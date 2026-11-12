@@ -1,0 +1,5 @@
+.build/
+.swiftpm/
+dist/
+work/ScrollFixture.app/
+.DS_Store
