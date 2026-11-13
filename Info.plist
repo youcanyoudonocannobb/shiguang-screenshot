@@ -7,8 +7,8 @@
     <key>CFBundleExecutable</key><string>Shiguang</string>
     <key>CFBundleIdentifier</key><string>dev.shiguang.screenshot</string>
     <key>CFBundlePackageType</key><string>APPL</string>
-    <key>CFBundleShortVersionString</key><string>0.7.0</string>
-    <key>CFBundleVersion</key><string>10</string>
+    <key>CFBundleShortVersionString</key><string>0.7.1</string>
+    <key>CFBundleVersion</key><string>11</string>
     <key>CFBundleIconFile</key><string>AppIcon</string>
     <key>LSMinimumSystemVersion</key><string>15.0</string>
     <key>LSUIElement</key><true/>

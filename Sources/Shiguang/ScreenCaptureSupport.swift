@@ -81,11 +81,13 @@ struct CaptureRegion {
 enum CaptureFailure: LocalizedError {
     case displayUnavailable
     case invalidSelection
+    case timedOut
 
     var errorDescription: String? {
         switch self {
         case .displayUnavailable: return "所选显示器已断开，请重新选择截图区域。"
         case .invalidSelection: return "截图区域不在当前显示器内，请重新框选。"
+        case .timedOut: return "屏幕截图长时间没有响应，已自动取消。请重新尝试。"
         }
     }
 }

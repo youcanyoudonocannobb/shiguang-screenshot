@@ -136,6 +136,12 @@ struct PermissionChecks {
                         "Capture failures must not be mislabeled as cancellation or denial")
             try require(model.sourceText == "Unfinished OCR edits" && model.marks.count == 1,
                         "Capture errors must not erase the document")
+            model.errorMessage = nil
+            model.activity = "Capturing"
+            model.captureFailed(CaptureFailure.timedOut)
+            try require(!model.isBusy && !model.showsPermissionHelp &&
+                        model.errorMessage?.contains("没有响应") == true,
+                        "A hung capture must surface a timeout instead of staying busy forever")
         }
     }
 

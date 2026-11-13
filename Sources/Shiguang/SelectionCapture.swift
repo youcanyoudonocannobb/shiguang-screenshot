@@ -1,4 +1,5 @@
 import AppKit
+import Carbon
 import SwiftUI
 import Translation
 
@@ -18,7 +19,9 @@ final class SelectionCaptureController: NSObject {
     private var hoveredRect: CGRect?
     private var hoveredScreen = CGRect.zero
     private var captureTask: Task<Void, Never>?
+    private var captureWatchdog: Task<Void, Never>?
     private var preparationTask: Task<Void, Never>?
+    private var escapeHotKey: EventHotKeyRef?
     var isActive: Bool { !windows.isEmpty || captureTask != nil || preparationTask != nil }
 
     init(onComplete: @escaping (NSImage, NSRect) -> Void, onCancel: @escaping () -> Void,
@@ -65,10 +68,16 @@ final class SelectionCaptureController: NSObject {
             window.acceptsMouseMovedEvents = true
             window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
             window.hidesOnDeactivate = false
+            window.animationBehavior = .none
+            window.hasShadow = false
+            window.isMovable = false
             window.makeKeyAndOrderFront(nil)
+            window.orderFrontRegardless()
             window.makeFirstResponder(view)
             windows.append(window)
         }
+        let keyID = EventHotKeyID(signature: OSType(0x53484747), id: 7)
+        RegisterEventHotKey(53, 0, keyID, GetApplicationEventTarget(), 0, &escapeHotKey)
         NSCursor.crosshair.push()
     }
 
@@ -77,6 +86,10 @@ final class SelectionCaptureController: NSObject {
         preparationTask = nil
         captureTask?.cancel()
         captureTask = nil
+        captureWatchdog?.cancel()
+        captureWatchdog = nil
+        if let escapeHotKey { UnregisterEventHotKey(escapeHotKey) }
+        escapeHotKey = nil
         guard !windows.isEmpty else { return }
         NSCursor.pop()
         for window in windows { window.orderOut(nil) }
@@ -122,7 +135,19 @@ final class SelectionCaptureController: NSObject {
         let global = NSRect(x: screen.frame.minX + local.minX,
                             y: screen.frame.minY + local.minY,
                             width: local.width, height: local.height)
+        let captureRequest = CaptureRequest(screen: screen, local: local, global: global, excluded: excluded)
+        captureWatchdog = Task { @MainActor in
+            do { try await Task.sleep(for: .seconds(20)) } catch { return }
+            guard captureTask != nil else { return }
+            captureTask?.cancel()
+            captureTask = nil
+            onError(CaptureFailure.timedOut)
+        }
         captureTask = Task { @MainActor in
+            defer {
+                captureWatchdog?.cancel()
+                captureWatchdog = nil
+            }
             do {
                 // Returning focus after dismissing the panel also restores Stage Manager's target window.
                 if let targetApplication, !targetApplication.isTerminated {
@@ -136,16 +161,17 @@ final class SelectionCaptureController: NSObject {
                     return
                 }
                 if let onScreenSelected {
-                    let snapshot = try await ScreenCaptureService.capture(screen: screen,
-                        selection: CGRect(origin: .zero, size: screen.frame.size), excludingWindowIDs: excluded)
+                    let snapshot = try await ScreenCaptureService.capture(screen: captureRequest.screen,
+                        selection: CGRect(origin: .zero, size: captureRequest.screen.frame.size),
+                        excludingWindowIDs: captureRequest.excluded)
                     captureTask = nil
-                    onScreenSelected(snapshot, screen, global)
+                    onScreenSelected(snapshot, captureRequest.screen, captureRequest.global)
                     return
                 }
-                let image = try await ScreenCaptureService.capture(screen: screen, selection: local,
-                                                                    excludingWindowIDs: excluded)
+                let image = try await ScreenCaptureService.capture(screen: captureRequest.screen,
+                    selection: captureRequest.local, excludingWindowIDs: captureRequest.excluded)
                 captureTask = nil
-                onComplete(image, global)
+                onComplete(image, captureRequest.global)
             } catch is CancellationError {
                 return
             } catch {
@@ -190,8 +216,20 @@ final class SelectionCaptureController: NSObject {
     }
 }
 
+private struct CaptureRequest {
+    let screen: NSScreen
+    let local: CGRect
+    let global: CGRect
+    let excluded: Set<CGWindowID>
+}
+
 final class SelectionWindow: NSPanel {
     override var canBecomeKey: Bool { true }
+
+    override func cancelOperation(_ sender: Any?) {
+        guard let view = contentView as? SelectionView else { return }
+        view.controller?.cancelByUser()
+    }
 }
 
 final class SelectionView: NSView {
@@ -199,6 +237,9 @@ final class SelectionView: NSView {
     var screenFrame = CGRect.zero
 
     override var acceptsFirstResponder: Bool { true }
+    // The overlay is a nonactivating panel: without this the first click is swallowed
+    // whenever the underlying app still owns key focus, which feels like a freeze.
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
@@ -271,6 +312,10 @@ final class SelectionView: NSView {
         if event.keyCode == 53 {
             controller?.cancelByUser()
         }
+    }
+
+    override func rightMouseDown(with event: NSEvent) {
+        controller?.cancelByUser()
     }
 }
 

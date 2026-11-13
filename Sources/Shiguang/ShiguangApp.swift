@@ -467,6 +467,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
                 }
                 else if id == 5 { delegate.showClipboardWindow() }
                 else if id == 6 { delegate.translateClipboard() }
+                else if id == 7 { delegate.captureController?.cancelByUser() }
                 else { delegate.model.capture(translate: id == 2) }
             }
             return noErr
