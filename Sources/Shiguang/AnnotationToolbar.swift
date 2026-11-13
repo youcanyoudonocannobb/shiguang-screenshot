@@ -7,6 +7,7 @@ struct AnnotationToolbar: View {
     @StoredState private var showsRecordingOptions = false
     @StoredState private var showsScrollOptions = false
     @StoredState private var showsColors = false
+    @StoredState private var showsMarkTools = false
 
     var body: some View {
         HStack(spacing: 2) {
@@ -27,20 +28,60 @@ struct AnnotationToolbar: View {
                     }.disabled(model.isBusy)
                 }
             }
-            action("标注颜色", symbol: "paintpalette") { showsColors.toggle() }
-                .popover(isPresented: $showsColors, arrowEdge: .top) {
-                    HStack(spacing: 10) {
-                        ForEach(["E45F3C", "347A64", "3975B7", "FFFFFF", "1C2723"], id: \.self) { hex in
-                            Button { model.markColor = hex; showsColors = false } label: {
-                                Circle().fill(Color(hex: hex)).frame(width: 22, height: 22)
+            action("更多标注", symbol: "square.grid.2x2") { showsMarkTools.toggle() }
+                .disabled(model.isBusy)
+                .popover(isPresented: $showsMarkTools, arrowEdge: .top) {
+                    markToolsPanel
+                }
+            Button { showsColors.toggle() } label: {
+                ZStack(alignment: .bottomTrailing) {
+                    Image(systemName: "paintpalette.fill")
+                        .font(.system(size: 16, weight: .medium))
+                    Circle()
+                        .fill(Color(hex: model.markColor))
+                        .frame(width: 11, height: 11)
+                        .overlay(Circle().stroke(Color(hex: "17191C"), lineWidth: 2))
+                        .offset(x: 3, y: 3)
+                }
+                .frame(width: 30, height: 32)
+                .foregroundStyle(.white)
+                .contentShape(RoundedRectangle(cornerRadius: 6))
+                .background(showsColors ? Color.white.opacity(0.16) : .clear,
+                            in: RoundedRectangle(cornerRadius: 6))
+            }
+            .buttonStyle(ToolbarActionStyle())
+            .help("标注颜色")
+            .accessibilityLabel("标注颜色")
+            .popover(isPresented: $showsColors, arrowEdge: .top) {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("标注颜色")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.86))
+                    HStack(spacing: 9) {
+                        ForEach(["E45F3C", "347A64", "3975B7", "D8A72C", "FFFFFF", "1C2723"], id: \.self) { hex in
+                            Button {
+                                model.markColor = hex
+                                showsColors = false
+                            } label: {
+                                Circle()
+                                    .fill(Color(hex: hex))
+                                    .frame(width: 24, height: 24)
+                                    .overlay(Circle().stroke(hex == "FFFFFF" ? Palette.line : .clear, lineWidth: 1))
                                     .padding(3)
                                     .overlay(Circle().stroke(model.markColor == hex ? Color.white : .clear, lineWidth: 2))
-                            }.buttonStyle(.plain).accessibilityLabel("标注颜色 \(hex)")
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("标注颜色 \(hex)")
                         }
-                    }.padding(14).preferredColorScheme(.dark)
+                    }
                 }
+                .padding(13)
+                .background(Color(hex: "17191C"))
+                .preferredColorScheme(.dark)
+            }
             divider
             action("撤销", symbol: "arrow.uturn.backward") { model.undo() }.disabled(!model.canUndo)
+            action("重做", symbol: "arrow.uturn.forward") { model.redo() }.disabled(!model.canRedo)
             action(model.isRecognizing ? "取消文字识别" : "文字识别", symbol: model.isRecognizing ? "stop.circle" : "text.viewfinder") {
                 if model.isRecognizing { model.cancelRecognition() }
                 else { model.recognizeInWindow() }
@@ -100,16 +141,27 @@ struct AnnotationToolbar: View {
                 .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
                 .help("更多操作").accessibilityLabel("更多操作")
             if showsCompletion, model.draftImage != nil {
-                action("复制到剪贴板并完成", symbol: "checkmark") {
+                completionAction("复制到剪贴板并完成", symbol: "checkmark", tint: Color(hex: "75E6A5")) {
                     model.confirmDraft()
                 }
-                action("取消截图", symbol: "xmark") { model.discardDraft() }
+                completionAction("取消截图", symbol: "xmark", tint: Color(hex: "FF7979")) {
+                    model.discardDraft()
+                }
             } else if showsCompletion {
                 action("关闭截图 (Esc)", symbol: "xmark") { model.closeEditor() }
             }
         }
         .padding(7)
-        .background(Color(hex: "17191C"), in: RoundedRectangle(cornerRadius: 12))
+        .background(
+            LinearGradient(colors: [Color(hex: "23272C"), Color(hex: "15171A")],
+                           startPoint: .top, endPoint: .bottom),
+            in: RoundedRectangle(cornerRadius: 12)
+        )
+        .overlay(alignment: .top) {
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(LinearGradient(colors: [.white.opacity(0.16), .clear],
+                                       startPoint: .top, endPoint: .bottom), lineWidth: 1)
+        }
         .overlay(RoundedRectangle(cornerRadius: 12).stroke(.white.opacity(0.12)))
         .shadow(color: .black.opacity(0.22), radius: 10, y: 4)
         .fixedSize(horizontal: true, vertical: true)
@@ -121,29 +173,109 @@ struct AnnotationToolbar: View {
         Rectangle().fill(.white.opacity(0.18)).frame(width: 1, height: 20).padding(.horizontal, 4)
     }
 
-    private func icon(_ symbol: String) -> some View {
-        Image(systemName: symbol).font(.system(size: 17, weight: .medium))
-            .frame(width: 30, height: 32).foregroundStyle(.white)
-            .contentShape(RoundedRectangle(cornerRadius: 6))
+    private var markToolsPanel: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("更多标注").font(.system(size: 12, weight: .semibold)).foregroundStyle(.white)
+            LazyVGrid(columns: [GridItem(.fixed(126)), GridItem(.fixed(126))], spacing: 8) {
+                ForEach([MarkTool.ellipse, .line, .highlighter, .number, .redact, .picker], id: \.self) { tool in
+                    Button {
+                        model.tool = tool
+                        showsMarkTools = false
+                    } label: {
+                        HStack(spacing: 8) {
+                            Image(systemName: tool.symbol).frame(width: 18)
+                            Text(tool.title)
+                            Spacer(minLength: 0)
+                            if model.tool == tool {
+                                Image(systemName: "checkmark").font(.system(size: 10, weight: .bold))
+                            }
+                        }
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 9).frame(height: 32)
+                        .background(model.tool == tool ? Color.white.opacity(0.18) : Color.white.opacity(0.07),
+                                    in: RoundedRectangle(cornerRadius: 7))
+                    }.buttonStyle(.plain)
+                }
+            }
+            Divider().overlay(.white.opacity(0.16))
+            Toggle(isOn: $model.fillShapes) {
+                Label("填充新绘制的矩形/椭圆", systemImage: "circle.lefthalf.filled")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(.white)
+            }
+            .toggleStyle(.switch)
+            .controlSize(.small)
+            .tint(Palette.accent)
+            Text(model.tool == .picker ? "点击图片取色，取色后自动回到浏览工具。" : "标注颜色会用于形状、画笔、文字和编号。")
+                .font(.system(size: 10)).foregroundStyle(Color(hex: "BEC5CF"))
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(13).frame(width: 286)
+        .background(Color(hex: "17191C"))
+        .tint(.white).environment(\.colorScheme, .dark)
+        .preferredColorScheme(.dark)
+    }
+
+    private func icon(_ symbol: String, selected: Bool = false) -> some View {
+        ZStack(alignment: .bottom) {
+            Image(systemName: symbol)
+                .font(.system(size: 17, weight: .medium))
+                .frame(width: 30, height: 32)
+            if selected {
+                Capsule()
+                    .fill(Color(hex: "75E6A5"))
+                    .frame(width: 11, height: 2)
+                    .padding(.bottom, 2)
+            }
+        }
+        .foregroundStyle(.white)
+        .contentShape(RoundedRectangle(cornerRadius: 6))
+        .background(selected ? Color.white.opacity(0.14) : .clear,
+                    in: RoundedRectangle(cornerRadius: 6))
     }
 
     private func action(_ title: String, text: String, selected: Bool = false,
                         perform: @escaping () -> Void) -> some View {
         Button(action: perform) {
-            Text(text).font(.custom("Georgia-Bold", size: 17))
-                .frame(width: 30, height: 32).foregroundStyle(.white)
-                .contentShape(RoundedRectangle(cornerRadius: 6))
-                .background(selected ? Color.white.opacity(0.22) : .clear,
-                            in: RoundedRectangle(cornerRadius: 6))
+            ZStack(alignment: .bottom) {
+                Text(text)
+                    .font(.custom("Georgia-Bold", size: 17))
+                    .frame(width: 30, height: 32)
+                if selected {
+                    Capsule()
+                        .fill(Color(hex: "75E6A5"))
+                        .frame(width: 11, height: 2)
+                        .padding(.bottom, 2)
+                }
+            }
+            .foregroundStyle(.white)
+            .contentShape(RoundedRectangle(cornerRadius: 6))
+            .background(selected ? Color.white.opacity(0.14) : .clear,
+                        in: RoundedRectangle(cornerRadius: 6))
         }.buttonStyle(ToolbarActionStyle()).help(title).accessibilityLabel(title)
     }
 
     private func action(_ title: String, symbol: String, selected: Bool = false,
                         perform: @escaping () -> Void) -> some View {
         Button(action: perform) {
-            icon(symbol).background(selected ? Color.white.opacity(0.22) : .clear,
-                                    in: RoundedRectangle(cornerRadius: 6))
+            icon(symbol, selected: selected)
         }.buttonStyle(ToolbarActionStyle()).help(title).accessibilityLabel(title)
+    }
+
+    private func completionAction(_ title: String, symbol: String, tint: Color,
+                                  perform: @escaping () -> Void) -> some View {
+        Button(action: perform) {
+            Image(systemName: symbol)
+                .font(.system(size: 17, weight: .bold))
+                .foregroundStyle(tint)
+                .frame(width: 32, height: 32)
+                .background(tint.opacity(0.1), in: RoundedRectangle(cornerRadius: 7))
+                .contentShape(RoundedRectangle(cornerRadius: 7))
+        }
+        .buttonStyle(ToolbarActionStyle())
+        .help(title)
+        .accessibilityLabel(title)
     }
 }
 
@@ -237,10 +369,14 @@ private struct CaptureOptionStyle: ButtonStyle {
 
 private struct ToolbarActionStyle: ButtonStyle {
     @Environment(\.isEnabled) var enabled
+    @StoredState private var hovered = false
+
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .background(configuration.isPressed ? Color.white.opacity(0.15) : .clear,
+            .background(configuration.isPressed ? Color.white.opacity(0.16) :
+                            (hovered ? Color.white.opacity(0.08) : .clear),
                         in: RoundedRectangle(cornerRadius: 6))
             .opacity(enabled ? 1 : 0.35)
+            .onHover { hovered = $0 }
     }
 }

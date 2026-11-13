@@ -14,17 +14,22 @@ enum ScrollCaptureMode: String, CaseIterable {
 }
 
 enum MarkTool: String, Codable, CaseIterable {
-    case pointer, rectangle, arrow, pen, text, mosaic, redact
+    case pointer, rectangle, ellipse, line, arrow, pen, highlighter, number, text, mosaic, redact, picker
 
     var symbol: String {
         switch self {
         case .pointer: return "cursorarrow"
         case .rectangle: return "rectangle"
+        case .ellipse: return "circle"
+        case .line: return "minus"
         case .arrow: return "arrow.up.right"
         case .pen: return "pencil.tip"
+        case .highlighter: return "highlighter"
+        case .number: return "number.circle"
         case .text: return "textformat"
         case .mosaic: return "square.grid.3x3.fill"
         case .redact: return "rectangle.fill"
+        case .picker: return "eyedropper"
         }
     }
 
@@ -32,11 +37,16 @@ enum MarkTool: String, Codable, CaseIterable {
         switch self {
         case .pointer: return "浏览"
         case .rectangle: return "矩形"
+        case .ellipse: return "椭圆"
+        case .line: return "直线"
         case .arrow: return "箭头"
         case .pen: return "画笔"
+        case .highlighter: return "荧光笔"
+        case .number: return "编号"
         case .text: return "文字"
         case .mosaic: return "马赛克"
         case .redact: return "遮盖"
+        case .picker: return "取色"
         }
     }
 }
@@ -60,6 +70,7 @@ struct Mark: Codable, Identifiable, Equatable {
     var tool: MarkTool
     var points: [UnitPoint]
     var colorHex: String
+    var filled: Bool?
     var text: String?
     var fontSize: Double?
 }
@@ -152,9 +163,27 @@ enum ImageRenderer {
             let rect = CGRect(x: min(first.x, last.x), y: min(first.y, last.y),
                               width: abs(last.x - first.x), height: abs(last.y - first.y))
             switch mark.tool {
-            case .pointer: break
+            case .pointer, .picker:
+                break
             case .rectangle:
-                context.stroke(rect)
+                if mark.filled == true {
+                    context.setFillColor(color)
+                    context.fill(rect)
+                } else {
+                    context.stroke(rect)
+                }
+            case .ellipse:
+                if mark.filled == true {
+                    context.setFillColor(color)
+                    context.fillEllipse(in: rect)
+                } else {
+                    context.strokeEllipse(in: rect)
+                }
+            case .line:
+                context.beginPath()
+                context.move(to: first)
+                context.addLine(to: last)
+                context.strokePath()
             case .redact:
                 context.setFillColor(NSColor.black.cgColor)
                 context.fill(rect)
@@ -169,6 +198,8 @@ enum ImageRenderer {
                 context.interpolationQuality = .none
                 context.draw(small, in: CGRect(origin: .zero, size: size))
                 context.restoreGState()
+            case .number:
+                drawNumber(mark.text ?? "1", at: first, color: color, imageSize: size, context: context)
             case .text:
                 guard let text = mark.text, !text.isEmpty else { continue }
                 context.saveGState()
@@ -184,6 +215,15 @@ enum ImageRenderer {
                 context.move(to: first)
                 for point in mark.points.dropFirst() { context.addLine(to: point.scaled(size)) }
                 context.strokePath()
+            case .highlighter:
+                context.saveGState()
+                context.setAlpha(0.34)
+                context.setLineWidth(width * 3.8)
+                context.beginPath()
+                context.move(to: first)
+                for point in mark.points.dropFirst() { context.addLine(to: point.scaled(size)) }
+                context.strokePath()
+                context.restoreGState()
             case .arrow:
                 context.beginPath()
                 context.move(to: first)
@@ -200,6 +240,33 @@ enum ImageRenderer {
         }
         guard let output = context.makeImage() else { return image }
         return NSImage(cgImage: output, size: size)
+    }
+
+    private static func drawNumber(_ text: String, at point: CGPoint, color: CGColor,
+                                   imageSize: CGSize, context: CGContext) {
+        let radius = max(11, min(34, min(imageSize.width, imageSize.height) * 0.022))
+        let badge = CGRect(x: point.x - radius, y: point.y - radius,
+                           width: radius * 2, height: radius * 2)
+        context.saveGState()
+        context.setFillColor(color)
+        context.fillEllipse(in: badge)
+        context.setStrokeColor(CGColor(gray: 1, alpha: 0.94))
+        context.setLineWidth(max(2, radius * 0.12))
+        context.strokeEllipse(in: badge.insetBy(dx: 1, dy: 1))
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: true)
+        let font = NSFont.monospacedDigitSystemFont(ofSize: max(13, radius * 1.05), weight: .bold)
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: font,
+            .foregroundColor: NSColor.white
+        ]
+        let value = text as NSString
+        let valueSize = value.size(withAttributes: attributes)
+        value.draw(at: CGPoint(x: point.x - valueSize.width / 2,
+                               y: point.y - valueSize.height / 2),
+                   withAttributes: attributes)
+        NSGraphicsContext.restoreGraphicsState()
+        context.restoreGState()
     }
 
     private static func pixelated(_ source: CGImage) -> CGImage? {

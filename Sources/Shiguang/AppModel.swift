@@ -72,6 +72,9 @@ final class AppModel: ObservableObject {
     @Published var marks: [Mark] = []
     @Published var tool: MarkTool = .pointer
     @Published var markColor = "E45F3C"
+    @Published var fillShapes: Bool {
+        didSet { preferences.set(fillShapes, forKey: "fillShapes") }
+    }
     @Published var zoomFactor: CGFloat = 1
     @Published var viewportResetID = UUID()
     @Published var recordingReady = false
@@ -116,6 +119,12 @@ final class AppModel: ObservableObject {
             hotkeysChanged?()
         }
     }
+    @Published var clipboardTranslateHotkey: HotkeySettings = AppModel.loadHotkey(prefix: "clipboardTranslateHotkey", defaultKey: "C") {
+        didSet {
+            AppModel.saveHotkey(clipboardTranslateHotkey, prefix: "clipboardTranslateHotkey")
+            hotkeysChanged?()
+        }
+    }
     @Published var hotkeyAvailable = true
     var showWindow: (() -> Void)?
     var showWorkspace: (() -> Void)?
@@ -155,6 +164,7 @@ final class AppModel: ObservableObject {
     private var ocrID: UUID?
     private var translationWatchdog: Task<Void, Never>?
     private var undoMarks: [[Mark]] = []
+    private var redoMarks: [[Mark]] = []
     private var draftTitle = ""
     var isBusy: Bool { activity != nil }
     enum EditorMode {
@@ -180,6 +190,7 @@ final class AppModel: ObservableObject {
             ?? preferences.object(forKey: "autoOCR") as? Bool ?? false
         autoTranslate = preferences.bool(forKey: "autoTranslate")
         keepHistory = preferences.object(forKey: "keepHistory") as? Bool ?? true
+        fillShapes = preferences.bool(forKey: "fillShapes")
         screenPermission = permission
         screenPermission.refresh()
         do {
@@ -245,6 +256,7 @@ final class AppModel: ObservableObject {
         targetLanguage = record.targetLanguage
         marks = record.marks
         undoMarks = []
+        redoMarks = []
         tool = .pointer
         notice = "已打开 \(record.title)"
         showEditor?()
@@ -264,6 +276,7 @@ final class AppModel: ObservableObject {
         translatedText = ""
         marks = []
         undoMarks = []
+        redoMarks = []
         notice = "文字翻译 · 草稿不保存到历史"
         showEditor?()
     }
@@ -322,6 +335,7 @@ final class AppModel: ObservableObject {
         targetLanguage = "zh-Hans"
         marks = []
         undoMarks = []
+        redoMarks = []
         tool = .pointer
         notice = "编辑中 · 点击 ✅ 复制到剪贴板"
         let automatic = inlineRect == nil && (autoTranslate || autoOCR)
@@ -338,6 +352,7 @@ final class AppModel: ObservableObject {
         guard draftImage != nil, editorMode == .annotation, !isBusy else { return }
         marks = marks.map(remap)
         undoMarks = undoMarks.map { $0.map(remap) }
+        redoMarks = redoMarks.map { $0.map(remap) }
         image = newImage
         draftImage = newImage
         captureRect = rect
@@ -423,6 +438,7 @@ final class AppModel: ObservableObject {
         translatedText = ""
         marks = []
         undoMarks = []
+        redoMarks = []
         tool = .pointer
         editorMode = .annotation
         errorMessage = nil
@@ -437,6 +453,29 @@ final class AppModel: ObservableObject {
 
     func startTextTranslation() {
         newText()
+    }
+
+    func translateClipboard(from pasteboard: NSPasteboard = .general) {
+        translateClipboardContent(image: NSImage(pasteboard: pasteboard),
+                                  text: pasteboard.string(forType: .string))
+    }
+
+    func translateClipboardContent(image clipboardImage: NSImage?, text clipboardText: String?) {
+        guard !isBusy else { return }
+        if let image = clipboardImage {
+            acceptImage(image, title: "剪贴板图片", translate: true)
+            return
+        }
+        if let text = clipboardText?
+            .trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty {
+            newText()
+            sourceText = text
+            translatedText = ""
+            sourceLanguage = "auto"
+            requestTranslation()
+            return
+        }
+        errorMessage = "剪贴板中没有可翻译的文字或图片。"
     }
 
     func closeEditor() {
@@ -688,23 +727,52 @@ final class AppModel: ObservableObject {
         persistCurrent()
     }
 
+    func swapTranslationLanguages() {
+        guard editorMode == .text else { return }
+        var effectiveSource = sourceLanguage
+        if effectiveSource == "auto" {
+            let recognizer = NLLanguageRecognizer()
+            recognizer.processString(sourceText)
+            effectiveSource = recognizer.dominantLanguage?.rawValue ?? "en"
+        }
+        let previousTarget = targetLanguage
+        sourceLanguage = previousTarget
+        targetLanguage = effectiveSource == previousTarget
+            ? (previousTarget.hasPrefix("zh") ? "en" : "zh-Hans")
+            : effectiveSource
+        translatedText = ""
+        persistCurrent()
+    }
+
     func addMark(_ mark: Mark) {
         undoMarks.append(marks)
         marks.append(mark)
+        redoMarks = []
         persistCurrent()
     }
 
     func undo() {
         guard !isBusy, let previous = undoMarks.popLast() else { return }
+        redoMarks.append(marks)
         marks = previous
         persistCurrent()
     }
 
     var canUndo: Bool { !undoMarks.isEmpty && !isBusy }
 
+    func redo() {
+        guard !isBusy, let next = redoMarks.popLast() else { return }
+        undoMarks.append(marks)
+        marks = next
+        persistCurrent()
+    }
+
+    var canRedo: Bool { !redoMarks.isEmpty && !isBusy }
+
     func clearMarks() {
         guard !marks.isEmpty else { return }
         undoMarks.append(marks)
+        redoMarks = []
         marks = []
         persistCurrent()
     }
@@ -774,6 +842,7 @@ final class AppModel: ObservableObject {
                 translatedText = ""
                 marks = []
                 undoMarks = []
+                redoMarks = []
             }
             try store.removeImage(record)
         } catch { errorMessage = "删除失败：\(error.localizedDescription)" }
@@ -791,6 +860,7 @@ final class AppModel: ObservableObject {
             translatedText = ""
             marks = []
             undoMarks = []
+            redoMarks = []
             for record in old { try store.removeImage(record) }
             notice = "本地截图历史已清空。"
         } catch { errorMessage = "清理失败：\(error.localizedDescription)" }

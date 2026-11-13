@@ -57,6 +57,10 @@ private final class ScreenRegionEditorView: NSView {
         addSubview(toolbar)
         canvas.onMark = { [weak model] in model?.addMark($0) }
         canvas.onEscape = { [weak model] in model?.discardDraft() }
+        canvas.onColorPick = { [weak model] color in
+            model?.markColor = color
+            model?.tool = .pointer
+        }
         canvas.onZoom = { [weak model] in model?.zoomFactor = $0 }
         canvas.onSelectionDrag = { [weak self] event, phase in
             guard let self, !model.isBusy else { return }
@@ -78,7 +82,8 @@ private final class ScreenRegionEditorView: NSView {
         guard let image = model.image else { return }
         canvas.frame = selection
         canvas.configure(image: image, marks: model.marks, tool: model.tool, color: model.markColor,
-            zoom: model.zoomFactor, resetID: model.viewportResetID, movesWindow: false, enabled: !model.isBusy, inPlace: true)
+            zoom: model.zoomFactor, resetID: model.viewportResetID, movesWindow: false,
+            enabled: !model.isBusy, inPlace: true, filledShapes: model.fillShapes)
         decoration.frame = bounds
         decoration.selection = selection
         decoration.scale = screen.backingScaleFactor

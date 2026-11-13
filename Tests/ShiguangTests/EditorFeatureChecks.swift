@@ -443,6 +443,73 @@ struct EditorFeatureChecks {
         model.closeEditor()
     }
 
+    static func annotationToolkitAndLanguageSwap() async throws {
+        let suite = "Shiguang.AnnotationToolkitChecks.\(UUID())"
+        let defaults = UserDefaults(suiteName: suite)!
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { defaults.removePersistentDomain(forName: suite); try? FileManager.default.removeItem(at: folder) }
+        defaults.set(false, forKey: "autoOCR.v2")
+        let model = AppModel(historyDirectory: folder, preferences: defaults)
+        model.acceptImage(sample(), title: "Toolkit")
+        let ellipse = Mark(tool: .ellipse, points: [UnitPoint(x: 0.1, y: 0.1), UnitPoint(x: 0.4, y: 0.5)],
+                           colorHex: "E45F3C", filled: true)
+        let line = Mark(tool: .line, points: [UnitPoint(x: 0.6, y: 0.2), UnitPoint(x: 0.9, y: 0.2)],
+                        colorHex: "347A64")
+        let highlighter = Mark(tool: .highlighter,
+                               points: [UnitPoint(x: 0.6, y: 0.6), UnitPoint(x: 0.9, y: 0.6)],
+                               colorHex: "3975B7")
+        let number = Mark(tool: .number, points: [UnitPoint(x: 0.5, y: 0.8)],
+                          colorHex: "1C2723", filled: nil, text: "1", fontSize: nil)
+        for mark in [ellipse, line, highlighter, number] { model.addMark(mark) }
+        try require(model.marks.count == 4 && model.canUndo, "New annotation tools must enter the undo stack")
+        func coloredPixelCount(_ mark: Mark, where predicate: (NSColor) -> Bool) -> Int {
+            let bitmap = NSBitmapImageRep(data: ImageRenderer.render(sample(), marks: [mark]).pngData!)!
+            var count = 0
+            for y in 0..<bitmap.pixelsHigh {
+                for x in 0..<bitmap.pixelsWide {
+                    if let color = bitmap.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB), predicate(color) {
+                        count += 1
+                    }
+                }
+            }
+            return count
+        }
+        let ellipsePixels = coloredPixelCount(ellipse) {
+            $0.redComponent > 0.7 && $0.greenComponent < 0.6
+        }
+        let linePixels = coloredPixelCount(line) {
+            $0.greenComponent > $0.redComponent + 0.1
+        }
+        let highlighterPixels = coloredPixelCount(highlighter) {
+            $0.blueComponent > $0.redComponent + 0.1 && $0.greenComponent > 0.7
+        }
+        let numberPixels = coloredPixelCount(number) {
+            $0.redComponent < 0.3 && $0.greenComponent < 0.3 && $0.blueComponent < 0.3
+        }
+        try require(ellipsePixels > 500, "Ellipse fill must paint the selected interior")
+        try require(linePixels > 20 && highlighterPixels > 100 && numberPixels > 100,
+                    "Line, highlighter and numbered marker must render onto the image")
+        model.undo()
+        try require(model.marks.count == 3 && model.canRedo, "Undo must be reversible")
+        model.redo()
+        try require(model.marks.count == 4 && !model.canRedo, "Redo must restore the annotation")
+        model.discardDraft()
+        model.newText()
+        model.sourceText = "Hello"
+        model.sourceLanguage = "en"
+        model.targetLanguage = "zh-Hans"
+        model.swapTranslationLanguages()
+        try require(model.sourceLanguage == "zh-Hans" && model.targetLanguage == "en" && model.translatedText.isEmpty,
+                    "Language swap must reverse the current pair and clear stale translation")
+        model.closeEditor()
+        model.translateClipboardContent(image: nil, text: "A clipboard sentence for translation.")
+        try require(model.editorMode == .text && model.sourceText == "A clipboard sentence for translation." &&
+                    model.translationJob?.target == "zh-Hans",
+                    "Clipboard translation failed: mode=\(model.editorMode) source=\(model.sourceText) " +
+                    "target=\(model.translationJob?.target ?? "nil") busy=\(model.isBusy)")
+        model.cancelTranslation()
+    }
+
     static func movieAndGIF() async throws {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
@@ -523,6 +590,7 @@ struct EditorFeatureChecks {
             ("retina_crop_and_annotation_screen_anchors", retinaCropAndMarkAnchors),
             ("adjusted_selection_remains_draft_and_reaches_recording", adjustedSelectionStaysDraft),
             ("text_only_windows_and_detected_language_defaults", textWindowsAndLanguageDefaults),
+            ("annotation_toolkit_redo_and_language_swap", annotationToolkitAndLanguageSwap),
             ("recording_dimensions_are_encodable", recordingDimensions),
             ("unsaved_recording_survives_relaunch", recordingDraftRecovery)
         ]

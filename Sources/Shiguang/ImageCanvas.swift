@@ -47,6 +47,8 @@ struct ImageCanvas: NSViewRepresentable {
     var resetID: UUID
     var movesWindow = false
     var enabled = true
+    var filledShapes = false
+    var onColorPick: ((String) -> Void)?
     let onMark: (Mark) -> Void
     let onEscape: () -> Void
 
@@ -55,9 +57,11 @@ struct ImageCanvas: NSViewRepresentable {
     func updateNSView(_ view: NativeImageCanvas, context: Context) {
         view.onMark = onMark
         view.onEscape = onEscape
+        view.onColorPick = onColorPick
         view.onZoom = { zoom = $0 }
         view.configure(image: image, marks: marks, tool: tool, color: colorHex, zoom: zoom,
-                       resetID: resetID, movesWindow: movesWindow, enabled: enabled)
+                       resetID: resetID, movesWindow: movesWindow, enabled: enabled,
+                       filledShapes: filledShapes)
     }
 }
 
@@ -66,12 +70,14 @@ final class NativeImageCanvas: NSView, NSTextFieldDelegate {
     var onSelectionDrag: ((NSEvent, SelectionDrag) -> Void)?
     var onMark: ((Mark) -> Void)?
     var onEscape: (() -> Void)?
+    var onColorPick: ((String) -> Void)?
     var onZoom: ((CGFloat) -> Void)?
     private var image: NSImage?
     private var rendered: NSImage?
     private var marks: [Mark] = []
     private var tool = MarkTool.pointer
     private var color = "E45F3C"
+    private var filledShapes = false
     private var enabled = true
     private var viewport = CanvasViewport()
     private var draft: Mark?
@@ -94,7 +100,8 @@ final class NativeImageCanvas: NSView, NSTextFieldDelegate {
     private var imageRect: CGRect { viewport.imageRect(image: imageSize, viewport: bounds.size) }
 
     func configure(image: NSImage, marks: [Mark], tool: MarkTool, color: String, zoom: CGFloat,
-                   resetID: UUID, movesWindow: Bool, enabled: Bool, inPlace: Bool = false) {
+                   resetID: UUID, movesWindow: Bool, enabled: Bool, inPlace: Bool = false,
+                   filledShapes: Bool = false) {
         let changedImage = self.image !== image
         if changedImage {
             finishText(commit: false)
@@ -109,6 +116,7 @@ final class NativeImageCanvas: NSView, NSTextFieldDelegate {
         if self.tool != tool { finishText(commit: true); draft = nil }
         self.tool = tool
         self.color = color
+        self.filledShapes = filledShapes
         self.enabled = enabled
         self.movesWindow = movesWindow
         self.inPlace = inPlace
@@ -169,19 +177,42 @@ final class NativeImageCanvas: NSView, NSTextFieldDelegate {
         path.lineWidth = max(2, min(imageSize.width, imageSize.height) * 0.005 * rect.width / imageSize.width)
         path.lineCapStyle = .round
         path.lineJoinStyle = .round
-        NSColor(hex: mark.colorHex).setStroke()
+        let color = NSColor(hex: mark.colorHex)
         switch mark.tool {
-        case .pointer, .text: return
+        case .pointer, .picker, .number, .text: return
         case .redact:
             NSColor.black.setFill(); NSBezierPath(rect: box).fill(); return
         case .mosaic:
             NSColor.gray.withAlphaComponent(0.5).setFill()
             NSBezierPath(rect: box).fill()
             path.appendRect(box)
-        case .rectangle: path.appendRect(box)
+        case .rectangle:
+            if mark.filled == true {
+                color.setFill()
+                NSBezierPath(rect: box).fill()
+                return
+            }
+            path.appendRect(box)
+        case .ellipse:
+            if mark.filled == true {
+                color.setFill()
+                NSBezierPath(ovalIn: box).fill()
+                return
+            }
+            path.appendOval(in: box)
+        case .line:
+            path.move(to: first)
+            path.line(to: last)
         case .pen:
             path.move(to: first)
             for p in mark.points.dropFirst() { path.line(to: point(p)) }
+        case .highlighter:
+            color.withAlphaComponent(0.34).setStroke()
+            path.lineWidth *= 3.8
+            path.move(to: first)
+            for p in mark.points.dropFirst() { path.line(to: point(p)) }
+            path.stroke()
+            return
         case .arrow:
             path.move(to: first); path.line(to: last)
             let angle = atan2(last.y - first.y, last.x - first.x)
@@ -191,6 +222,7 @@ final class NativeImageCanvas: NSView, NSTextFieldDelegate {
                 path.line(to: CGPoint(x: last.x - length * cos(angle + offset), y: last.y - length * sin(angle + offset)))
             }
         }
+        color.setStroke()
         path.stroke()
     }
 
@@ -223,8 +255,20 @@ final class NativeImageCanvas: NSView, NSTextFieldDelegate {
         }
         guard enabled else { return }
         if tool == .text { beginText(at: point); return }
+        if tool == .picker {
+            if let picked = sampledColor(at: point) { onColorPick?(picked) }
+            return
+        }
+        if tool == .number {
+            let next = marks.filter { $0.tool == .number }.count + 1
+            onMark?(Mark(tool: .number, points: [normalized(point)], colorHex: color,
+                         filled: nil, text: String(next), fontSize: nil))
+            return
+        }
         if tool != .pointer {
-            draft = Mark(tool: tool, points: [normalized(point)], colorHex: color)
+            let shouldFill = (tool == .rectangle || tool == .ellipse) && filledShapes
+            draft = Mark(tool: tool, points: [normalized(point)], colorHex: color,
+                         filled: shouldFill, text: nil, fontSize: nil)
         }
     }
 
@@ -236,7 +280,7 @@ final class NativeImageCanvas: NSView, NSTextFieldDelegate {
                                       y: offsetStart.y + point.y - dragStart.y)
             viewport.constrain(image: imageSize, viewport: bounds.size)
         } else if enabled, var mark = draft, let start = mark.points.first {
-            if tool == .pen { mark.points.append(normalized(point)) }
+            if tool == .pen || tool == .highlighter { mark.points.append(normalized(point)) }
             else { mark.points = [start, normalized(point)] }
             draft = mark
         }
@@ -255,6 +299,23 @@ final class NativeImageCanvas: NSView, NSTextFieldDelegate {
         if let mark = draft, mark.points.count > 1 { onMark?(mark) }
         draft = nil
         needsDisplay = true
+    }
+
+    private func sampledColor(at point: CGPoint) -> String? {
+        guard let cg = rendered?.cgImageValue else { return nil }
+        let rect = imageRect
+        guard rect.width > 0, rect.height > 0 else { return nil }
+        let unitX = min(0.999, max(0, (point.x - rect.minX) / rect.width))
+        let unitY = min(0.999, max(0, (point.y - rect.minY) / rect.height))
+        let x = min(cg.width - 1, max(0, Int(unitX * CGFloat(cg.width))))
+        let y = min(cg.height - 1, max(0, Int(unitY * CGFloat(cg.height))))
+        let bitmap = NSBitmapImageRep(cgImage: cg)
+        guard let color = bitmap.colorAt(x: x, y: bitmap.pixelsHigh - 1 - y)?
+            .usingColorSpace(.sRGB) else { return nil }
+        return String(format: "%02X%02X%02X",
+                      Int((color.redComponent * 255).rounded()),
+                      Int((color.greenComponent * 255).rounded()),
+                      Int((color.blueComponent * 255).rounded()))
     }
 
     override func scrollWheel(with event: NSEvent) {

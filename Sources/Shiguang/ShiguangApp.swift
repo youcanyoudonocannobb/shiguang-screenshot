@@ -10,7 +10,7 @@ struct ShiguangApp {
         let app = NSApplication.shared
         let delegate = AppDelegate()
         app.delegate = delegate
-        app.setActivationPolicy(.regular)
+        app.setActivationPolicy(.accessory)
         app.run()
         withExtendedLifetime(delegate) {}
     }
@@ -51,6 +51,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     private var clipboard: ClipboardHistory!
     private var clipboardWindow: NSPanel?
     private var clipboardMenuItem: NSMenuItem?
+    private var clipboardTranslateMenuItem: NSMenuItem?
     private var clipboardReturnApplication: NSRunningApplication?
     private weak var clipboardReturnWindow: NSWindow?
 
@@ -70,18 +71,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             .appendingPathComponent("Shiguang", isDirectory: true)
         clipboard = ClipboardHistory(directory: support.appendingPathComponent("Clipboard", isDirectory: true))
         makeMenu()
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 720, height: 640),
-                              styleMask: [.titled, .closable, .miniaturizable, .resizable],
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 820, height: 620),
+                              styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
                               backing: .buffered, defer: false)
         window.title = "拾光截图"
+        window.toolbarStyle = .unified
+        window.tabbingMode = .disallowed
         window.titlebarAppearsTransparent = true
+        window.titleVisibility = .hidden
+        window.titlebarSeparatorStyle = .none
+        window.isMovableByWindowBackground = true
         window.backgroundColor = NSColor(hex: "F5F3ED")
-        window.minSize = NSSize(width: 680, height: 590)
+        window.contentMinSize = NSSize(width: 760, height: 540)
         window.isReleasedWhenClosed = false
         window.delegate = self
-        window.contentView = NSHostingView(rootView: SettingsView(model: model, clipboard: clipboard))
+        window.contentViewController = settingsContentController(
+            rootView: SettingsView(model: model, clipboard: clipboard)
+        )
         window.center()
-        window.setFrameAutosaveName("ShiguangSettings")
+        window.setFrameAutosaveName("ShiguangSettingsV3")
         self.window = window
         model.showWindow = { [weak self] in self?.showWorkspace() }
         model.showEditor = { [weak self] in self?.showEditorWindow() }
@@ -212,8 +220,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         NSApp.activate(ignoringOtherApps: true)
     }
 
+    private func settingsContentController<Content: View>(rootView: Content) -> NSViewController {
+        let hosting = NSHostingController(rootView: rootView)
+        hosting.sizingOptions = []
+        hosting.sceneBridgingOptions = [.title, .toolbars]
+
+        let container = NSViewController()
+        container.view = NSView(frame: NSRect(x: 0, y: 0, width: 820, height: 620))
+        container.addChild(hosting)
+        hosting.view.frame = container.view.bounds
+        hosting.view.autoresizingMask = [.width, .height]
+        container.view.addSubview(hosting.view)
+        return container
+    }
+
     @objc func capture() { model.capture() }
     @objc func translateCapture() { model.capture(translate: true) }
+    @objc private func translateClipboard() { model.translateClipboard() }
     @objc func importImage() { showWorkspace(); model.importImage() }
     @objc func pasteImage() { showWorkspace(); model.pasteImage() }
     @objc func preferences() { showWorkspace(); model.showsSettings = true }
@@ -221,6 +244,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     @objc func showTextTranslation() { model.startTextTranslation() }
     @objc func exportImage() { model.exportImage() }
     @objc func undoMark() { model.undo() }
+    @objc func redoMark() { model.redo() }
     @objc func quit() { NSApp.terminate(nil) }
     @objc func recordVideo() { model.record(.video) }
     @objc func recordGIF() { model.record(.gif) }
@@ -304,6 +328,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         return item
     }
 
+    private func menuItem(_ title: String, action: Selector, key: String = "",
+                          symbol: String) -> NSMenuItem {
+        let item = menuItem(title, action: action, key: key)
+        item.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
+        return item
+    }
+
     private func makeMenu() {
         let main = NSMenu()
         let appItem = NSMenuItem()
@@ -328,6 +359,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         paste.keyEquivalentModifierMask = [.command, .shift]
         file.addItem(paste)
         file.addItem(menuItem("文字翻译", action: #selector(showTextTranslation), key: "t"))
+        let clipboardTranslate = menuItem("翻译剪贴板", action: #selector(translateClipboard))
+        clipboardTranslateMenuItem = clipboardTranslate
+        file.addItem(clipboardTranslate)
         let clipboardItem = menuItem("剪贴板历史", action: #selector(showClipboardWindow))
         clipboardMenuItem = clipboardItem
         file.addItem(clipboardItem)
@@ -347,6 +381,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         let undo = menuItem("撤销标注", action: #selector(undoMark), key: "z")
         undo.keyEquivalentModifierMask = [.command, .option]
         edit.addItem(undo)
+        let redo = menuItem("重做标注", action: #selector(redoMark), key: "z")
+        redo.keyEquivalentModifierMask = [.command, .shift]
+        edit.addItem(redo)
         editItem.submenu = edit
         main.addItem(editItem)
         let windowItem = NSMenuItem()
@@ -374,34 +411,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
 
     private func setupStatusItem() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-        statusItem.behavior = [.removalAllowed]
         statusItem.isVisible = true
         if let image = NSImage(systemSymbolName: "viewfinder", accessibilityDescription: "拾光截图") {
             image.isTemplate = true
             statusItem.button?.image = image
+            statusItem.button?.toolTip = "拾光截图 · 截图、识别与剪贴板"
+            statusItem.button?.setAccessibilityLabel("拾光截图菜单")
         } else {
             // Keep an actionable entry point even if the symbol asset is unavailable.
             statusItem.button?.title = "拾光"
             statusItem.length = NSStatusItem.variableLength
         }
         let menu = NSMenu()
-        menu.addItem(menuItem("区域截图                  \(model.captureHotkey.symbol)", action: #selector(capture)))
-        menu.addItem(menuItem("截图并翻译              \(model.translateHotkey.symbol)", action: #selector(translateCapture)))
-        menu.addItem(menuItem("剪贴板历史              \(model.clipboardHotkey.symbol)", action: #selector(showClipboardWindow)))
+        menu.addItem(menuItem("区域截图                  \(model.captureHotkey.symbol)",
+                              action: #selector(capture), symbol: "viewfinder"))
+        menu.addItem(menuItem("截图并翻译              \(model.translateHotkey.symbol)",
+                              action: #selector(translateCapture), symbol: "character.bubble"))
+        menu.addItem(menuItem("剪贴板历史              \(model.clipboardHotkey.symbol)",
+                              action: #selector(showClipboardWindow), symbol: "doc.on.clipboard"))
+        menu.addItem(menuItem("翻译剪贴板              \(model.clipboardTranslateHotkey.symbol)",
+                              action: #selector(translateClipboard), symbol: "character.book.closed"))
         menu.addItem(.separator())
-        menu.addItem(menuItem("录制 MP4 视频…", action: #selector(recordVideo)))
-        menu.addItem(menuItem("录制 GIF 动图…", action: #selector(recordGIF)))
+        menu.addItem(menuItem("录制 MP4 视频…", action: #selector(recordVideo), symbol: "record.circle"))
+        menu.addItem(menuItem("录制 GIF 动图…", action: #selector(recordGIF), symbol: "photo.on.rectangle.angled"))
         menu.addItem(recordingDraftMenuItem())
-        menu.addItem(menuItem("自动长截图…", action: #selector(scrollAutomatic)))
-        menu.addItem(menuItem("手动长截图…", action: #selector(scrollManual)))
+        menu.addItem(menuItem("自动长截图…", action: #selector(scrollAutomatic), symbol: "rectangle.expand.vertical"))
+        menu.addItem(menuItem("手动长截图…", action: #selector(scrollManual), symbol: "hand.point.up"))
         menu.addItem(.separator())
-        menu.addItem(menuItem("快速编辑", action: #selector(showEditorWindow)))
-        menu.addItem(menuItem("导入图片…", action: #selector(importImage)))
-        menu.addItem(menuItem("文字翻译", action: #selector(newText)))
+        menu.addItem(menuItem("快速编辑", action: #selector(showEditorWindow), symbol: "macwindow"))
+        menu.addItem(menuItem("导入图片…", action: #selector(importImage), symbol: "photo.badge.plus"))
+        menu.addItem(menuItem("文字翻译", action: #selector(newText), symbol: "text.bubble"))
         menu.addItem(.separator())
-        menu.addItem(menuItem("偏好设置…", action: #selector(preferences)))
+        menu.addItem(menuItem("偏好设置…", action: #selector(preferences), symbol: "gearshape"))
         menu.addItem(.separator())
-        menu.addItem(menuItem("退出拾光截图", action: #selector(quit)))
+        menu.addItem(menuItem("退出拾光截图", action: #selector(quit), symbol: "power"))
         statusItem.menu = menu
     }
 
@@ -423,6 +466,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
                     else { delegate.cancelRecording() }
                 }
                 else if id == 5 { delegate.showClipboardWindow() }
+                else if id == 6 { delegate.translateClipboard() }
                 else { delegate.model.capture(translate: id == 2) }
             }
             return noErr
@@ -463,7 +507,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
 
     private func registerHotkeys() {
         model.hotkeyAvailable = true
-        for (id, settings) in [(UInt32(1), model.captureHotkey), (UInt32(2), model.translateHotkey), (UInt32(5), model.clipboardHotkey)] {
+        for (id, settings) in [
+            (UInt32(1), model.captureHotkey),
+            (UInt32(2), model.translateHotkey),
+            (UInt32(5), model.clipboardHotkey),
+            (UInt32(6), model.clipboardTranslateHotkey)
+        ] {
             guard settings.carbonModifiers != 0 else {
                 model.hotkeyAvailable = false
                 continue
@@ -482,8 +531,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         menu.items[0].title = "区域截图                  \(model.captureHotkey.symbol)"
         menu.items[1].title = "截图并翻译              \(model.translateHotkey.symbol)"
         menu.items[2].title = "剪贴板历史              \(model.clipboardHotkey.symbol)"
+        menu.items[3].title = "翻译剪贴板              \(model.clipboardTranslateHotkey.symbol)"
         clipboardMenuItem?.keyEquivalent = model.clipboardHotkey.carbonModifiers == 0 ? "" : model.clipboardHotkey.key.lowercased()
         clipboardMenuItem?.keyEquivalentModifierMask = model.clipboardHotkey.cocoaModifiers
+        clipboardTranslateMenuItem?.keyEquivalent =
+            model.clipboardTranslateHotkey.carbonModifiers == 0 ? "" : model.clipboardTranslateHotkey.key.lowercased()
+        clipboardTranslateMenuItem?.keyEquivalentModifierMask = model.clipboardTranslateHotkey.cocoaModifiers
     }
 
     private func rebindHotkeys() {
