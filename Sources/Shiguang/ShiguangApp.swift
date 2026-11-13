@@ -114,6 +114,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             pendingRecordings = drafts.loadAll()
             model.recordingReady = !pendingRecordings.isEmpty
         }
+        // Page the Vision text models in while the app is idle: a cold first
+        // recognition otherwise blocks for ~15s on the user's first capture.
+        Task.detached(priority: .utility) {
+            try? await Task.sleep(for: .seconds(2))
+            await OCRService.warmUp()
+        }
         escapeMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self else { return event }
             if let clipboardWindow = self.clipboardWindow, clipboardWindow.isVisible,

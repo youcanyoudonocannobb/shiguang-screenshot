@@ -1,4 +1,5 @@
 import AppKit
+import CoreText
 import Foundation
 import Vision
 
@@ -331,6 +332,26 @@ final class HistoryStore {
 }
 
 enum OCRService {
+    /// Warms the Vision text pipeline with a throwaway image so the first real
+    /// capture does not pay the model paging cost (measured ~15s on a cold start).
+    static func warmUp() async {
+        let size = 128
+        guard let context = CGContext(data: nil, width: size, height: size, bitsPerComponent: 8,
+                                      bytesPerRow: 0, space: CGColorSpaceCreateDeviceRGB(),
+                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return }
+        context.setFillColor(CGColor(red: 1, green: 1, blue: 1, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: size, height: size))
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: CTFontCreateWithName("Helvetica" as CFString, 40, nil),
+            .foregroundColor: CGColor(red: 0, green: 0, blue: 0, alpha: 1)
+        ]
+        let line = CTLineCreateWithAttributedString(NSAttributedString(string: "A1", attributes: attributes))
+        context.textPosition = CGPoint(x: 14, y: 46)
+        CTLineDraw(line, context)
+        guard let image = context.makeImage() else { return }
+        _ = try? await recognize(image)
+    }
+
     static func recognize(_ image: CGImage) async throws -> String {
         let request = VNRecognizeTextRequest()
         request.recognitionLevel = .accurate

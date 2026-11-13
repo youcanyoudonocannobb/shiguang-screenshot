@@ -178,6 +178,10 @@ struct SettingsView: View {
                 }
             }
             .listStyle(.sidebar)
+            // Keep the sidebar on the app's cream surface; the default sidebar
+            // material made the list look like a separate grey panel.
+            .scrollContentBackground(.hidden)
+            .background(Palette.background)
             .overlay {
                 if ShiguangSettingsPage.allCases.allSatisfy({ !$0.matches(query) }) {
                     Text("没有匹配的设置")
