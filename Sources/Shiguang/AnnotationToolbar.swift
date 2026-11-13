@@ -3,6 +3,7 @@ import SwiftUI
 struct AnnotationToolbar: View {
     @ObservedObject var model: AppModel
     var onShowText: (() -> Void)? = nil
+    var showsSelectionTools = true
     var showsCompletion = true
     @StoredState private var showsRecordingOptions = false
     @StoredState private var showsScrollOptions = false
@@ -11,7 +12,7 @@ struct AnnotationToolbar: View {
 
     var body: some View {
         HStack(spacing: 2) {
-            if !showsCompletion {
+            if showsSelectionTools {
                 action("移动选区", symbol: "cursorarrow", selected: model.tool == .pointer) {
                     model.tool = .pointer
                     model.resetViewport()
@@ -39,9 +40,9 @@ struct AnnotationToolbar: View {
                         .font(.system(size: 16, weight: .medium))
                     Circle()
                         .fill(Color(hex: model.markColor))
-                        .frame(width: 11, height: 11)
+                        .frame(width: 10, height: 10)
                         .overlay(Circle().stroke(Color(hex: "17191C"), lineWidth: 2))
-                        .offset(x: 3, y: 3)
+                        .offset(x: 2, y: 2)
                 }
                 .frame(width: 30, height: 32)
                 .foregroundStyle(.white)
@@ -82,6 +83,7 @@ struct AnnotationToolbar: View {
             divider
             action("撤销", symbol: "arrow.uturn.backward") { model.undo() }.disabled(!model.canUndo)
             action("重做", symbol: "arrow.uturn.forward") { model.redo() }.disabled(!model.canRedo)
+            divider
             action(model.isRecognizing ? "取消文字识别" : "文字识别", symbol: model.isRecognizing ? "stop.circle" : "text.viewfinder") {
                 if model.isRecognizing { model.cancelRecognition() }
                 else { model.recognizeInWindow() }
@@ -141,13 +143,15 @@ struct AnnotationToolbar: View {
                 .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
                 .help("更多操作").accessibilityLabel("更多操作")
             if showsCompletion, model.draftImage != nil {
-                completionAction("复制到剪贴板并完成", symbol: "checkmark", tint: Color(hex: "75E6A5")) {
-                    model.confirmDraft()
-                }
+                completionDivider
                 completionAction("取消截图", symbol: "xmark", tint: Color(hex: "FF7979")) {
                     model.discardDraft()
                 }
+                completionAction("复制到剪贴板并完成", symbol: "checkmark", tint: Color(hex: "75E6A5")) {
+                    model.confirmDraft()
+                }
             } else if showsCompletion {
+                completionDivider
                 action("关闭截图 (Esc)", symbol: "xmark") { model.closeEditor() }
             }
         }
@@ -170,7 +174,11 @@ struct AnnotationToolbar: View {
     }
 
     private var divider: some View {
-        Rectangle().fill(.white.opacity(0.18)).frame(width: 1, height: 20).padding(.horizontal, 4)
+        Rectangle().fill(.white.opacity(0.18)).frame(width: 1, height: 20).padding(.horizontal, 3)
+    }
+
+    private var completionDivider: some View {
+        Rectangle().fill(.white.opacity(0.22)).frame(width: 1, height: 24).padding(.horizontal, 6)
     }
 
     private var markToolsPanel: some View {
@@ -269,37 +277,14 @@ struct AnnotationToolbar: View {
             Image(systemName: symbol)
                 .font(.system(size: 17, weight: .bold))
                 .foregroundStyle(tint)
-                .frame(width: 32, height: 32)
-                .background(tint.opacity(0.1), in: RoundedRectangle(cornerRadius: 7))
-                .contentShape(RoundedRectangle(cornerRadius: 7))
+                .frame(width: 34, height: 32)
+                .background(tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+                .overlay(RoundedRectangle(cornerRadius: 8).stroke(tint.opacity(0.28), lineWidth: 1))
+                .contentShape(RoundedRectangle(cornerRadius: 8))
         }
         .buttonStyle(ToolbarActionStyle())
         .help(title)
         .accessibilityLabel(title)
-    }
-}
-
-struct CaptureCompletionToolbar: View {
-    @ObservedObject var model: AppModel
-    var body: some View {
-        HStack(spacing: 2) {
-            Button { model.discardDraft() } label: { Image(systemName: "xmark").foregroundStyle(Color(hex: "FF7979")) }
-                .help("取消截图 (Esc)").accessibilityLabel("取消截图")
-            Button { model.confirmDraft() } label: { Image(systemName: "checkmark").foregroundStyle(Color(hex: "75E6A5")) }
-                .help("复制到剪贴板并完成").accessibilityLabel("复制到剪贴板并完成")
-        }
-        .font(.system(size: 18, weight: .semibold))
-        .buttonStyle(CaptureCompletionStyle()).padding(7)
-        .background(Color(hex: "17191C"), in: RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).stroke(.white.opacity(0.12)))
-        .fixedSize().preferredColorScheme(.dark)
-    }
-}
-
-private struct CaptureCompletionStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label.frame(width: 30, height: 32)
-            .background(configuration.isPressed ? .white.opacity(0.18) : .clear, in: RoundedRectangle(cornerRadius: 6))
     }
 }
 

@@ -187,10 +187,10 @@ private final class ScreenRegionEditorView: NSView {
 private struct ScreenCaptureToolbar: View {
     @ObservedObject var model: AppModel
     var body: some View {
-        HStack(spacing: 6) {
-            AnnotationToolbar(model: model, onShowText: { model.translateImage() }, showsCompletion: false)
-            CaptureCompletionToolbar(model: model)
-        }.fixedSize()
+        AnnotationToolbar(model: model,
+                          onShowText: { model.translateImage() },
+                          showsSelectionTools: false)
+            .fixedSize()
     }
 }
 
