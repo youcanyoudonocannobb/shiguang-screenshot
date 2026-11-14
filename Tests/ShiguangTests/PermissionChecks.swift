@@ -127,7 +127,8 @@ struct PermissionChecks {
             model.captureFailed(NSError(domain: SCStreamErrorDomain,
                                         code: SCStreamError.Code.userDeclined.rawValue))
             try require(!model.isBusy && model.showsPermissionHelp && model.errorMessage == nil,
-                        "Permission failures must lead to authorization help")
+                        "Permission failures must lead to authorization help: busy=\(model.isBusy) " +
+                        "help=\(model.showsPermissionHelp) error=\(model.errorMessage ?? "nil")")
             model.showsPermissionHelp = false
             model.activity = "Capturing"
             model.captureFailed(CaptureFailure.displayUnavailable)

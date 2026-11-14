@@ -38,6 +38,21 @@ private func requireValue<T>(_ value: T?, _ message: String) throws -> T {
     return value
 }
 
+private func requestBodyData(_ request: URLRequest) -> Data {
+    if let body = request.httpBody { return body }
+    guard let stream = request.httpBodyStream else { return Data() }
+    stream.open()
+    defer { stream.close() }
+    var data = Data()
+    var buffer = [UInt8](repeating: 0, count: 4096)
+    while stream.hasBytesAvailable {
+        let count = stream.read(&buffer, maxLength: buffer.count)
+        guard count > 0 else { break }
+        data.append(buffer, count: count)
+    }
+    return data
+}
+
 @main
 @MainActor
 struct EditorFeatureChecks {
@@ -317,6 +332,232 @@ struct EditorFeatureChecks {
                         "AI server errors must surface the service message")
         }
         try require(failed, "A 401 response must fail translation")
+    }
+
+    static func aiProtocolCompatibility() async throws {
+        let chat = AITranslationConfiguration(
+            baseURL: "https://api.example.com/v1",
+            model: "chat-model",
+            instructions: "",
+            api: .openAIChat
+        )
+        let responses = AITranslationConfiguration(
+            baseURL: "https://api.example.com/v1",
+            model: "responses-model",
+            instructions: "",
+            api: .openAIResponses
+        )
+        let anthropic = AITranslationConfiguration(
+            baseURL: "https://api.example.com/v1",
+            model: "claude-test",
+            instructions: "",
+            api: .anthropicMessages
+        )
+        let gemini = AITranslationConfiguration(
+            baseURL: "https://api.example.com/v1beta",
+            model: "gemini-test",
+            instructions: "",
+            api: .gemini
+        )
+        try require(AITranslationService.endpoint(for: chat)?.path == "/v1/chat/completions",
+                    "OpenAI Chat must append its native endpoint")
+        try require(AITranslationService.endpoint(for: responses)?.path == "/v1/responses",
+                    "OpenAI Responses must append its native endpoint")
+        try require(AITranslationService.endpoint(for: anthropic)?.path == "/v1/messages",
+                    "Claude Messages must append its native endpoint")
+        try require(AITranslationService.endpoint(for: gemini)?.absoluteString ==
+                    "https://api.example.com/v1beta/models/gemini-test:generateContent",
+                    "Gemini must place the model in the generateContent path")
+        try require(AITranslationService.endpoint(for: AITranslationConfiguration(
+            baseURL: "http://127.0.0.1:11434/v1", model: "local")) != nil,
+                    "Loopback OpenAI-compatible services may use local HTTP")
+        try require(AITranslationService.endpoint(for: AITranslationConfiguration(
+            baseURL: "http://remote.example.com/v1", model: "remote")) == nil,
+                    "Non-loopback endpoints must still require HTTPS")
+
+        let sessionConfiguration = URLSessionConfiguration.ephemeral
+        sessionConfiguration.protocolClasses = [MockAIURLProtocol.self]
+        let session = URLSession(configuration: sessionConfiguration)
+        defer { MockAIURLProtocol.handler = nil }
+
+        var capturedPath = ""
+        var capturedBody: [String: Any] = [:]
+        var capturedHeaders: [String: String] = [:]
+        MockAIURLProtocol.handler = { request in
+            capturedPath = request.url?.path ?? ""
+            capturedHeaders = [
+                "authorization": request.value(forHTTPHeaderField: "Authorization") ?? "",
+                "x-api-key": request.value(forHTTPHeaderField: "x-api-key") ?? "",
+                "anthropic-version": request.value(forHTTPHeaderField: "anthropic-version") ?? "",
+                "x-goog-api-key": request.value(forHTTPHeaderField: "x-goog-api-key") ?? ""
+            ]
+            let data = requestBodyData(request)
+            if let body = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                capturedBody = body
+            }
+            return (200, Data(#"{"choices":[{"message":{"content":"聊天译文"}}]}"#.utf8))
+        }
+        let chatResult = try await AITranslationService(session: session).translate(
+            text: "Hello", source: "en", target: "zh-Hans",
+            configuration: chat, apiKey: "chat-key"
+        )
+        try require(chatResult == "聊天译文" && capturedPath == "/v1/chat/completions" &&
+                    capturedHeaders["authorization"] == "Bearer chat-key" &&
+                    capturedBody["model"] as? String == "chat-model",
+                    "OpenAI Chat request contract must remain compatible: result=\(chatResult) " +
+                    "path=\(capturedPath) headers=\(capturedHeaders) body=\(capturedBody)")
+
+        capturedPath = ""
+        capturedBody = [:]
+        capturedHeaders = [:]
+        MockAIURLProtocol.handler = { request in
+            capturedPath = request.url?.path ?? ""
+            capturedHeaders = [
+                "authorization": request.value(forHTTPHeaderField: "Authorization") ?? "",
+                "x-api-key": request.value(forHTTPHeaderField: "x-api-key") ?? "",
+                "anthropic-version": request.value(forHTTPHeaderField: "anthropic-version") ?? "",
+                "x-goog-api-key": request.value(forHTTPHeaderField: "x-goog-api-key") ?? ""
+            ]
+            let data = requestBodyData(request)
+            if let body = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                capturedBody = body
+            }
+            return (200, Data(#"{"output":[{"content":[{"type":"output_text","text":"响应译文"}]}]}"#.utf8))
+        }
+        let responsesResult = try await AITranslationService(session: session).translate(
+            text: "Hello", source: "en", target: "zh-Hans",
+            configuration: responses, apiKey: "responses-key"
+        )
+        try require(responsesResult == "响应译文" && capturedPath == "/v1/responses" &&
+                    capturedBody["input"] as? String == "Hello" &&
+                    capturedBody["instructions"] is String,
+                    "OpenAI Responses must send instructions and decode output content")
+
+        capturedPath = ""
+        capturedBody = [:]
+        capturedHeaders = [:]
+        MockAIURLProtocol.handler = { request in
+            capturedPath = request.url?.path ?? ""
+            capturedHeaders = [
+                "authorization": request.value(forHTTPHeaderField: "Authorization") ?? "",
+                "x-api-key": request.value(forHTTPHeaderField: "x-api-key") ?? "",
+                "anthropic-version": request.value(forHTTPHeaderField: "anthropic-version") ?? "",
+                "x-goog-api-key": request.value(forHTTPHeaderField: "x-goog-api-key") ?? ""
+            ]
+            let data = requestBodyData(request)
+            if let body = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                capturedBody = body
+            }
+            return (200, Data(#"{"content":[{"type":"text","text":"Claude 译文"}]}"#.utf8))
+        }
+        let anthropicResult = try await AITranslationService(session: session).translate(
+            text: "Hello", source: "en", target: "zh-Hans",
+            configuration: anthropic, apiKey: "anthropic-key"
+        )
+        try require(anthropicResult == "Claude 译文" && capturedPath == "/v1/messages" &&
+                    capturedHeaders["x-api-key"] == "anthropic-key" &&
+                    capturedHeaders["anthropic-version"] == "2023-06-01" &&
+                    capturedBody["max_tokens"] as? Int == 4096,
+                    "Claude Messages must use x-api-key and its versioned message body")
+
+        capturedPath = ""
+        capturedBody = [:]
+        capturedHeaders = [:]
+        MockAIURLProtocol.handler = { request in
+            capturedPath = request.url?.path ?? ""
+            capturedHeaders = [
+                "authorization": request.value(forHTTPHeaderField: "Authorization") ?? "",
+                "x-api-key": request.value(forHTTPHeaderField: "x-api-key") ?? "",
+                "anthropic-version": request.value(forHTTPHeaderField: "anthropic-version") ?? "",
+                "x-goog-api-key": request.value(forHTTPHeaderField: "x-goog-api-key") ?? ""
+            ]
+            let data = requestBodyData(request)
+            if let body = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                capturedBody = body
+            }
+            return (200, Data(#"{"candidates":[{"content":{"parts":[{"text":"Gemini 译文"}]}}]}"#.utf8))
+        }
+        let geminiResult = try await AITranslationService(session: session).translate(
+            text: "Hello", source: "en", target: "zh-Hans",
+            configuration: gemini, apiKey: "gemini-key"
+        )
+        try require(geminiResult == "Gemini 译文" &&
+                    capturedPath == "/v1beta/models/gemini-test:generateContent" &&
+                    capturedHeaders["x-goog-api-key"] == "gemini-key" &&
+                    capturedBody["systemInstruction"] != nil &&
+                    capturedBody["contents"] != nil,
+                    "Gemini must use generateContent, google key header and native body")
+
+        let local = AITranslationConfiguration(
+            baseURL: "http://127.0.0.1:11434/v1",
+            model: "local-model",
+            instructions: "",
+            api: .openAIChat
+        )
+        MockAIURLProtocol.handler = { _ in
+            (200, Data(#"{"choices":[{"message":{"content":"本机译文"}}]}"#.utf8))
+        }
+        let localResult = try await AITranslationService(session: session).translate(
+            text: "Hello", source: "en", target: "zh-Hans",
+            configuration: local, apiKey: ""
+        )
+        try require(localResult == "本机译文",
+                    "Loopback OpenAI-compatible services must work without an API key")
+        try require(local.allowsEmptyAPIKey,
+                    "Local configuration must explicitly allow an empty API key")
+    }
+
+    static func textToolboxGeneration() async throws {
+        try require(VariableNameTransformer.convert(
+            "user profile", defaultStyle: .lowerCamel).value == "userProfile",
+                    "Lower camel conversion must produce xt-style names")
+        try require(VariableNameTransformer.convert(
+            "user profile", defaultStyle: .upperCamel).value == "UserProfile",
+                    "Upper camel conversion must capitalize every word")
+        try require(VariableNameTransformer.convert(
+            "用户 名称", defaultStyle: .lowerCamel).value == "yongHuMingCheng",
+                    "Chinese phrases must transliterate into pinyin variable names: " +
+                    VariableNameTransformer.convert("用户 名称", defaultStyle: .lowerCamel).value)
+        try require(VariableNameTransformer.convert(
+            "snake API response", defaultStyle: .lowerCamel).value == "api_response",
+                    "Command prefixes must override the selected variable style")
+        try require(VariableNameTransformer.convert(
+            "upper API response", defaultStyle: .lowerCamel).value == "API_RESPONSE",
+                    "Constant command must generate upper snake case")
+
+        for type in RandomDataType.allCases {
+            let value = RandomDataGenerator.generate(type)
+            try require(!value.isEmpty, "Random \(type.title) must not be empty")
+            switch type {
+            case .email:
+                try require(value.contains("@") && value.contains("."),
+                            "Generated email must contain a domain")
+            case .address:
+                try require(value.contains("号") && value.contains("室"),
+                            "Generated address must be a complete sample address")
+            case .phone:
+                try require(value.count == 11 && value.allSatisfy(\.isNumber),
+                            "Generated mobile number must contain 11 digits")
+            case .ipv4:
+                let parts = value.split(separator: ".").compactMap { Int($0) }
+                try require(parts.count == 4 && parts.allSatisfy { (0...255).contains($0) },
+                            "Generated IPv4 address must be valid")
+            case .identityCard:
+                try require(value.count == 18 && RandomDataGenerator.isChecksumValidIdentityCard(value),
+                            "Generated identity card must have a valid checksum")
+            case .uuid:
+                try require(UUID(uuidString: value) != nil, "Generated UUID must be valid")
+            case .password:
+                try require(value.count == 16 &&
+                            value.contains(where: \.isLowercase) &&
+                            value.contains(where: \.isUppercase) &&
+                            value.contains(where: \.isNumber) &&
+                            value.contains { !$0.isLetter && !$0.isNumber },
+                            "Generated password must include every character class")
+            case .name:
+                try require(value.count >= 2, "Generated name must contain at least two characters")
+            }
+        }
     }
 
     static func draftCancellationDismissesWindows() async throws {
@@ -785,7 +1026,9 @@ struct EditorFeatureChecks {
             ("manual_hotkey_input_parser", manualHotkeyInput),
             ("selected_text_translation", selectedTextTranslation),
             ("ai_translation_request_contract", aiTranslationRequests),
-            ("ai_translation_server_error", aiTranslationErrors)
+            ("ai_translation_server_error", aiTranslationErrors),
+            ("ai_protocol_compatibility", aiProtocolCompatibility),
+            ("variable_names_and_random_test_data", textToolboxGeneration)
         ]
         if !ProcessInfo.processInfo.arguments.contains("--skip-video") { checks.append(("playable_mp4_and_animated_gif_export", movieAndGIF)) }
         var failures = 0

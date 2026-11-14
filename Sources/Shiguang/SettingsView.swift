@@ -72,12 +72,14 @@ enum ShiguangSettingsPage: String, CaseIterable, Identifiable {
             return ["自动识别", "OCR", "文字识别", "自动翻译", "历史", "保存", "截图流程", "确认", "复制"]
         case .translation:
             return ["语言", "中文", "英文", "日文", "目标语言", "源语言", "Apple",
-                    "AI", "API", "Key", "模型", "接口", "文字翻译", "翻译剪贴板", "划词翻译", "选区"]
+                    "AI", "API", "Key", "模型", "接口", "OpenAI", "Responses", "Claude",
+                    "Anthropic", "Gemini", "文字翻译", "翻译剪贴板", "划词翻译", "选区"]
         case .clipboard:
-            return ["历史", "系统剪贴板", "复制", "监听", "记录", "图片", "GIF", "视频", "文件", "100"]
+            return ["历史", "系统剪贴板", "复制", "监听", "记录", "图片", "GIF", "视频", "文件",
+                    "100", "变量名", "驼峰", "随机", "姓名", "邮箱", "地址", "IP", "身份证"]
         case .shortcuts:
             return ["快捷键", "热键", "按键", "区域截图", "截图并翻译", "剪贴板历史",
-                    "翻译剪贴板", "划词翻译"]
+                    "翻译剪贴板", "划词翻译", "变量名"]
         case .history:
             return ["历史", "截图历史", "搜索", "删除", "本地存储", "识别文字", "译文"]
         case .privacy:
@@ -149,7 +151,7 @@ struct SettingsView: View {
                 Image(nsImage: NSApp.applicationIconImage)
                     .resizable().scaledToFit().frame(width: 36, height: 36)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("汪拍").font(.system(size: 13.5, weight: .semibold))
+                    Text("PawShot").font(.system(size: 13.5, weight: .semibold))
                     Text("偏好设置").font(.system(size: 11)).foregroundStyle(Palette.muted)
                 }
                 Spacer(minLength: 0)
@@ -222,7 +224,7 @@ struct SettingsView: View {
     private var permissionHelp: some View {
         VStack(alignment: .leading, spacing: 20) {
             SettingsSymbolTile(symbol: "lock.shield", accented: true, size: 40)
-            Text("允许汪拍访问屏幕").font(.system(size: 22, weight: .semibold))
+            Text("允许 PawShot 访问屏幕").font(.system(size: 22, weight: .semibold))
             Text(model.screenPermission.detail).font(.system(size: 13))
                 .foregroundStyle(Palette.muted).fixedSize(horizontal: false, vertical: true)
             HStack {
@@ -233,7 +235,7 @@ struct SettingsView: View {
             HStack {
                 Button("稍后", role: .cancel) { model.showsPermissionHelp = false }
                 Spacer()
-                Button("重启汪拍") { model.restartApp?() }
+                Button("重启 PawShot") { model.restartApp?() }
             }
         }
         .padding(28).frame(width: 480).background(Palette.background)
@@ -355,7 +357,7 @@ private struct SettingsDetailView: View {
                 SettingsToggle(
                     "登录时自动启动",
                     detail: model.launchAtLoginRequiresApproval
-                        ? "等待你在系统设置中允许汪拍"
+                        ? "等待你在系统设置中允许 PawShot"
                         : "登录 Mac 后自动在菜单栏运行",
                     isOn: Binding(
                         get: { model.launchAtLoginEnabled || model.launchAtLoginRequiresApproval },
@@ -436,14 +438,32 @@ private struct SettingsDetailView: View {
             }
 
             if model.translationProvider == .ai {
-                SettingsSection("AI 服务", footer: "API Key 仅保存在 macOS 钥匙串。测试连接会发送一次 Hello 翻译请求。") {
+                SettingsSection(
+                    "AI 服务",
+                    footer: "\(model.aiAPI.detail)。每个协议分别保存 API Key，且仅写入 macOS 钥匙串；本机地址可省略 Key。测试连接会发送一次 Hello 翻译请求。"
+                ) {
+                    SettingsFieldRow("协议") {
+                        Picker("AI 协议", selection: Binding(
+                            get: { model.aiAPI },
+                            set: { model.selectAIAPI($0) }
+                        )) {
+                            ForEach(AITranslationAPI.allCases) { api in
+                                Text(api.title).tag(api)
+                            }
+                        }
+                        .labelsHidden()
+                        .pickerStyle(.menu)
+                        .frame(width: 190)
+                    }
+                    SettingsSeparator()
                     SettingsFieldRow("接口地址") {
-                        TextField("https://api.openai.com/v1", text: $model.aiBaseURL)
+                        TextField(model.aiAPI.defaultBaseURL, text: $model.aiBaseURL)
                             .accessibilityLabel("AI 接口地址")
                     }
                     SettingsSeparator()
                     SettingsFieldRow("模型") {
-                        TextField("gpt-4o-mini", text: $model.aiModel).accessibilityLabel("AI 模型")
+                        TextField(model.aiAPI.defaultModel, text: $model.aiModel)
+                            .accessibilityLabel("AI 模型")
                     }
                     SettingsSeparator()
                     SettingsFieldRow("API Key") {
@@ -520,6 +540,21 @@ private struct SettingsDetailView: View {
             SettingsSection("快捷入口") {
                 SettingsActionRow(title: "打开剪贴板历史", symbol: "list.clipboard",
                                   shortcut: model.clipboardHotkey.symbol) { model.showClipboard?() }
+                SettingsSeparator()
+                SettingsActionRow(title: "变量命名与测试数据", detail: "转换变量格式，生成姓名、地址、IP、身份证等",
+                                  symbol: "wrench.and.screwdriver",
+                                  shortcut: model.variableNamingHotkey.symbol) { model.showClipboardTools?() }
+            }
+            SettingsSection("变量命名", footer: "在任意应用中选中文字后按快捷键，可复制为当前格式；也可以使用 xt、dt、snake、kebab、const 命令前缀。") {
+                SettingsRow("默认格式") {
+                    Picker("变量命名格式", selection: $model.variableNamingStyle) {
+                        ForEach(VariableNamingStyle.allCases) { style in
+                            Text("\(style.title) · \(style.shortcut)").tag(style)
+                        }
+                    }
+                    .labelsHidden()
+                    .frame(width: 150)
+                }
             }
         }
     }
@@ -541,6 +576,9 @@ private struct SettingsDetailView: View {
                               onRecordingChanged: model.setHotkeyCaptureActive)
                     SettingsSeparator()
                     HotkeyRow(title: "划词翻译", settings: $model.selectionTranslateHotkey,
+                              onRecordingChanged: model.setHotkeyCaptureActive)
+                    SettingsSeparator()
+                    HotkeyRow(title: "快捷取变量名", settings: $model.variableNamingHotkey,
                               onRecordingChanged: model.setHotkeyCaptureActive)
                 }
             }
@@ -594,9 +632,9 @@ private struct SettingsDetailView: View {
             SettingsSection("屏幕访问", footer: "只在你主动截图、识别或录制时读取所选区域。") {
                 PermissionActionRow(model: model)
             }
-            SettingsSection("划词翻译", footer: "汪拍只读取当前选区，不会保存其他输入内容。") {
+            SettingsSection("划词翻译", footer: "PawShot 只读取当前选区，不会保存其他输入内容。") {
                 SettingsRow("辅助功能访问",
-                            detail: SelectedTextReader.isTrusted ? "已授权，可读取其他应用的选中文字" : "需要在系统设置中允许汪拍读取选中文字") {
+                            detail: SelectedTextReader.isTrusted ? "已授权，可读取其他应用的选中文字" : "需要在系统设置中允许 PawShot 读取选中文字") {
                     HStack(spacing: 10) {
                         Text(SelectedTextReader.isTrusted ? "已授权" : "待授权")
                             .foregroundStyle(SelectedTextReader.isTrusted ? Palette.success : Palette.warning)
@@ -647,7 +685,7 @@ private struct SettingsDetailView: View {
             HStack(spacing: 18) {
                 Image(nsImage: NSApp.applicationIconImage).resizable().scaledToFit().frame(width: 72, height: 72)
                 VStack(alignment: .leading, spacing: 5) {
-                    Text("汪拍").font(.system(size: 20, weight: .semibold))
+                    Text("PawShot").font(.system(size: 20, weight: .semibold))
                     Text("截取片刻，读懂世界。").font(.system(size: 12)).foregroundStyle(Palette.muted)
                     Text("版本 \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "-") (\(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "-"))")
                         .font(.system(size: 11)).foregroundStyle(Palette.muted)

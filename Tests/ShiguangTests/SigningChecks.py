@@ -95,7 +95,7 @@ def main():
         print("PASS missing_identity_fails_without_silent_regeneration")
 
         output = directory / "output"
-        existing = output / "汪拍.app/Contents/MacOS/Shiguang"
+        existing = output / "PawShot.app/Contents/MacOS/Shiguang"
         existing.parent.mkdir(parents=True)
         existing.write_bytes(b"Existing usable application")
         env.update(OUTPUT_DIR=str(output), BUILD_DIR=str(directory / "build"))

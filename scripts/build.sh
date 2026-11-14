@@ -4,7 +4,7 @@ set -euo pipefail
 PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 BUILD_DIR="${BUILD_DIR:-$PROJECT_DIR/.build}"
 OUTPUT_DIR="${OUTPUT_DIR:-$PROJECT_DIR/dist}"
-FINAL_APP="$OUTPUT_DIR/汪拍.app"
+FINAL_APP="$OUTPUT_DIR/PawShot.app"
 # Fail before replacing a build if the persistent certificate is unavailable.
 python3 "$PROJECT_DIR/scripts/local-signing.py" check
 mkdir -p "$BUILD_DIR" "$OUTPUT_DIR"
@@ -18,7 +18,7 @@ fi
 swift build "${BUILD_OPTIONS[@]}"
 BIN_DIR="$(swift build "${BUILD_OPTIONS[@]}" --show-bin-path)"
 STAGING_DIR="$(mktemp -d "$OUTPUT_DIR/.shiguang-build.XXXXXX")"
-APP="$STAGING_DIR/汪拍.app"
+APP="$STAGING_DIR/PawShot.app"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN_DIR/Shiguang" "$APP/Contents/MacOS/Shiguang"
 cp "$PROJECT_DIR/Info.plist" "$APP/Contents/Info.plist"

@@ -165,6 +165,14 @@ struct ClipboardEntry: Codable, Identifiable {
     }
 }
 
+enum ClipboardSection: String, CaseIterable, Identifiable {
+    case history
+    case tools
+
+    var id: String { rawValue }
+    var title: String { self == .history ? "历史" : "快捷工具" }
+}
+
 @MainActor
 final class ClipboardHistory: ObservableObject {
     @Published private(set) var entries: [ClipboardEntry] = []
@@ -172,6 +180,7 @@ final class ClipboardHistory: ObservableObject {
     @Published var search = ""
     @Published var filter: ClipboardEntry.Kind?
     @Published var selectedID: UUID?
+    @Published var section: ClipboardSection = .history
     @Published var monitorsSystem: Bool {
         didSet { preferences.set(monitorsSystem, forKey: "clipboard.monitor"); observedChange = pasteboard.changeCount }
     }
@@ -202,9 +211,17 @@ final class ClipboardHistory: ObservableObject {
 
     func prepareForDisplay() {
         captureCurrent()
+        section = .history
         search = ""
         filter = nil
         selectedID = entries.first?.id
+    }
+
+    func prepareForTools() {
+        captureCurrent()
+        section = .tools
+        search = ""
+        filter = nil
     }
 
     func moveSelection(_ delta: Int) {
@@ -246,6 +263,7 @@ final class ClipboardHistory: ObservableObject {
 
     func stop() { timer?.invalidate(); timer = nil }
     func reportCopyError(_ error: Error) { message = "复制失败：\(error.localizedDescription)" }
+    func report(_ value: String) { message = value }
 
     func poll() {
         guard pasteboard.changeCount != observedChange else { return }
@@ -265,8 +283,10 @@ final class ClipboardHistory: ObservableObject {
     }
 
     func copyImage(_ image: NSImage) throws { try publish(ClipboardSnapshot.image(image)) }
-    func copyText(_ text: String) throws {
-        try publish(ClipboardSnapshot(items: [[NSPasteboard.PasteboardType.string.rawValue: Data(text.utf8)]]))
+    func copyText(_ text: String,
+                  successMessage: String = "已复制到剪贴板，可按 ⌘V 粘贴。") throws {
+        try publish(ClipboardSnapshot(items: [[NSPasteboard.PasteboardType.string.rawValue: Data(text.utf8)]]),
+                    successMessage: successMessage)
     }
 
     func makeMediaURL(fileExtension: String) throws -> URL {
@@ -335,12 +355,13 @@ final class ClipboardHistory: ObservableObject {
         } catch { message = "清空失败：\(error.localizedDescription)" }
     }
 
-    private func publish(_ snapshot: ClipboardSnapshot, ownedFileName: String? = nil) throws {
+    private func publish(_ snapshot: ClipboardSnapshot, ownedFileName: String? = nil,
+                         successMessage: String = "已复制到剪贴板，可按 ⌘V 粘贴。") throws {
         try snapshot.write(to: pasteboard)
         observedChange = pasteboard.changeCount
         lastPublishedChange = observedChange
         record(snapshot, ownedFileName: ownedFileName)
-        message = "已复制到剪贴板，可按 ⌘V 粘贴。"
+        message = successMessage
     }
 
     private func record(_ snapshot: ClipboardSnapshot, ownedFileName: String? = nil) {

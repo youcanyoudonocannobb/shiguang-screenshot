@@ -32,6 +32,16 @@ final class AppModel: ObservableObject {
     @Published var translationProvider: TranslationProvider {
         didSet { preferences.set(translationProvider.rawValue, forKey: "translationProvider") }
     }
+    @Published var aiAPI: AITranslationAPI = AITranslationAPI(
+        rawValue: UserDefaults.standard.string(forKey: "aiAPI") ?? ""
+    ) ?? .openAIChat {
+        didSet { UserDefaults.standard.set(aiAPI.rawValue, forKey: "aiAPI") }
+    }
+    @Published var variableNamingStyle: VariableNamingStyle = VariableNamingStyle(
+        rawValue: UserDefaults.standard.string(forKey: "variableNamingStyle") ?? ""
+    ) ?? .lowerCamel {
+        didSet { UserDefaults.standard.set(variableNamingStyle.rawValue, forKey: "variableNamingStyle") }
+    }
     @Published var showsMenuBarIcon: Bool {
         didSet {
             preferences.set(showsMenuBarIcon, forKey: "showsMenuBarIcon")
@@ -48,19 +58,22 @@ final class AppModel: ObservableObject {
     @Published private(set) var launchAtLoginRequiresApproval = false
     @Published private(set) var launchAtLoginMessage: String?
     @Published var aiBaseURL: String = UserDefaults.standard.string(forKey: "aiBaseURL")
+        ?? AITranslationAPI(rawValue: UserDefaults.standard.string(forKey: "aiAPI") ?? "")?.defaultBaseURL
         ?? AITranslationConfiguration().baseURL {
         didSet { UserDefaults.standard.set(aiBaseURL, forKey: "aiBaseURL") }
     }
     @Published var aiModel: String = UserDefaults.standard.string(forKey: "aiModel")
+        ?? AITranslationAPI(rawValue: UserDefaults.standard.string(forKey: "aiAPI") ?? "")?.defaultModel
         ?? AITranslationConfiguration().model {
         didSet { UserDefaults.standard.set(aiModel, forKey: "aiModel") }
     }
     @Published var aiInstructions: String = UserDefaults.standard.string(forKey: "aiInstructions") ?? "" {
         didSet { UserDefaults.standard.set(aiInstructions, forKey: "aiInstructions") }
     }
-    @Published var aiAPIKey: String = AITranslationKeychain.load() {
+    @Published var aiAPIKey: String = "" {
         didSet {
-            do { try AITranslationKeychain.save(aiAPIKey) }
+            guard !isSwitchingAIKey else { return }
+            do { try AITranslationKeychain.save(aiAPIKey, for: aiAPI) }
             catch { errorMessage = error.localizedDescription }
         }
     }
@@ -128,6 +141,12 @@ final class AppModel: ObservableObject {
             hotkeysChanged?()
         }
     }
+    @Published var variableNamingHotkey: HotkeySettings = AppModel.loadHotkey(prefix: "variableNamingHotkey", defaultKey: "X") {
+        didSet {
+            AppModel.saveHotkey(variableNamingHotkey, prefix: "variableNamingHotkey")
+            hotkeysChanged?()
+        }
+    }
     @Published var hotkeyAvailable = true
     var showWindow: (() -> Void)?
     var showWorkspace: (() -> Void)?
@@ -146,6 +165,7 @@ final class AppModel: ObservableObject {
     var saveRecording: (() -> Void)?
     var beginScrollCapture: ((ScrollCaptureMode, CGRect?) -> Void)?
     var showClipboard: (() -> Void)?
+    var showClipboardTools: (() -> Void)?
     var translateSelection: (() -> Void)?
     var didCopyCapture: (() -> Void)?
     var publishImage: (NSImage) throws -> Void = { image in
@@ -175,6 +195,7 @@ final class AppModel: ObservableObject {
     private var translationWatchdog: Task<Void, Never>?
     private var aiTranslationTask: Task<Void, Never>?
     private var aiTestTask: Task<Void, Never>?
+    private var isSwitchingAIKey = false
     private var undoMarks: [[Mark]] = []
     private var redoMarks: [[Mark]] = []
     private var draftTitle = ""
@@ -185,10 +206,13 @@ final class AppModel: ObservableObject {
     var isTextWorkspace: Bool { editorMode != .annotation }
     var canTranslate: Bool { !sourceText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !isBusy }
     var aiConfiguration: AITranslationConfiguration {
-        AITranslationConfiguration(baseURL: aiBaseURL, model: aiModel, instructions: aiInstructions)
+        AITranslationConfiguration(baseURL: aiBaseURL, model: aiModel,
+                                   instructions: aiInstructions, api: aiAPI)
     }
     var aiReady: Bool {
-        aiConfiguration.isConfigured && !aiAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        aiConfiguration.isConfigured &&
+            (aiConfiguration.allowsEmptyAPIKey ||
+             !aiAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
     }
     var currentRecord: CaptureRecord? { records.first { $0.id == selectedID } }
     var filteredRecords: [CaptureRecord] {
@@ -201,6 +225,10 @@ final class AppModel: ObservableObject {
          preferences: UserDefaults = .standard,
          recognizeImage: @escaping (CGImage) async throws -> String = OCRService.recognize,
          ocrTiming: OCRTimingPolicy = OCRTimingPolicy()) {
+        let initialAIAPI = AITranslationAPI(
+            rawValue: UserDefaults.standard.string(forKey: "aiAPI") ?? ""
+        ) ?? .openAIChat
+        aiAPIKey = AITranslationKeychain.load(for: initialAIAPI)
         self.preferences = preferences
         self.recognizeImage = recognizeImage
         self.ocrTiming = ocrTiming
@@ -277,8 +305,26 @@ final class AppModel: ObservableObject {
         }
         refreshLaunchAtLoginState()
         if launchAtLoginRequiresApproval {
-            launchAtLoginMessage = "已提交登录项，请在“系统设置 > 通用 > 登录项”中允许汪拍。"
+            launchAtLoginMessage = "已提交登录项，请在“系统设置 > 通用 > 登录项”中允许 PawShot。"
         }
+    }
+
+    func selectAIAPI(_ next: AITranslationAPI) {
+        guard next != aiAPI else { return }
+        let previous = aiAPI
+        if aiBaseURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
+            aiBaseURL == previous.defaultBaseURL {
+            aiBaseURL = next.defaultBaseURL
+        }
+        if aiModel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
+            aiModel == previous.defaultModel {
+            aiModel = next.defaultModel
+        }
+        isSwitchingAIKey = true
+        aiAPI = next
+        aiAPIKey = AITranslationKeychain.load(for: next)
+        isSwitchingAIKey = false
+        aiTestMessage = nil
     }
 
     func openLoginItemsSettings() {
@@ -780,7 +826,7 @@ final class AppModel: ObservableObject {
             }
         }
         activity = provider == .ai
-            ? "正在使用 AI 翻译 · \(aiModel)"
+            ? "正在使用 \(aiAPI.title) 翻译 · \(aiModel)"
             : "正在翻译 · 首次使用可能需要下载语言包"
         let job = TranslationJob(documentID: selectedID, text: text,
                                  source: source, target: target, provider: provider)
@@ -986,7 +1032,7 @@ final class AppModel: ObservableObject {
         guard let output = renderedImage(), let data = output.pngData else { return }
         let panel = NSSavePanel()
         panel.allowedContentTypes = [.png]
-        let title = (currentRecord?.title ?? "汪拍")
+        let title = (currentRecord?.title ?? "PawShot")
             .replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: ":", with: "-")
         panel.nameFieldStringValue = "\(title).png"
         NSApp.activate(ignoringOtherApps: true)

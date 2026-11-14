@@ -54,6 +54,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     private var clipboardMenuItem: NSMenuItem?
     private var clipboardTranslateMenuItem: NSMenuItem?
     private var selectionTranslateMenuItem: NSMenuItem?
+    private var variableNameMenuItem: NSMenuItem?
     private var clipboardReturnApplication: NSRunningApplication?
     private weak var clipboardReturnWindow: NSWindow?
 
@@ -76,7 +77,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 880, height: 620),
                               styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
                               backing: .buffered, defer: false)
-        window.title = "汪拍"
+        window.title = "PawShot"
         window.toolbarStyle = .unified
         window.tabbingMode = .disallowed
         window.titlebarAppearsTransparent = true
@@ -107,6 +108,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         model.saveRecording = { [weak self] in self?.copyLastRecording() }
         model.beginScrollCapture = { [weak self] mode, region in self?.beginScrollCapture(mode, region: region) }
         model.showClipboard = { [weak self] in self?.showClipboardWindow() }
+        model.showClipboardTools = { [weak self] in self?.presentClipboardWindow(section: .tools) }
         model.translateSelection = { [weak self] in self?.translateSelection() }
         model.statusItemPreferencesChanged = { [weak self] in self?.applyStatusItemPreferences() }
         model.publishImage = { [unowned self] image in try self.clipboard.copyImage(image) }
@@ -252,7 +254,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     @objc private func translateClipboard() { model.translateClipboard() }
     @objc private func translateSelection() {
         guard SelectedTextReader.isTrusted else {
-            requestSelectionTranslationAccess()
+            requestSelectionAccess(for: "划词翻译")
             return
         }
         guard let text = SelectedTextReader.selectedText(
@@ -269,10 +271,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         model.translateSelectedText(text)
     }
 
-    private func requestSelectionTranslationAccess() {
+    @objc private func copySelectionAsVariableName() {
+        guard SelectedTextReader.isTrusted else {
+            requestSelectionAccess(for: "快捷取变量名")
+            return
+        }
+        guard let text = SelectedTextReader.selectedText(
+            applicationPID: lastExternalApplication?.processIdentifier
+        ) else {
+            presentClipboardWindow(section: .tools)
+            clipboard.report("没有读取到选中文字。可在“快捷工具”中输入词组，或先选中文字再按快捷键。")
+            return
+        }
+        let conversion = VariableNameTransformer.convert(text, defaultStyle: model.variableNamingStyle)
+        guard !conversion.value.isEmpty else {
+            presentClipboardWindow(section: .tools)
+            clipboard.report("选中的内容无法转换为变量名。")
+            return
+        }
+        do {
+            try clipboard.copyText(
+                conversion.value,
+                successMessage: "已复制变量名：\(conversion.value) · \(conversion.style.title)"
+            )
+        } catch {
+            clipboard.reportCopyError(error)
+        }
+    }
+
+    private func requestSelectionAccess(for feature: String) {
         let alert = NSAlert()
-        alert.messageText = "划词翻译需要辅助功能权限"
-        alert.informativeText = "汪拍只读取当前应用中被选中的文字，不记录其他输入内容。请在「系统设置 > 隐私与安全性 > 辅助功能」中允许汪拍。"
+        alert.messageText = "\(feature)需要辅助功能权限"
+        alert.informativeText = "PawShot 只读取当前应用中被选中的文字，不记录其他输入内容。请在「系统设置 > 隐私与安全性 > 辅助功能」中允许 PawShot。"
         alert.addButton(withTitle: "打开辅助功能设置")
         alert.addButton(withTitle: "取消")
         NSApp.activate(ignoringOtherApps: true)
@@ -299,23 +329,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
 
     @objc private func showClipboardWindow() {
         if clipboardWindow?.isVisible == true { closeClipboardWindow(); return }
+        presentClipboardWindow(section: .history)
+    }
+
+    private func presentClipboardWindow(section: ClipboardSection) {
+        if clipboardWindow?.isVisible == true {
+            clipboard.section = section
+            clipboardWindow?.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
         if captureController?.isActive == true { captureController?.cancelByUser() }
         clipboardReturnApplication = NSWorkspace.shared.frontmostApplication
         clipboardReturnWindow = NSApp.keyWindow
         NSApp.activate(ignoringOtherApps: true)
-        clipboard.prepareForDisplay()
+        if section == .tools { clipboard.prepareForTools() }
+        else { clipboard.prepareForDisplay() }
         if clipboardWindow == nil {
             let panel = ScrollCapturePanel(contentRect: NSRect(x: 0, y: 0, width: 580, height: 650),
                 styleMask: [.titled, .closable, .resizable, .utilityWindow], backing: .buffered, defer: false)
-            panel.title = "汪拍 · 剪贴板"
+            panel.title = "PawShot · 剪贴板"
             panel.minSize = NSSize(width: 520, height: 460)
             panel.isReleasedWhenClosed = false
             panel.hidesOnDeactivate = true
             panel.level = .floating
             panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
             panel.backgroundColor = NSColor(hex: "F4F7FA")
-            panel.contentView = NSHostingView(rootView: ClipboardView(history: clipboard,
+            panel.contentView = NSHostingView(rootView: ClipboardView(model: model, history: clipboard,
                 onCopy: { [weak self] entry in self?.copyClipboardEntry(entry) },
+                onCopyText: { [weak self] text in self?.copyGeneratedText(text) },
                 onClose: { [weak self] in self?.closeClipboardWindow() }))
             panel.center()
             clipboardWindow = panel
@@ -332,6 +374,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     private func copyClipboardEntry(_ entry: ClipboardEntry) {
         do { try clipboard.copy(entry); closeClipboardWindow() }
         catch { clipboard.reportCopyError(error) }
+    }
+
+    private func copyGeneratedText(_ text: String) {
+        do {
+            try clipboard.copyText(text, successMessage: "已复制：\(String(text.prefix(48)))")
+        } catch {
+            clipboard.reportCopyError(error)
+        }
     }
 
     private func closeClipboardWindow() {
@@ -361,7 +411,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
                 NSApp.terminate(nil)
             } catch {
                 isRestarting = false
-                model.errorMessage = "无法重启汪拍：\(error.localizedDescription)"
+                model.errorMessage = "无法重启 PawShot：\(error.localizedDescription)"
                 showWorkspace()
             }
         }
@@ -383,12 +433,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
 
     private func makeMenu() {
         let main = NSMenu()
-        let appItem = NSMenuItem()
+        let appItem = NSMenuItem(title: "PawShot", action: nil, keyEquivalent: "")
         let appMenu = NSMenu()
-        appMenu.addItem(menuItem("关于汪拍", action: #selector(about)))
+        appMenu.addItem(menuItem("关于 PawShot", action: #selector(about)))
         appMenu.addItem(menuItem("偏好设置…", action: #selector(preferences), key: ","))
         appMenu.addItem(.separator())
-        appMenu.addItem(menuItem("退出汪拍", action: #selector(quit), key: "q"))
+        appMenu.addItem(menuItem("退出 PawShot", action: #selector(quit), key: "q"))
         appItem.submenu = appMenu
         main.addItem(appItem)
         let fileItem = NSMenuItem()
@@ -411,6 +461,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         let selectionTranslate = menuItem("划词翻译", action: #selector(translateSelection))
         selectionTranslateMenuItem = selectionTranslate
         file.addItem(selectionTranslate)
+        let variableName = menuItem("快捷取变量名", action: #selector(copySelectionAsVariableName))
+        variableNameMenuItem = variableName
+        file.addItem(variableName)
         let clipboardItem = menuItem("剪贴板历史", action: #selector(showClipboardWindow))
         clipboardMenuItem = clipboardItem
         file.addItem(clipboardItem)
@@ -464,7 +517,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             ))
         }
         NSApp.orderFrontStandardAboutPanel(options: [
-            .applicationName: "汪拍",
+            .applicationName: "PawShot",
             .applicationVersion: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "",
             .version: Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "",
             .credits: credits
@@ -484,6 +537,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
                               action: #selector(translateClipboard), symbol: "character.book.closed"))
         menu.addItem(menuItem("划词翻译                  \(model.selectionTranslateHotkey.symbol)",
                               action: #selector(translateSelection), symbol: "text.cursor"))
+        menu.addItem(menuItem("快捷取变量名              \(model.variableNamingHotkey.symbol)",
+                              action: #selector(copySelectionAsVariableName), symbol: "textformat.abc"))
         menu.addItem(.separator())
         menu.addItem(menuItem("录制 MP4 视频…", action: #selector(recordVideo), symbol: "record.circle"))
         menu.addItem(menuItem("录制 GIF 动图…", action: #selector(recordGIF), symbol: "photo.on.rectangle.angled"))
@@ -497,7 +552,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         menu.addItem(.separator())
         menu.addItem(menuItem("偏好设置…", action: #selector(preferences), symbol: "gearshape"))
         menu.addItem(.separator())
-        menu.addItem(menuItem("退出汪拍", action: #selector(quit), symbol: "power"))
+        menu.addItem(menuItem("退出 PawShot", action: #selector(quit), symbol: "power"))
         statusItem.menu = menu
         applyStatusItemPreferences()
     }
@@ -506,8 +561,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         guard let statusItem else { return }
         statusItem.isVisible = model.showsMenuBarIcon
         statusItem.button?.image = BrandArtwork.menuBarImage(colorHex: model.menuBarDogStyle.colorHex)
-        statusItem.button?.toolTip = "汪拍 · 截图、识别与剪贴板"
-        statusItem.button?.setAccessibilityLabel("汪拍菜单")
+        statusItem.button?.toolTip = "PawShot · 截图、识别与剪贴板"
+        statusItem.button?.setAccessibilityLabel("PawShot 菜单")
     }
 
     private func setupHotkeys() {
@@ -531,6 +586,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
                 else if id == 6 { delegate.translateClipboard() }
                 else if id == 7 { delegate.captureController?.cancelByUser() }
                 else if id == 8 { delegate.translateSelection() }
+                else if id == 9 { delegate.copySelectionAsVariableName() }
                 else { delegate.model.capture(translate: id == 2) }
             }
             return noErr
@@ -576,7 +632,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             (UInt32(2), model.translateHotkey),
             (UInt32(5), model.clipboardHotkey),
             (UInt32(6), model.clipboardTranslateHotkey),
-            (UInt32(8), model.selectionTranslateHotkey)
+            (UInt32(8), model.selectionTranslateHotkey),
+            (UInt32(9), model.variableNamingHotkey)
         ] {
             guard settings.carbonModifiers != 0 else {
                 model.hotkeyAvailable = false
@@ -592,12 +649,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     }
 
     private func updateStatusMenuHotkeys() {
-        guard let menu = statusItem?.menu, menu.items.count >= 5 else { return }
+        guard let menu = statusItem?.menu, menu.items.count >= 6 else { return }
         menu.items[0].title = "区域截图                  \(model.captureHotkey.symbol)"
         menu.items[1].title = "截图并翻译              \(model.translateHotkey.symbol)"
         menu.items[2].title = "剪贴板历史              \(model.clipboardHotkey.symbol)"
         menu.items[3].title = "翻译剪贴板              \(model.clipboardTranslateHotkey.symbol)"
         menu.items[4].title = "划词翻译                  \(model.selectionTranslateHotkey.symbol)"
+        menu.items[5].title = "快捷取变量名              \(model.variableNamingHotkey.symbol)"
         clipboardMenuItem?.keyEquivalent = model.clipboardHotkey.carbonModifiers == 0 ? "" : model.clipboardHotkey.key.lowercased()
         clipboardMenuItem?.keyEquivalentModifierMask = model.clipboardHotkey.cocoaModifiers
         clipboardTranslateMenuItem?.keyEquivalent =
@@ -606,6 +664,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         selectionTranslateMenuItem?.keyEquivalent =
             model.selectionTranslateHotkey.carbonModifiers == 0 ? "" : model.selectionTranslateHotkey.key.lowercased()
         selectionTranslateMenuItem?.keyEquivalentModifierMask = model.selectionTranslateHotkey.cocoaModifiers
+        variableNameMenuItem?.keyEquivalent =
+            model.variableNamingHotkey.carbonModifiers == 0 ? "" : model.variableNamingHotkey.key.lowercased()
+        variableNameMenuItem?.keyEquivalentModifierMask = model.variableNamingHotkey.cocoaModifiers
     }
 
     private func rebindHotkeys() {
@@ -631,7 +692,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             let panel = CaptureEditorWindow(contentRect: NSRect(x: 0, y: 0, width: 980, height: 760),
                                  styleMask: [.titled, .closable, .miniaturizable, .resizable],
                                  backing: .buffered, defer: false)
-            panel.title = "汪拍 · 快速编辑"
+            panel.title = "PawShot · 快速编辑"
             panel.backgroundColor = NSColor(hex: "F4F7FA")
             panel.isReleasedWhenClosed = false
             panel.delegate = self
@@ -641,8 +702,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         }
         let text = model.isTextWorkspace
         if text { window?.orderOut(nil) }
-        editorWindow.title = model.editorMode == .recognition ? "汪拍 · 文字识别" :
-            (text ? "汪拍 · 翻译" : "汪拍 · 快速编辑")
+        editorWindow.title = model.editorMode == .recognition ? "PawShot · 文字识别" :
+            (text ? "PawShot · 翻译" : "PawShot · 快速编辑")
         editorWindow.minSize = text ? NSSize(width: model.editorMode == .recognition ? 500 : 700,
                                              height: model.editorMode == .recognition ? 340 : 440) :
             NSSize(width: 700, height: 400)
@@ -766,7 +827,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         let baseHeight = displayHeight + 72
         let panel = CaptureEditorWindow(contentRect: NSRect(origin: .zero, size: NSSize(width: displayWidth, height: baseHeight)),
                              styleMask: [.borderless, .resizable], backing: .buffered, defer: false)
-        panel.title = "汪拍 · 悬浮编辑"
+        panel.title = "PawShot · 悬浮编辑"
         panel.minSize = NSSize(width: min(700, available.width - 24), height: 260)
         panel.backgroundColor = .clear
         panel.isOpaque = false
@@ -827,7 +888,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             case .alertSecondButtonReturn:
                 if CGRequestPostEventAccess() { beginScrollCapture(.automatic, region: region) }
                 else {
-                    model.notice = "请在系统设置的「辅助功能」中允许汪拍，再选择自动长截图。"
+                    model.notice = "请在系统设置的「辅助功能」中允许 PawShot，再选择自动长截图。"
                     if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
                         NSWorkspace.shared.open(url)
                     }
@@ -899,7 +960,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         let panelSize = CGSize(width: 260, height: min(560, visible.height - 24))
         let panel = ScrollCapturePanel(contentRect: CGRect(origin: .zero, size: panelSize),
                                        styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
-        panel.title = "汪拍 · \(mode.title)"
+        panel.title = "PawShot · \(mode.title)"
         panel.backgroundColor = .clear
         panel.isOpaque = false
         panel.hidesOnDeactivate = false
@@ -981,7 +1042,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         recordingBorder = border
         let bar = ScrollCapturePanel(contentRect: CGRect(x: 0, y: 0, width: 400, height: 42),
                                       styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
-        bar.title = "汪拍 · 录制"
+        bar.title = "PawShot · 录制"
         bar.backgroundColor = .clear
         bar.isOpaque = false
         bar.level = .floating
@@ -1158,7 +1219,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         let height = min(width * ratio, maxSize.height * 0.7)
         let panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: width, height: height),
                             styleMask: [.titled, .closable, .resizable, .utilityWindow], backing: .buffered, defer: false)
-        panel.title = "汪拍贴图 · 关闭以取消置顶"
+        panel.title = "PawShot 贴图 · 关闭以取消置顶"
         panel.level = .floating
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         panel.hidesOnDeactivate = false

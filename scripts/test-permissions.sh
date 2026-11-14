@@ -8,6 +8,7 @@ swiftc -parse-as-library -swift-version 5 -target "$(uname -m)-apple-macosx15.0"
     "$PROJECT_DIR/Sources/Shiguang/Models.swift" \
     "$PROJECT_DIR/Sources/Shiguang/HotkeySettings.swift" \
     "$PROJECT_DIR/Sources/Shiguang/AITranslation.swift" \
+    "$PROJECT_DIR/Sources/Shiguang/TextToolbox.swift" \
     "$PROJECT_DIR/Sources/Shiguang/ScreenCaptureSupport.swift" \
     "$PROJECT_DIR/Sources/Shiguang/SelectedTextReader.swift" \
     "$PROJECT_DIR/Sources/Shiguang/AppRelauncher.swift" \

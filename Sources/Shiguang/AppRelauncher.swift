@@ -7,7 +7,7 @@ enum RelaunchFailure: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .invalidBundle: return "找不到当前应用的可执行文件，请从原来的应用位置重新打开。"
-        case .terminationTimeout: return "旧进程尚未退出，已停止重启。请完全退出汪拍后重新打开。"
+        case .terminationTimeout: return "旧进程尚未退出，已停止重启。请完全退出 PawShot 后重新打开。"
         }
     }
 }
@@ -62,7 +62,7 @@ enum AppRelauncher {
             } catch {
                 app.activate(ignoringOtherApps: true)
                 let alert = NSAlert()
-                alert.messageText = "重启汪拍失败"
+                alert.messageText = "重启 PawShot 失败"
                 alert.informativeText = "\(error.localizedDescription)\n应用位置：\(target.url.path)"
                 alert.addButton(withTitle: "知道了")
                 alert.runModal()

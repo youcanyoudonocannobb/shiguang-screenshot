@@ -1,18 +1,27 @@
 import SwiftUI
 
 struct ClipboardView: View {
+    @ObservedObject var model: AppModel
     @ObservedObject var history: ClipboardHistory
     let onCopy: (ClipboardEntry) -> Void
+    let onCopyText: (String) -> Void
     let onClose: () -> Void
     @StoredState private var confirmsClear = false
+    @StoredState private var variableInput = ""
+    @StoredState private var generatedValues: [RandomDataType: String] = [:]
     @FocusState private var searchFocused: Bool
 
     var body: some View {
         VStack(spacing: 12) {
             header
-            searchField
-            filterBar
-            content
+            sectionBar
+            if history.section == .history {
+                searchField
+                filterBar
+                content
+            } else {
+                toolsContent
+            }
             footer
         }
         .padding(16)
@@ -21,7 +30,14 @@ struct ClipboardView: View {
         .foregroundStyle(Palette.ink)
         .tint(Palette.accent)
         .preferredColorScheme(.light)
-        .onAppear { searchFocused = true }
+        .onAppear {
+            searchFocused = history.section == .history
+            seedGeneratedValues()
+        }
+        .onChange(of: history.section) { _, section in
+            searchFocused = section == .history
+            if section == .tools { seedGeneratedValues() }
+        }
         .onChange(of: history.search) { _, _ in history.selectedID = history.filteredEntries.first?.id }
         .onChange(of: history.filter) { _, _ in history.selectedID = history.filteredEntries.first?.id }
         .confirmationDialog("清空剪贴板历史？", isPresented: $confirmsClear) {
@@ -42,16 +58,21 @@ struct ClipboardView: View {
                 HStack(spacing: 7) {
                     Text("剪贴板")
                         .font(.system(size: 19, weight: .semibold))
-                    Text("\(history.entries.count) 项")
-                        .font(.system(size: 10.5, weight: .medium))
-                        .foregroundStyle(Palette.muted)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(Palette.ink.opacity(0.045), in: Capsule())
+                    if history.section == .history {
+                        Text("\(history.entries.count) 项")
+                            .font(.system(size: 10.5, weight: .medium))
+                            .foregroundStyle(Palette.muted)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Palette.ink.opacity(0.045), in: Capsule())
+                    }
                 }
-                Text(history.monitorsSystem ? "正在记录本机剪贴板 · 最近 100 项" : "系统记录已暂停")
+                Text(history.section == .tools
+                     ? "变量命名与测试数据 · 一键复制"
+                     : (history.monitorsSystem ? "正在记录本机剪贴板 · 最近 100 项" : "系统记录已暂停"))
                     .font(.system(size: 10.5))
-                    .foregroundStyle(history.monitorsSystem ? Palette.muted : Palette.warning)
+                    .foregroundStyle(history.section == .history && !history.monitorsSystem
+                                     ? Palette.warning : Palette.muted)
             }
             Spacer()
             Menu {
@@ -83,6 +104,31 @@ struct ClipboardView: View {
             .help("关闭 (Esc)")
             .accessibilityLabel("关闭剪贴板")
         }
+    }
+
+    private var sectionBar: some View {
+        HStack(spacing: 4) {
+            ForEach(ClipboardSection.allCases) { section in
+                let selected = history.section == section
+                Button { history.section = section } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: section == .history ? "clock.arrow.circlepath" : "wrench.and.screwdriver")
+                            .font(.system(size: 10, weight: .semibold))
+                        Text(section.title)
+                            .font(.system(size: 11, weight: .semibold))
+                    }
+                    .foregroundStyle(selected ? .white : Palette.ink)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 28)
+                    .background(selected ? Palette.ink : Color.clear,
+                                in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(3)
+        .background(Palette.panel, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).stroke(Palette.line))
     }
 
     private var searchField: some View {
@@ -161,17 +207,216 @@ struct ClipboardView: View {
         }
     }
 
+    private var toolsContent: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                toolsSectionTitle("变量命名", detail: "输入中文、英文或混合词组，实时转换")
+                variableNameCard
+
+                HStack {
+                    toolsSectionTitle("随机测试数据", detail: "点击卡片生成并复制，可在本地反复刷新")
+                    Spacer()
+                }
+                LazyVGrid(
+                    columns: [
+                        GridItem(.flexible(), spacing: 8),
+                        GridItem(.flexible(), spacing: 8)
+                    ],
+                    spacing: 8
+                ) {
+                    ForEach(RandomDataType.allCases) { type in
+                        randomDataCard(type)
+                    }
+                }
+            }
+            .padding(1)
+        }
+    }
+
+    private var variableNameCard: some View {
+        let conversion = VariableNameTransformer.convert(
+            variableInput,
+            defaultStyle: model.variableNamingStyle
+        )
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Image(systemName: "textformat.abc.dottedunderline")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(Palette.accent)
+                    .frame(width: 28, height: 28)
+                    .background(Palette.accentSoft, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                TextField("例如：xt user profile / 用户 名称", text: $variableInput)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 12))
+                Menu {
+                    ForEach(VariableNamingStyle.allCases) { style in
+                        Button {
+                            model.variableNamingStyle = style
+                        } label: {
+                            if style == model.variableNamingStyle {
+                                Label("\(style.title) · \(style.shortcut)", systemImage: "checkmark")
+                            } else {
+                                Text("\(style.title) · \(style.shortcut)")
+                            }
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 5) {
+                        Text(conversion.style.title)
+                        Text(conversion.style.shortcut)
+                            .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                            .foregroundStyle(Palette.muted)
+                        Image(systemName: "chevron.down")
+                            .font(.system(size: 8, weight: .bold))
+                            .foregroundStyle(Palette.muted)
+                    }
+                    .font(.system(size: 10.5, weight: .medium))
+                    .padding(.horizontal, 8)
+                    .frame(height: 28)
+                    .background(Palette.background, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous).stroke(Palette.line))
+                }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize()
+            }
+
+            HStack(spacing: 8) {
+                Text(conversion.value.isEmpty ? "转换结果会显示在这里" : conversion.value)
+                    .font(.system(size: 13, weight: conversion.value.isEmpty ? .regular : .medium,
+                                  design: .monospaced))
+                    .foregroundStyle(conversion.value.isEmpty ? Palette.muted : Palette.ink)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                if conversion.usedCommand {
+                    Text("命令 \(conversion.style.shortcut)")
+                        .font(.system(size: 8.5, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(Palette.accent)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 3)
+                        .background(Palette.accentSoft, in: Capsule())
+                }
+                Button {
+                    guard !conversion.value.isEmpty else { return }
+                    onCopyText(conversion.value)
+                } label: {
+                    Label("复制", systemImage: "doc.on.doc")
+                        .font(.system(size: 10.5, weight: .semibold))
+                        .padding(.horizontal, 9)
+                        .frame(height: 27)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(conversion.value.isEmpty ? Palette.muted : .white)
+                .background(conversion.value.isEmpty ? Palette.ink.opacity(0.06) : Palette.accent,
+                            in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                .disabled(conversion.value.isEmpty)
+            }
+            .padding(.horizontal, 10)
+            .frame(height: 38)
+            .background(Palette.background, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(Palette.line))
+
+            HStack(spacing: 6) {
+                Image(systemName: "bolt.fill")
+                    .font(.system(size: 8))
+                    .foregroundStyle(Palette.accent)
+                Text("命令前缀")
+                    .font(.system(size: 9.5, weight: .semibold))
+                ForEach(VariableNamingStyle.allCases) { style in
+                    Text("\(style.shortcut) \(style.title)")
+                        .font(.system(size: 9, design: .monospaced))
+                        .foregroundStyle(Palette.muted)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 3)
+                        .background(Palette.ink.opacity(0.045), in: Capsule())
+                }
+                Spacer(minLength: 0)
+                Text(model.variableNamingHotkey.symbol)
+                    .font(.system(size: 8.5, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(Palette.muted)
+            }
+        }
+        .padding(12)
+        .background(Palette.panel, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(Palette.line))
+    }
+
+    private func randomDataCard(_ type: RandomDataType) -> some View {
+        Button {
+            let value = RandomDataGenerator.generate(type)
+            generatedValues[type] = value
+            onCopyText(value)
+        } label: {
+            VStack(alignment: .leading, spacing: 7) {
+                HStack(spacing: 7) {
+                    Image(systemName: type.symbol)
+                        .font(.system(size: 10.5, weight: .semibold))
+                        .foregroundStyle(Palette.accent)
+                        .frame(width: 24, height: 24)
+                        .background(Palette.accentSoft, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                    Text(type.title)
+                        .font(.system(size: 11, weight: .semibold))
+                    Spacer()
+                    Image(systemName: "arrow.clockwise")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(Palette.muted)
+                }
+                Text(generatedValues[type] ?? "点击生成并复制")
+                    .font(.system(size: 10.5, design: .monospaced))
+                    .foregroundStyle(generatedValues[type] == nil ? Palette.muted : Palette.ink)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Palette.panel, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).stroke(Palette.line))
+        }
+        .buttonStyle(.plain)
+        .help("生成新的\(type.title)并复制")
+        .accessibilityLabel("生成并复制\(type.title)")
+    }
+
+    private func toolsSectionTitle(_ title: String, detail: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 7) {
+            Text(title)
+                .font(.system(size: 12, weight: .semibold))
+            Text(detail)
+                .font(.system(size: 9.5))
+                .foregroundStyle(Palette.muted)
+        }
+    }
+
+    private func seedGeneratedValues() {
+        guard generatedValues.isEmpty else { return }
+        for type in RandomDataType.allCases {
+            generatedValues[type] = RandomDataGenerator.generate(type)
+        }
+    }
+
     private var footer: some View {
         VStack(spacing: 6) {
-            HStack(spacing: 7) {
-                keyHint("↑ ↓", label: "选择")
-                keyHint("↩", label: "复制")
-                keyHint("Esc", label: "关闭")
-                Spacer()
-                if !history.monitorsSystem {
-                    Label("记录已暂停", systemImage: "pause.circle")
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(Palette.warning)
+            if history.section == .history {
+                HStack(spacing: 7) {
+                    keyHint("↑ ↓", label: "选择")
+                    keyHint("↩", label: "复制")
+                    keyHint("Esc", label: "关闭")
+                    Spacer()
+                    if !history.monitorsSystem {
+                        Label("记录已暂停", systemImage: "pause.circle")
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundStyle(Palette.warning)
+                    }
+                }
+            } else {
+                HStack(spacing: 7) {
+                    keyHint(model.variableNamingHotkey.symbol, label: "选中文字转变量名")
+                    Spacer()
+                    Text("测试数据仅用于开发与演示")
+                        .font(.system(size: 9.5))
+                        .foregroundStyle(Palette.muted)
                 }
             }
             if !history.message.isEmpty {

@@ -15,7 +15,7 @@ enum BrandArtwork {
             return true
         }
         image.isTemplate = colorHex == nil
-        image.accessibilityDescription = "汪拍小狗"
+        image.accessibilityDescription = "PawShot 小狗"
         return image
     }
 
