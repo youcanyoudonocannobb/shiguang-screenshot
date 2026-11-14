@@ -165,6 +165,29 @@ struct EditorFeatureChecks {
         try require(scrollMode == .manual, "Manual long screenshot must reach its controller")
     }
 
+    static func defaultPreferences() async throws {
+        let suite = "Shiguang.DefaultPreferencesChecks.\(UUID())"
+        let defaults = UserDefaults(suiteName: suite)!
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { defaults.removePersistentDomain(forName: suite); try? FileManager.default.removeItem(at: folder) }
+
+        defaults.set(TranslationProvider.ai.rawValue, forKey: "translationProvider")
+        let first = AppModel(historyDirectory: folder, preferences: defaults)
+        try require(first.translationProvider == .apple,
+                    "A first run upgraded from an older version must default to Apple translation")
+        try require(first.showsMenuBarIcon && first.menuBarDogStyle == .system,
+                    "Menu bar visibility and monochrome dog must use safe defaults")
+
+        first.translationProvider = .ai
+        first.showsMenuBarIcon = false
+        first.menuBarDogStyle = .lake
+        let second = AppModel(historyDirectory: folder, preferences: defaults)
+        try require(second.translationProvider == .ai,
+                    "A translation engine explicitly selected after migration must persist")
+        try require(!second.showsMenuBarIcon && second.menuBarDogStyle == .lake,
+                    "Menu bar visibility and dog colour must persist across launches")
+    }
+
     static func manualHotkeyInput() async throws {
         let compact = try requireValue(HotkeySettings.parseInput("⌥⇧K"),
                                        "Compact modifier notation must be accepted")
@@ -519,10 +542,17 @@ struct EditorFeatureChecks {
         try require(bounds.contains(moved) && moved.size == initial.size, "Moving must preserve size and remain on the original display")
         let barSize = CGSize(width: 600, height: 46)
         let below = CaptureSelectionGeometry.toolbarFrame(selection: initial, size: barSize, visible: bounds)
-        try require(abs(below.maxY - (initial.minY - 2)) < 0.01 && bounds.contains(below), "Toolbar must sit immediately below the selection")
+        try require(abs(below.maxY - (initial.minY - 10)) < 0.01 && bounds.contains(below),
+                    "Toolbar must default to a 10pt gap below the selection")
         let low = CGRect(x: 800, y: 0, width: 100, height: 80)
         let above = CaptureSelectionGeometry.toolbarFrame(selection: low, size: barSize, visible: bounds)
-        try require(above.minY == low.maxY + 2 && bounds.contains(above), "A bottom-edge crop must keep every control reachable above it")
+        try require(above.minY == low.maxY + 10 && bounds.contains(above),
+                    "A bottom-edge crop must attach above with the same 10pt gap")
+        let tall = CGRect(x: 280, y: 0, width: 180, height: 700)
+        let side = CaptureSelectionGeometry.toolbarFrame(
+            selection: tall, size: CGSize(width: 220, height: 46), visible: bounds)
+        try require(side.minX == tall.maxX + 10 && bounds.contains(side),
+                    "A full-height selection must attach to the nearest horizontal edge")
     }
 
     static func retinaCropAndMarkAnchors() async throws {
@@ -740,6 +770,7 @@ struct EditorFeatureChecks {
             ("mosaic_changes_only_selected_pixels", mosaicPixels),
             ("cursor_anchored_zoom_and_limits", zoomGeometry),
             ("editor_close_translation_undo_and_record_actions", editorActions),
+            ("apple_translation_and_menu_bar_defaults", defaultPreferences),
             ("cancel_and_escape_dismiss_draft_windows", draftCancellationDismissesWindows),
             ("text_translation_requires_explicit_entry", textTranslationRequiresExplicitEntry),
             ("draft_commits_only_after_confirmation", draftCommitIsTransactional),

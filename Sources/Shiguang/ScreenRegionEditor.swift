@@ -207,25 +207,20 @@ private final class SelectionDecorationView: NSView {
     var scale: CGFloat = 1
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
     override func draw(_ dirtyRect: NSRect) {
-        let green = NSColor(hex: "7ED3A8")
         if let context = NSGraphicsContext.current?.cgContext {
-            context.setStrokeColor(green.cgColor)
-            context.setLineWidth(1)
-            context.setLineDash(phase: 0, lengths: [4, 3])
-            context.stroke(selection)
-        }
-        for handle in SelectionHandle.allCases {
-            let p = handle.point(in: selection)
-            let dot = NSBezierPath(ovalIn: CGRect(x: p.x - 3, y: p.y - 3, width: 6, height: 6))
-            green.setFill(); dot.fill()
+            SelectionChrome.draw(in: selection, context: context)
         }
         let text = "\(Int((selection.width * scale).rounded())) × \(Int((selection.height * scale).rounded())) px" as NSString
         let attributes: [NSAttributedString.Key: Any] = [.font: NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .medium), .foregroundColor: NSColor.white]
         let size = text.size(withAttributes: attributes)
         let y = selection.maxY + size.height + 8 < bounds.maxY ? selection.maxY + 4 : selection.maxY - size.height - 8
         let badge = CGRect(x: min(selection.minX, bounds.maxX - size.width - 14), y: y, width: size.width + 14, height: size.height + 6)
-        NSColor(hex: "1E2123").setFill()
+        NSColor(hex: "172A38").withAlphaComponent(0.92).setFill()
         NSBezierPath(roundedRect: badge, xRadius: 4, yRadius: 4).fill()
+        SelectionChrome.accent.withAlphaComponent(0.5).setStroke()
+        let badgeBorder = NSBezierPath(roundedRect: badge, xRadius: 4, yRadius: 4)
+        badgeBorder.lineWidth = 1
+        badgeBorder.stroke()
         text.draw(at: CGPoint(x: badge.minX + 7, y: badge.minY + 3), withAttributes: attributes)
         setAccessibilityLabel(text as String)
     }

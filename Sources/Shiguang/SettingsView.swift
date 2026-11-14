@@ -37,7 +37,7 @@ enum ShiguangSettingsPage: String, CaseIterable, Identifiable {
 
     var summary: String {
         switch self {
-        case .general: return "快速截图、运行状态和常用操作"
+        case .general: return "启动、菜单栏与常用操作"
         case .screenshot: return "截图流程、识别和历史记录"
         case .translation: return "翻译引擎、默认语言和 AI 接口"
         case .clipboard: return "系统剪贴板历史、快捷键和本机保存"
@@ -45,7 +45,7 @@ enum ShiguangSettingsPage: String, CaseIterable, Identifiable {
         case .history: return "查看最近截图、识别文字和译文"
         case .privacy: return "屏幕访问、本机处理和本地数据"
         case .tools: return "导入图片、文字翻译和体验示例"
-        case .about: return "版本、运行方式和隐私说明"
+        case .about: return "版本、开源地址和隐私说明"
         }
     }
 
@@ -66,7 +66,8 @@ enum ShiguangSettingsPage: String, CaseIterable, Identifiable {
     var keywords: [String] {
         switch self {
         case .general:
-            return ["截图", "开始", "菜单栏", "状态", "权限", "剪贴板", "快捷键", "翻译"]
+            return ["截图", "开始", "菜单栏", "状态", "权限", "剪贴板", "快捷键", "翻译",
+                    "开机", "启动", "登录项", "小狗", "颜色", "图标"]
         case .screenshot:
             return ["自动识别", "OCR", "文字识别", "自动翻译", "历史", "保存", "截图流程", "确认", "复制"]
         case .translation:
@@ -85,7 +86,7 @@ enum ShiguangSettingsPage: String, CaseIterable, Identifiable {
         case .tools:
             return ["导入图片", "文字翻译", "翻译剪贴板", "体验示例", "OCR", "工具"]
         case .about:
-            return ["版本", "关于", "菜单栏", "Dock", "隐私", "更新"]
+            return ["版本", "关于", "GitHub", "开源", "菜单栏", "Dock", "隐私", "更新"]
         }
     }
 
@@ -207,7 +208,7 @@ struct SettingsView: View {
             Rectangle().fill(Palette.line.opacity(0.75)).frame(height: 1)
             HStack(spacing: 6) {
                 Image(systemName: "menubar.rectangle").font(.system(size: 11))
-                Text("菜单栏常驻").font(.system(size: 10.5))
+                Text(model.showsMenuBarIcon ? "菜单栏常驻" : "菜单栏已隐藏").font(.system(size: 10.5))
                 Spacer(minLength: 0)
                 Text("v\(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "-")")
                     .font(.system(size: 10, design: .monospaced))
@@ -350,6 +351,31 @@ private struct SettingsDetailView: View {
     private var generalContent: some View {
         Group {
             SettingsOverviewStrip(model: model, clipboard: clipboard)
+            SettingsSection("启动与菜单栏", footer: model.launchAtLoginMessage) {
+                SettingsToggle(
+                    "登录时自动启动",
+                    detail: model.launchAtLoginRequiresApproval
+                        ? "等待你在系统设置中允许汪拍"
+                        : "登录 Mac 后自动在菜单栏运行",
+                    isOn: Binding(
+                        get: { model.launchAtLoginEnabled || model.launchAtLoginRequiresApproval },
+                        set: { model.setLaunchAtLogin($0) }
+                    )
+                )
+                if model.launchAtLoginRequiresApproval {
+                    SettingsSeparator()
+                    SettingsRow("系统登录项待确认", detail: "macOS 需要你手动允许一次") {
+                        Button("打开设置") { model.openLoginItemsSettings() }
+                    }
+                }
+                SettingsSeparator()
+                SettingsToggle("显示菜单栏小狗", detail: "关闭后仍可通过快捷键和重新打开应用使用",
+                               isOn: $model.showsMenuBarIcon)
+                SettingsSeparator()
+                SettingsRow("小狗样式", detail: "系统单色会随菜单栏明暗自动反色") {
+                    MenuBarDogStylePicker(selection: $model.menuBarDogStyle)
+                }
+            }
             SettingsSection("常用操作") {
                 SettingsActionRow(title: "区域截图", detail: "选中区域后，直接标注与编辑", symbol: "viewfinder",
                                   shortcut: model.captureHotkey.symbol) { model.capture() }
@@ -365,7 +391,8 @@ private struct SettingsDetailView: View {
             }
             SettingsSection("使用方式") {
                 SettingsRow("菜单栏运行", detail: "关闭窗口后仍可使用快捷键和菜单栏入口") {
-                    Text("已启用").foregroundStyle(Palette.muted)
+                    Text(model.showsMenuBarIcon ? "已启用" : "图标已隐藏")
+                        .foregroundStyle(Palette.muted)
                 }
                 SettingsSeparator()
                 PermissionActionRow(model: model)
@@ -628,9 +655,21 @@ private struct SettingsDetailView: View {
                 Spacer()
             }
             .padding(.vertical, 8)
+            SettingsSection("项目") {
+                SettingsActionRow(
+                    title: "GitHub",
+                    detail: "github.com/youcanyoudonocannobb/shiguang-screenshot",
+                    symbol: "link"
+                ) {
+                    if let url = URL(string: "https://github.com/youcanyoudonocannobb/shiguang-screenshot") {
+                        NSWorkspace.shared.open(url)
+                    }
+                }
+            }
             SettingsSection("运行方式") {
                 SettingsRow("菜单栏常驻", detail: "关闭窗口后继续运行，Dock 中不显示图标") {
-                    Text("已启用").foregroundStyle(Palette.muted)
+                    Text(model.showsMenuBarIcon ? "小狗图标" : "已隐藏")
+                        .foregroundStyle(Palette.muted)
                 }
             }
             SettingsFootnote("文字识别在本机处理。Apple 与 AI 翻译可在翻译设置中选择；使用 AI 时，文字会发送到你配置的服务。",
@@ -640,6 +679,45 @@ private struct SettingsDetailView: View {
 
     private func openDataDirectory() {
         if let directory = model.store?.directory { NSWorkspace.shared.open(directory) }
+    }
+}
+
+private struct MenuBarDogStylePicker: View {
+    @Binding var selection: MenuBarDogStyle
+
+    var body: some View {
+        HStack(spacing: 6) {
+            ForEach(MenuBarDogStyle.allCases) { style in
+                Button {
+                    selection = style
+                } label: {
+                    Image(nsImage: BrandArtwork.menuBarImage(colorHex: style.colorHex))
+                        .resizable()
+                        .renderingMode(style == .system ? .template : .original)
+                        .scaledToFit()
+                        .frame(width: 19, height: 17)
+                        .foregroundStyle(style == .system ? Palette.ink : Color.clear)
+                        .frame(width: 31, height: 29)
+                        .background(
+                            previewTint(style).opacity(selection == style ? 0.16 : 0.065),
+                            in: RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        )
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                .stroke(selection == style ? Palette.accent : Palette.line,
+                                        lineWidth: selection == style ? 1.5 : 1)
+                        }
+                }
+                .buttonStyle(.plain)
+                .help(style.title)
+                .accessibilityLabel("菜单栏小狗样式：\(style.title)")
+                .accessibilityAddTraits(selection == style ? .isSelected : [])
+            }
+        }
+    }
+
+    private func previewTint(_ style: MenuBarDogStyle) -> Color {
+        style.colorHex.map(Color.init(hex:)) ?? Palette.ink
     }
 }
 

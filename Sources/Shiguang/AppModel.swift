@@ -1,6 +1,7 @@
 import AppKit
 import Combine
 import NaturalLanguage
+import ServiceManagement
 import Translation
 import UniformTypeIdentifiers
 
@@ -28,11 +29,24 @@ final class AppModel: ObservableObject {
     @Published var translatedText = ""
     @Published var sourceLanguage = "auto"
     @Published var targetLanguage = "zh-Hans"
-    @Published var translationProvider: TranslationProvider = TranslationProvider(
-        rawValue: UserDefaults.standard.string(forKey: "translationProvider") ?? ""
-    ) ?? .apple {
-        didSet { UserDefaults.standard.set(translationProvider.rawValue, forKey: "translationProvider") }
+    @Published var translationProvider: TranslationProvider {
+        didSet { preferences.set(translationProvider.rawValue, forKey: "translationProvider") }
     }
+    @Published var showsMenuBarIcon: Bool {
+        didSet {
+            preferences.set(showsMenuBarIcon, forKey: "showsMenuBarIcon")
+            statusItemPreferencesChanged?()
+        }
+    }
+    @Published var menuBarDogStyle: MenuBarDogStyle {
+        didSet {
+            preferences.set(menuBarDogStyle.rawValue, forKey: "menuBarDogStyle")
+            statusItemPreferencesChanged?()
+        }
+    }
+    @Published private(set) var launchAtLoginEnabled = false
+    @Published private(set) var launchAtLoginRequiresApproval = false
+    @Published private(set) var launchAtLoginMessage: String?
     @Published var aiBaseURL: String = UserDefaults.standard.string(forKey: "aiBaseURL")
         ?? AITranslationConfiguration().baseURL {
         didSet { UserDefaults.standard.set(aiBaseURL, forKey: "aiBaseURL") }
@@ -126,6 +140,7 @@ final class AppModel: ObservableObject {
     var pinImage: ((NSImage) -> Void)?
     var hotkeysChanged: (() -> Void)?
     var hotkeyCaptureChanged: ((Bool) -> Void)?
+    var statusItemPreferencesChanged: (() -> Void)?
     var restartApp: (() -> Void)?
     var beginRecording: ((RecordingFormat, CGRect?) -> Void)?
     var saveRecording: (() -> Void)?
@@ -189,6 +204,21 @@ final class AppModel: ObservableObject {
         self.preferences = preferences
         self.recognizeImage = recognizeImage
         self.ocrTiming = ocrTiming
+        let initialTranslationProvider: TranslationProvider
+        if preferences.bool(forKey: "translationProvider.defaultApple.v1") {
+            initialTranslationProvider = TranslationProvider(
+                rawValue: preferences.string(forKey: "translationProvider") ?? ""
+            ) ?? .apple
+        } else {
+            initialTranslationProvider = .apple
+            preferences.set(TranslationProvider.apple.rawValue, forKey: "translationProvider")
+            preferences.set(true, forKey: "translationProvider.defaultApple.v1")
+        }
+        translationProvider = initialTranslationProvider
+        showsMenuBarIcon = preferences.object(forKey: "showsMenuBarIcon") as? Bool ?? true
+        menuBarDogStyle = MenuBarDogStyle(
+            rawValue: preferences.string(forKey: "menuBarDogStyle") ?? ""
+        ) ?? .system
         autoOCR = preferences.object(forKey: "autoOCR.v2") as? Bool
             ?? preferences.object(forKey: "autoOCR") as? Bool ?? false
         autoTranslate = preferences.bool(forKey: "autoTranslate")
@@ -204,6 +234,55 @@ final class AppModel: ObservableObject {
         } catch {
             errorMessage = "读取历史失败：\(error.localizedDescription)。原文件已保留。"
         }
+    }
+
+    func refreshLaunchAtLoginState() {
+        switch SMAppService.mainApp.status {
+        case .enabled:
+            launchAtLoginEnabled = true
+            launchAtLoginRequiresApproval = false
+        case .requiresApproval:
+            launchAtLoginEnabled = false
+            launchAtLoginRequiresApproval = true
+        case .notRegistered, .notFound:
+            launchAtLoginEnabled = false
+            launchAtLoginRequiresApproval = false
+        @unknown default:
+            launchAtLoginEnabled = false
+            launchAtLoginRequiresApproval = false
+        }
+        if launchAtLoginEnabled {
+            launchAtLoginMessage = nil
+        }
+    }
+
+    func setLaunchAtLogin(_ enabled: Bool) {
+        launchAtLoginMessage = nil
+        do {
+            if enabled {
+                guard SMAppService.mainApp.status != .enabled else {
+                    refreshLaunchAtLoginState()
+                    return
+                }
+                try SMAppService.mainApp.register()
+            } else {
+                guard SMAppService.mainApp.status != .notRegistered else {
+                    refreshLaunchAtLoginState()
+                    return
+                }
+                try SMAppService.mainApp.unregister()
+            }
+        } catch {
+            launchAtLoginMessage = "无法更新登录项：\(error.localizedDescription)"
+        }
+        refreshLaunchAtLoginState()
+        if launchAtLoginRequiresApproval {
+            launchAtLoginMessage = "已提交登录项，请在“系统设置 > 通用 > 登录项”中允许汪拍。"
+        }
+    }
+
+    func openLoginItemsSettings() {
+        SMAppService.openSystemSettingsLoginItems()
     }
 
     private static func loadHotkey(prefix: String, defaultKey: String) -> HotkeySettings {

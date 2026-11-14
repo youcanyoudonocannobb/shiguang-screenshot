@@ -108,6 +108,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         model.beginScrollCapture = { [weak self] mode, region in self?.beginScrollCapture(mode, region: region) }
         model.showClipboard = { [weak self] in self?.showClipboardWindow() }
         model.translateSelection = { [weak self] in self?.translateSelection() }
+        model.statusItemPreferencesChanged = { [weak self] in self?.applyStatusItemPreferences() }
         model.publishImage = { [unowned self] image in try self.clipboard.copyImage(image) }
         model.publishText = { [unowned self] text in try self.clipboard.copyText(text) }
         model.didCopyCapture = { [weak self] in self?.restoreCaptureApplication() }
@@ -163,6 +164,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             return event
         }
         setupStatusItem()
+        model.refreshLaunchAtLoginState()
         setupHotkeys()
         model.hotkeysChanged = { [weak self] in self?.rebindHotkeys() }
         model.hotkeyCaptureChanged = { [weak self] active in self?.setHotkeyCaptureActive(active) }
@@ -223,6 +225,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
 
     func applicationDidBecomeActive(_ notification: Notification) {
         model.refreshPermissionStatus()
+        model.refreshLaunchAtLoginState()
     }
 
     @objc func showWorkspace() {
@@ -447,20 +450,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     }
 
     @objc private func about() {
+        let credits = NSMutableAttributedString(
+            string: "截取片刻，读懂世界。\n原生 macOS 截图、文字识别与翻译。\n\n",
+            attributes: [.font: NSFont.systemFont(ofSize: NSFont.smallSystemFontSize)]
+        )
+        if let url = URL(string: "https://github.com/youcanyoudonocannobb/shiguang-screenshot") {
+            credits.append(NSAttributedString(
+                string: "GitHub  github.com/youcanyoudonocannobb/shiguang-screenshot",
+                attributes: [
+                    .font: NSFont.systemFont(ofSize: NSFont.smallSystemFontSize),
+                    .link: url
+                ]
+            ))
+        }
         NSApp.orderFrontStandardAboutPanel(options: [
             .applicationName: "汪拍",
             .applicationVersion: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "",
             .version: Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "",
-            .credits: NSAttributedString(string: "截取片刻，读懂世界。\n原生 macOS 截图、文字识别与翻译。")
+            .credits: credits
         ])
     }
 
     private func setupStatusItem() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-        statusItem.isVisible = true
-        statusItem.button?.image = BrandArtwork.menuBarImage()
-        statusItem.button?.toolTip = "汪拍 · 截图、识别与剪贴板"
-        statusItem.button?.setAccessibilityLabel("汪拍菜单")
         let menu = NSMenu()
         menu.addItem(menuItem("区域截图                  \(model.captureHotkey.symbol)",
                               action: #selector(capture), symbol: "viewfinder"))
@@ -487,6 +499,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         menu.addItem(.separator())
         menu.addItem(menuItem("退出汪拍", action: #selector(quit), symbol: "power"))
         statusItem.menu = menu
+        applyStatusItemPreferences()
+    }
+
+    private func applyStatusItemPreferences() {
+        guard let statusItem else { return }
+        statusItem.isVisible = model.showsMenuBarIcon
+        statusItem.button?.image = BrandArtwork.menuBarImage(colorHex: model.menuBarDogStyle.colorHex)
+        statusItem.button?.toolTip = "汪拍 · 截图、识别与剪贴板"
+        statusItem.button?.setAccessibilityLabel("汪拍菜单")
     }
 
     private func setupHotkeys() {

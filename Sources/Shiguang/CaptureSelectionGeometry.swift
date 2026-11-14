@@ -40,13 +40,33 @@ enum CaptureSelectionGeometry {
         return CGRect(x: left, y: bottom, width: right - left, height: top - bottom)
     }
 
-    static func toolbarFrame(selection: CGRect, size: CGSize, visible: CGRect, gap: CGFloat = 2) -> CGRect {
-        let x = min(max(visible.minX + 4, selection.maxX - size.width), visible.maxX - size.width - 4)
-        let below = selection.minY - gap - size.height
-        let y = below >= visible.minY + 4 ? below :
-            (selection.maxY + gap + size.height <= visible.maxY - 4 ? selection.maxY + gap :
-                max(visible.minY + 4, min(below, visible.maxY - size.height - 4)))
-        return CGRect(origin: CGPoint(x: max(visible.minX, x), y: y), size: size)
+    static func toolbarFrame(selection: CGRect, size: CGSize, visible: CGRect, gap: CGFloat = 10) -> CGRect {
+        let safe = visible.insetBy(dx: 4, dy: 4)
+        let centeredX = selection.midX - size.width / 2
+        let centeredY = selection.midY - size.height / 2
+        let x = min(max(safe.minX, centeredX), max(safe.minX, safe.maxX - size.width))
+        let y = min(max(safe.minY, centeredY), max(safe.minY, safe.maxY - size.height))
+
+        // Prefer the bottom edge. If the selection is near the bottom, move above;
+        // for a near full-height selection, attach to its right or left edge.
+        let candidates = [
+            CGRect(x: x, y: selection.minY - gap - size.height, width: size.width, height: size.height),
+            CGRect(x: x, y: selection.maxY + gap, width: size.width, height: size.height),
+            CGRect(x: selection.maxX + gap, y: y, width: size.width, height: size.height),
+            CGRect(x: selection.minX - gap - size.width, y: y, width: size.width, height: size.height)
+        ]
+        if let fitting = candidates.first(where: { safe.contains($0) }) { return fitting }
+
+        let fallback = candidates.max {
+            $0.intersection(safe).width * $0.intersection(safe).height <
+                $1.intersection(safe).width * $1.intersection(safe).height
+        } ?? candidates[0]
+        return CGRect(
+            x: min(max(safe.minX, fallback.minX), max(safe.minX, safe.maxX - size.width)),
+            y: min(max(safe.minY, fallback.minY), max(safe.minY, safe.maxY - size.height)),
+            width: size.width,
+            height: size.height
+        )
     }
 
     static func crop(_ image: NSImage, rect: CGRect, displaySize: CGSize) -> NSImage? {
@@ -69,5 +89,39 @@ enum CaptureSelectionGeometry {
         }
         if let font = mark.fontSize { mapped.fontSize = font * old.height / new.height }
         return mapped
+    }
+}
+
+enum SelectionChrome {
+    static let accent = NSColor(srgbRed: 0.25, green: 0.77, blue: 0.94, alpha: 1)
+    static let mask = NSColor(srgbRed: 0.025, green: 0.075, blue: 0.11, alpha: 0.52)
+
+    static func draw(in rect: CGRect, context: CGContext, showsHandles: Bool = true) {
+        guard rect.width > 0, rect.height > 0 else { return }
+        context.saveGState()
+
+        let border = rect.insetBy(dx: 1, dy: 1)
+        context.setShadow(offset: .zero, blur: 12, color: accent.withAlphaComponent(0.55).cgColor)
+        context.setStrokeColor(accent.cgColor)
+        context.setLineWidth(2.5)
+        context.stroke(border)
+
+        context.setShadow(offset: .zero, blur: 0, color: nil)
+        context.setStrokeColor(NSColor.white.withAlphaComponent(0.72).cgColor)
+        context.setLineWidth(0.75)
+        context.stroke(rect.insetBy(dx: 0.5, dy: 0.5))
+
+        if showsHandles && rect.width >= 34 && rect.height >= 34 {
+            for handle in SelectionHandle.allCases {
+                let point = handle.point(in: rect)
+                let dot = CGRect(x: point.x - 4, y: point.y - 4, width: 8, height: 8)
+                context.setFillColor(NSColor.white.withAlphaComponent(0.98).cgColor)
+                context.fillEllipse(in: dot)
+                context.setStrokeColor(accent.cgColor)
+                context.setLineWidth(2)
+                context.strokeEllipse(in: dot)
+            }
+        }
+        context.restoreGState()
     }
 }

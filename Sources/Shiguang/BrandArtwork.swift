@@ -1,8 +1,8 @@
 import AppKit
 
 enum BrandArtwork {
-    static func menuBarImage() -> NSImage {
-        let image = NSImage(size: NSSize(width: 20, height: 18), flipped: false) { rect in
+    static func menuBarImage(colorHex: String? = nil) -> NSImage {
+        let monochrome = NSImage(size: NSSize(width: 20, height: 18), flipped: false) { rect in
             NSGraphicsContext.saveGraphicsState()
             let transform = AffineTransform(scaleByX: rect.width / 100, byY: rect.height / 100)
             (transform as NSAffineTransform).concat()
@@ -10,9 +10,28 @@ enum BrandArtwork {
             NSGraphicsContext.restoreGraphicsState()
             return true
         }
-        image.isTemplate = true
+        let image: NSImage
+        if let colorHex {
+            image = NSImage(size: monochrome.size, flipped: false) { rect in
+                color(hex: colorHex).setFill()
+                rect.fill()
+                monochrome.draw(in: rect, from: .zero, operation: .destinationIn, fraction: 1)
+                return true
+            }
+            image.isTemplate = false
+        } else {
+            image = monochrome
+            image.isTemplate = true
+        }
         image.accessibilityDescription = "汪拍小狗"
         return image
+    }
+
+    private static func color(hex: String) -> NSColor {
+        let value = UInt64(hex.trimmingCharacters(in: CharacterSet(charactersIn: "#")), radix: 16) ?? 0
+        return NSColor(srgbRed: CGFloat((value >> 16) & 255) / 255,
+                       green: CGFloat((value >> 8) & 255) / 255,
+                       blue: CGFloat(value & 255) / 255, alpha: 1)
     }
 
     static func drawAppIcon() {

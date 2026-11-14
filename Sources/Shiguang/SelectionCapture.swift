@@ -58,6 +58,7 @@ final class SelectionCaptureController: NSObject {
             let view = SelectionView(frame: NSRect(origin: .zero, size: screen.frame.size))
             view.controller = self
             view.screenFrame = screen.frame
+            view.backingScale = screen.backingScaleFactor
             let window = SelectionWindow(contentRect: screen.frame,
                                   styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
             window.contentView = view
@@ -235,6 +236,7 @@ final class SelectionWindow: NSPanel {
 final class SelectionView: NSView {
     var controller: SelectionCaptureController?
     var screenFrame = CGRect.zero
+    var backingScale: CGFloat = 1
 
     override var acceptsFirstResponder: Bool { true }
     // The overlay is a nonactivating panel: without this the first click is swallowed
@@ -252,7 +254,7 @@ final class SelectionView: NSView {
     }
 
     override func draw(_ dirtyRect: NSRect) {
-        NSColor.black.withAlphaComponent(0.24).setFill()
+        SelectionChrome.mask.setFill()
         NSBezierPath(rect: bounds).fill()
         let prompt = (controller?.prompt ?? "") as NSString
         let attributes: [NSAttributedString.Key: Any] = [
@@ -261,8 +263,12 @@ final class SelectionView: NSView {
         let size = prompt.size(withAttributes: attributes)
         let badge = CGRect(x: (bounds.width - size.width) / 2 - 16, y: bounds.height - 86,
                            width: size.width + 32, height: 40)
-        NSColor.black.withAlphaComponent(0.75).setFill()
+        NSColor(hex: "172A38").withAlphaComponent(0.9).setFill()
         NSBezierPath(roundedRect: badge, xRadius: 12, yRadius: 12).fill()
+        SelectionChrome.accent.withAlphaComponent(0.35).setStroke()
+        let promptBorder = NSBezierPath(roundedRect: badge, xRadius: 12, yRadius: 12)
+        promptBorder.lineWidth = 1
+        promptBorder.stroke()
         prompt.draw(at: CGPoint(x: badge.minX + 16, y: badge.minY + 10), withAttributes: attributes)
         if let rect = controller?.selection(in: self) {
             if let context = NSGraphicsContext.current?.cgContext {
@@ -271,14 +277,13 @@ final class SelectionView: NSView {
                 context.fill(rect)
                 context.restoreGState()
             }
-            NSColor.white.withAlphaComponent(0.9).setStroke()
-            let border = NSBezierPath(rect: rect)
-            border.lineWidth = 1
-            border.stroke()
+            if let context = NSGraphicsContext.current?.cgContext {
+                SelectionChrome.draw(in: rect, context: context)
+            }
 
             // Real-time dimensions badge
             if rect.width > 20 && rect.height > 15 {
-                let text = "\(Int(rect.width)) × \(Int(rect.height))" as NSString
+                let text = "\(Int((rect.width * backingScale).rounded())) × \(Int((rect.height * backingScale).rounded())) px" as NSString
                 let font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .medium)
                 let attrs: [NSAttributedString.Key: Any] = [
                     .font: font,
@@ -288,8 +293,12 @@ final class SelectionView: NSView {
                 let badgeY = rect.minY >= textSize.height + 10 ? rect.minY - textSize.height - 8 : rect.maxY + 6
                 let badgeRect = NSRect(x: rect.minX, y: max(4, badgeY),
                                        width: textSize.width + 12, height: textSize.height + 6)
-                NSColor.black.withAlphaComponent(0.72).setFill()
+                NSColor(hex: "172A38").withAlphaComponent(0.9).setFill()
                 NSBezierPath(roundedRect: badgeRect, xRadius: 4, yRadius: 4).fill()
+                SelectionChrome.accent.withAlphaComponent(0.45).setStroke()
+                let badgeBorder = NSBezierPath(roundedRect: badgeRect, xRadius: 4, yRadius: 4)
+                badgeBorder.lineWidth = 1
+                badgeBorder.stroke()
                 text.draw(at: NSPoint(x: badgeRect.minX + 6, y: badgeRect.minY + 3), withAttributes: attrs)
             }
         }

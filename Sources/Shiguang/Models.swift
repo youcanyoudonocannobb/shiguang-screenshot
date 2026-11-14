@@ -14,6 +14,36 @@ enum ScrollCaptureMode: String, CaseIterable {
     var title: String { self == .automatic ? "自动长截图" : "手动长截图" }
 }
 
+enum MenuBarDogStyle: String, Codable, CaseIterable, Identifiable {
+    case system
+    case lake
+    case coral
+    case teal
+    case amber
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .system: return "系统单色"
+        case .lake: return "湖蓝"
+        case .coral: return "珊瑚"
+        case .teal: return "青绿"
+        case .amber: return "琥珀"
+        }
+    }
+
+    var colorHex: String? {
+        switch self {
+        case .system: return nil
+        case .lake: return "17698B"
+        case .coral: return "B84C45"
+        case .teal: return "2C7566"
+        case .amber: return "9A641B"
+        }
+    }
+}
+
 enum MarkTool: String, Codable, CaseIterable {
     case pointer, rectangle, ellipse, line, arrow, pen, highlighter, number, text, mosaic, redact, picker
 
