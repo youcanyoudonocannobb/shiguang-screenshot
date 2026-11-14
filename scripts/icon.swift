@@ -13,9 +13,9 @@ for points in [16, 32, 128, 256, 512] {
         NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: bitmap)
         let transform = AffineTransform(scale: CGFloat(size) / 1024)
         (transform as NSAffineTransform).concat()
-        NSColor(srgbRed: 0.94, green: 0.93, blue: 0.89, alpha: 1).setFill()
-        NSBezierPath(roundedRect: NSRect(x: 50, y: 50, width: 924, height: 924), xRadius: 210, yRadius: 210).fill()
-        NSColor(srgbRed: 0.15, green: 0.235, blue: 0.208, alpha: 1).setStroke()
+        NSColor(srgbRed: 0.965, green: 0.965, blue: 0.952, alpha: 1).setFill()
+        NSBezierPath(roundedRect: NSRect(x: 50, y: 50, width: 924, height: 924), xRadius: 224, yRadius: 224).fill()
+        NSColor(srgbRed: 0.145, green: 0.16, blue: 0.155, alpha: 1).setStroke()
         let path = NSBezierPath()
         path.lineWidth = 58
         path.lineCapStyle = .round
@@ -30,7 +30,7 @@ for points in [16, 32, 128, 256, 512] {
             path.line(to: NSPoint(x: x + dx, y: y))
         }
         path.stroke()
-        NSColor(srgbRed: 0.85, green: 0.369, blue: 0.227, alpha: 1).setFill()
+        NSColor(srgbRed: 0.69, green: 0.34, blue: 0.23, alpha: 1).setFill()
         NSBezierPath(ovalIn: NSRect(x: 432, y: 432, width: 160, height: 160)).fill()
         NSGraphicsContext.restoreGraphicsState()
         let data = bitmap.representation(using: .png, properties: [:])!

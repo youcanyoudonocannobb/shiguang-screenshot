@@ -71,7 +71,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             .appendingPathComponent("Shiguang", isDirectory: true)
         clipboard = ClipboardHistory(directory: support.appendingPathComponent("Clipboard", isDirectory: true))
         makeMenu()
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 820, height: 620),
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 880, height: 620),
                               styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
                               backing: .buffered, defer: false)
         window.title = "拾光截图"
@@ -81,8 +81,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         window.titleVisibility = .hidden
         window.titlebarSeparatorStyle = .none
         window.isMovableByWindowBackground = true
-        window.backgroundColor = NSColor(hex: "F5F3ED")
-        window.contentMinSize = NSSize(width: 760, height: 540)
+        window.backgroundColor = NSColor(hex: "F6F6F3")
+        window.contentMinSize = NSSize(width: 820, height: 560)
         window.isReleasedWhenClosed = false
         window.delegate = self
         window.contentViewController = settingsContentController(
@@ -273,7 +273,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             panel.hidesOnDeactivate = true
             panel.level = .floating
             panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-            panel.backgroundColor = NSColor(hex: "F5F3ED")
+            panel.backgroundColor = NSColor(hex: "F6F6F3")
             panel.contentView = NSHostingView(rootView: ClipboardView(history: clipboard,
                 onCopy: { [weak self] entry in self?.copyClipboardEntry(entry) },
                 onClose: { [weak self] in self?.closeClipboardWindow() }))
@@ -560,7 +560,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
                                  styleMask: [.titled, .closable, .miniaturizable, .resizable],
                                  backing: .buffered, defer: false)
             panel.title = "拾光截图 · 快速编辑"
-            panel.backgroundColor = NSColor(hex: "F5F3ED")
+            panel.backgroundColor = NSColor(hex: "F6F6F3")
             panel.isReleasedWhenClosed = false
             panel.delegate = self
             panel.contentView = NSHostingView(rootView: CaptureEditorView(model: model))

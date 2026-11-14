@@ -53,27 +53,13 @@ enum ShiguangSettingsPage: String, CaseIterable, Identifiable {
         switch self {
         case .general: return "slider.horizontal.3"
         case .screenshot: return "viewfinder"
-        case .translation: return "character.bubble.fill"
-        case .clipboard: return "clipboard.fill"
+        case .translation: return "character.bubble"
+        case .clipboard: return "doc.on.clipboard"
         case .shortcuts: return "command"
         case .history: return "clock.arrow.circlepath"
-        case .privacy: return "lock.shield.fill"
-        case .tools: return "wrench.and.screwdriver.fill"
-        case .about: return "info.circle.fill"
-        }
-    }
-
-    var color: Color {
-        switch self {
-        case .general: return Color(hex: "66736D")
-        case .screenshot: return Color(hex: "D45D3C")
-        case .translation: return Color(hex: "2F795E")
-        case .clipboard: return Color(hex: "B97832")
-        case .shortcuts: return Color(hex: "596FA8")
-        case .history: return Color(hex: "8A7131")
-        case .privacy: return Color(hex: "456D60")
-        case .tools: return Color(hex: "806855")
-        case .about: return Color(hex: "314139")
+        case .privacy: return "lock.shield"
+        case .tools: return "square.grid.2x2"
+        case .about: return "info.circle"
         }
     }
 
@@ -129,13 +115,13 @@ struct SettingsView: View {
     var body: some View {
         HSplitView {
             sidebar
-                .frame(minWidth: 172, idealWidth: 196, maxWidth: 230)
+                .frame(minWidth: 184, idealWidth: 204, maxWidth: 236)
             SettingsDetailView(model: model, clipboard: clipboard, page: selection)
         }
         .navigationTitle(selection.title)
         .tint(Palette.accent)
         .preferredColorScheme(.light)
-        .frame(minWidth: 760, minHeight: 540)
+        .frame(minWidth: 780, minHeight: 560)
         .sheet(isPresented: $model.showsPermissionHelp) {
             permissionHelp
         }
@@ -160,16 +146,20 @@ struct SettingsView: View {
             brandHeader
             searchBar
                 .padding(.horizontal, 12)
-                .padding(.top, 4)
-                .padding(.bottom, 9)
+                .padding(.top, 2)
+                .padding(.bottom, 10)
 
             List(selection: selectionBinding) {
                 ForEach(ShiguangSettingsPage.groups) { group in
                     let pages = group.pages.filter { $0.matches(query) }
                     if !pages.isEmpty {
                         if let title = group.title {
-                            Section(title) {
+                            Section {
                                 rows(pages)
+                            } header: {
+                                Text(title)
+                                    .font(.system(size: 10, weight: .semibold))
+                                    .foregroundStyle(Palette.muted.opacity(0.9))
                             }
                         } else {
                             Section {
@@ -180,8 +170,6 @@ struct SettingsView: View {
                 }
             }
             .listStyle(.sidebar)
-            // Keep the sidebar on the app's cream surface; the default sidebar
-            // material made the list look like a separate grey panel.
             .scrollContentBackground(.hidden)
             .overlay {
                 if ShiguangSettingsPage.allCases.allSatisfy({ !$0.matches(query) }) {
@@ -193,7 +181,7 @@ struct SettingsView: View {
 
             sidebarFooter
         }
-        .background(SettingsSidebarBackdrop())
+        .background(Palette.sidebar)
     }
 
     private var brandHeader: some View {
@@ -201,32 +189,26 @@ struct SettingsView: View {
             Image(nsImage: NSApp.applicationIconImage)
                 .resizable()
                 .scaledToFit()
-                .frame(width: 34, height: 34)
-                .background(Palette.panel, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 9, style: .continuous)
-                        .stroke(Palette.line.opacity(0.9))
-                }
-                .shadow(color: Palette.shadow, radius: 4, y: 2)
+                .frame(width: 30, height: 30)
 
             VStack(alignment: .leading, spacing: 1) {
                 Text("拾光截图")
-                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                    .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(Palette.ink)
-                Text("截图、识别与剪贴板")
+                Text("截图 · 识别 · 剪贴板")
                     .font(.system(size: 10))
                     .foregroundStyle(Palette.muted)
             }
             Spacer(minLength: 4)
         }
-        .padding(.horizontal, 12)
-        .padding(.top, 11)
-        .padding(.bottom, 6)
+        .padding(.horizontal, 14)
+        .padding(.top, 14)
+        .padding(.bottom, 10)
         .accessibilityElement(children: .combine)
     }
 
     private var searchBar: some View {
-        HStack(spacing: 7) {
+        HStack(spacing: 6) {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(Palette.muted)
@@ -238,44 +220,40 @@ struct SettingsView: View {
                     query = ""
                 } label: {
                     Image(systemName: "xmark.circle.fill")
-                        .foregroundStyle(.secondary)
+                        .font(.system(size: 11))
+                        .foregroundStyle(Palette.muted)
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("清除搜索")
             }
         }
-        .padding(.horizontal, 10)
-        .frame(height: 34)
-        .background(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(Palette.panel.opacity(0.96))
-        )
+        .padding(.horizontal, 8)
+        .frame(height: 29)
+        .background(Palette.panel, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
         .overlay {
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .stroke(Palette.line.opacity(query.isEmpty ? 0.9 : 0.35))
+            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                .stroke(Palette.line, lineWidth: 1)
         }
-        .shadow(color: Palette.shadow.opacity(0.65), radius: 4, y: 1)
     }
 
     private var sidebarFooter: some View {
-        HStack(spacing: 7) {
+        HStack(spacing: 6) {
             Circle()
-                .fill(Color(hex: "4E9A72"))
-                .frame(width: 7, height: 7)
-                .shadow(color: Color(hex: "4E9A72").opacity(0.3), radius: 2)
+                .fill(Palette.success)
+                .frame(width: 6, height: 6)
             Text("菜单栏运行中")
-                .font(.system(size: 10, weight: .medium))
+                .font(.system(size: 10))
                 .foregroundStyle(Palette.muted)
             Spacer(minLength: 4)
             Text(versionLabel)
-                .font(.system(size: 9, weight: .medium, design: .monospaced))
+                .font(.system(size: 9.5, design: .monospaced))
                 .foregroundStyle(Palette.muted.opacity(0.8))
         }
-        .padding(.horizontal, 13)
-        .padding(.vertical, 10)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 11)
         .background(alignment: .top) {
             Rectangle()
-                .fill(Palette.line.opacity(0.65))
+                .fill(Palette.line.opacity(0.7))
                 .frame(height: 0.5)
         }
         .accessibilityElement(children: .combine)
@@ -303,9 +281,13 @@ struct SettingsView: View {
     private var permissionHelp: some View {
         VStack(alignment: .leading, spacing: 18) {
             HStack(spacing: 12) {
-                SettingsKindTile(symbol: "lock.shield.fill", color: ShiguangSettingsPage.privacy.color, size: 40)
+                Image(systemName: "lock.shield")
+                    .font(.system(size: 18, weight: .medium))
+                    .foregroundStyle(Palette.accent)
+                    .frame(width: 38, height: 38)
+                    .background(Palette.accentSoft, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("允许拾光访问屏幕").font(.title2.weight(.semibold))
+                    Text("允许拾光访问屏幕").font(.title3.weight(.semibold))
                     Text("仅在你主动截图、识别或录制时使用。")
                         .font(.callout)
                         .foregroundStyle(.secondary)
@@ -314,6 +296,7 @@ struct SettingsView: View {
             Text(model.screenPermission.title).font(.headline)
             Text(model.screenPermission.detail)
                 .font(.body)
+                .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             HStack {
                 Button("授予屏幕权限") { model.requestPermission() }
@@ -329,6 +312,7 @@ struct SettingsView: View {
         }
         .padding(24)
         .frame(width: 480)
+        .background(Palette.background)
     }
 }
 
@@ -339,10 +323,13 @@ private struct SettingsSidebarRow: View {
     var body: some View {
         Label {
             Text(page.title)
-                .font(.system(size: 12.5, weight: isSelected ? .semibold : .medium))
-                .foregroundStyle(isSelected ? Palette.ink : .primary)
+                .font(.system(size: 12.5, weight: isSelected ? .semibold : .regular))
+                .foregroundStyle(Palette.ink)
         } icon: {
-            SettingsKindTile(symbol: page.symbol, color: page.color, size: 24, prominent: isSelected)
+            Image(systemName: page.symbol)
+                .font(.system(size: 12.5, weight: .medium))
+                .foregroundStyle(isSelected ? Palette.accent : Palette.muted)
+                .frame(width: 18)
         }
         .tag(page)
         .padding(.vertical, 1)
@@ -353,19 +340,10 @@ private struct SettingsSidebarRow: View {
     @ViewBuilder
     private var highlight: some View {
         if isSelected {
-            ZStack(alignment: .leading) {
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(page.color.opacity(0.11))
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .stroke(page.color.opacity(0.16))
-                    }
-                Capsule()
-                    .fill(page.color)
-                    .frame(width: 3, height: 18)
-                    .padding(.leading, 3)
-                }
-            .padding(.horizontal, 7)
+            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                .fill(Palette.accentSoft)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 1)
         }
     }
 }
@@ -414,35 +392,37 @@ private struct SettingsDetailView: View {
     }
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 11) {
-            HStack(spacing: 13) {
-                SettingsKindTile(symbol: page.symbol, color: page.color, size: 44, prominent: true)
-                VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .leading, spacing: 9) {
+            HStack(spacing: 11) {
+                Image(systemName: page.symbol)
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(Palette.accent)
+                    .frame(width: 34, height: 34)
+                    .background(Palette.accentSoft, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                VStack(alignment: .leading, spacing: 1) {
                     Text(page.title)
-                        .font(.system(size: 21, weight: .semibold, design: .rounded))
+                        .font(.system(size: 19, weight: .semibold))
                         .foregroundStyle(Palette.ink)
                     Text(page.summary)
-                        .font(.system(size: 11.5))
+                        .font(.system(size: 11))
                         .foregroundStyle(Palette.muted)
                 }
                 Spacer(minLength: 0)
             }
 
-            HStack(spacing: 7) {
+            HStack(spacing: 6) {
                 ForEach(headerFacts) { fact in
                     SettingsHeaderFact(fact: fact)
                 }
             }
         }
-        .padding(.horizontal, 20)
-        .padding(.top, 15)
-        .padding(.bottom, 12)
-        .background {
-            SettingsPageHeaderBackdrop(color: page.color)
-        }
+        .padding(.horizontal, 22)
+        .padding(.top, 16)
+        .padding(.bottom, 13)
+        .background(Palette.background)
         .overlay(alignment: .bottom) {
             Rectangle()
-                .fill(Palette.line.opacity(0.65))
+                .fill(Palette.line.opacity(0.7))
                 .frame(height: 0.5)
         }
     }
@@ -451,63 +431,61 @@ private struct SettingsDetailView: View {
         switch page {
         case .general:
             return [
-                SettingsHeaderFactModel(id: "history", symbol: "photo.stack", text: "\(model.records.count) 张截图", tint: page.color),
+                SettingsHeaderFactModel(id: "history", symbol: "photo.stack", text: "\(model.records.count) 张截图"),
                 permissionFact
             ]
         case .screenshot:
             return [
                 SettingsHeaderFactModel(id: "history", symbol: "clock.arrow.circlepath",
-                                        text: model.keepHistory ? "历史已开启" : "不写入历史", tint: page.color),
+                                        text: model.keepHistory ? "历史已开启" : "不写入历史"),
                 permissionFact
             ]
         case .translation:
             return [
                 SettingsHeaderFactModel(id: "target", symbol: "globe",
-                                        text: LanguageChoice.targets.first(where: { $0.id == model.targetLanguage })?.name ?? "自动",
-                                        tint: page.color),
+                                        text: LanguageChoice.targets.first(where: { $0.id == model.targetLanguage })?.name ?? "自动"),
                 SettingsHeaderFactModel(
                     id: "engine",
                     symbol: model.translationProvider.symbol,
                     text: model.translationProvider == .ai
                         ? (model.aiReady ? "AI 已配置" : "AI 待配置")
                         : "系统翻译",
-                    tint: model.translationProvider == .ai && !model.aiReady
-                        ? Color(hex: "C17A32") : Color(hex: "66736D")
+                    tint: model.translationProvider == .ai && !model.aiReady ? Palette.warning : nil
                 )
             ]
         case .clipboard:
             return [
-                SettingsHeaderFactModel(id: "monitor", symbol: clipboard.monitorsSystem ? "record.circle.fill" : "pause.circle.fill",
+                SettingsHeaderFactModel(id: "monitor", symbol: clipboard.monitorsSystem ? "record.circle" : "pause.circle",
                                         text: clipboard.monitorsSystem ? "正在监听" : "已暂停",
-                                        tint: clipboard.monitorsSystem ? Color(hex: "3B8B67") : Color(hex: "A56A32")),
-                SettingsHeaderFactModel(id: "entries", symbol: "tray.full", text: "\(clipboard.entries.count) 项记录", tint: page.color)
+                                        tint: clipboard.monitorsSystem ? Palette.success : Palette.warning),
+                SettingsHeaderFactModel(id: "entries", symbol: "tray.full", text: "\(clipboard.entries.count) 项记录")
             ]
         case .shortcuts:
             return [
-                SettingsHeaderFactModel(id: "registered", symbol: model.hotkeyAvailable ? "checkmark.circle.fill" : "exclamationmark.triangle.fill",
+                SettingsHeaderFactModel(id: "registered", symbol: model.hotkeyAvailable ? "checkmark.circle" : "exclamationmark.triangle",
                                         text: model.hotkeyAvailable ? "4 个快捷键已注册" : "存在快捷键冲突",
-                                        tint: model.hotkeyAvailable ? Color(hex: "3B8B67") : Color(hex: "C17A32")),
-                SettingsHeaderFactModel(id: "instant", symbol: "bolt.fill", text: "修改后即时生效", tint: page.color)
+                                        tint: model.hotkeyAvailable ? Palette.success : Palette.warning),
+                SettingsHeaderFactModel(id: "instant", symbol: "bolt", text: "修改后即时生效")
             ]
         case .history:
             return [
-                SettingsHeaderFactModel(id: "count", symbol: "photo.stack", text: "\(model.records.count) 项记录", tint: page.color),
-                SettingsHeaderFactModel(id: "local", symbol: "internaldrive.fill", text: "仅保存在本机", tint: Color(hex: "4C7566"))
+                SettingsHeaderFactModel(id: "count", symbol: "photo.stack", text: "\(model.records.count) 项记录"),
+                SettingsHeaderFactModel(id: "local", symbol: "internaldrive", text: "仅保存在本机")
             ]
         case .privacy:
             return [
                 permissionFact,
-                SettingsHeaderFactModel(id: "local", symbol: "hand.raised.fill", text: "无云端账号", tint: Color(hex: "4C7566"))
+                SettingsHeaderFactModel(id: "local", symbol: "hand.raised", text: "无云端账号")
             ]
         case .tools:
             return [
-                SettingsHeaderFactModel(id: "count", symbol: "square.grid.2x2", text: "4 个快捷入口", tint: page.color),
-                SettingsHeaderFactModel(id: "login", symbol: "person.crop.circle.badge.checkmark", text: "无需登录", tint: Color(hex: "4C7566"))
+                SettingsHeaderFactModel(id: "count", symbol: "square.grid.2x2", text: "4 个快捷入口"),
+                SettingsHeaderFactModel(id: "login", symbol: "person.crop.circle", text: "无需登录")
             ]
         case .about:
             return [
-                SettingsHeaderFactModel(id: "version", symbol: "number", text: "版本 \(versionLabel)", tint: page.color),
-                SettingsHeaderFactModel(id: "menu", symbol: "menubar.rectangle", text: "菜单栏应用", tint: Color(hex: "4C7566"))
+                SettingsHeaderFactModel(id: "version", symbol: "number", text: "版本 \(versionLabel)"),
+                SettingsHeaderFactModel(id: "menu", symbol: "menubar.rectangle", text: "菜单栏应用")
             ]
         }
     }
@@ -516,9 +494,9 @@ private struct SettingsDetailView: View {
         let granted = model.screenPermission.isGranted
         return SettingsHeaderFactModel(
             id: "permission",
-            symbol: granted ? "checkmark.shield.fill" : "exclamationmark.shield.fill",
+            symbol: granted ? "checkmark.shield" : "exclamationmark.shield",
             text: granted ? "屏幕访问已授权" : "屏幕访问待授权",
-            tint: granted ? Color(hex: "3B8B67") : Color(hex: "C17A32")
+            tint: granted ? Palette.success : Palette.warning
         )
     }
 
@@ -557,7 +535,6 @@ private struct SettingsDetailView: View {
                     title: "区域截图",
                     detail: "拖选屏幕区域并进入编辑，确认后复制",
                     symbol: "viewfinder",
-                    color: ShiguangSettingsPage.screenshot.color,
                     shortcut: model.captureHotkey.symbol
                 ) {
                     model.capture()
@@ -565,8 +542,7 @@ private struct SettingsDetailView: View {
                 SettingsActionRow(
                     title: "截图并翻译",
                     detail: "截取文字区域，直接打开独立翻译窗口",
-                    symbol: "character.bubble.fill",
-                    color: ShiguangSettingsPage.translation.color,
+                    symbol: "character.bubble",
                     shortcut: model.translateHotkey.symbol
                 ) {
                     model.capture(translate: true)
@@ -574,8 +550,7 @@ private struct SettingsDetailView: View {
                 SettingsActionRow(
                     title: "剪贴板历史",
                     detail: "搜索并重新复制最近保存的内容",
-                    symbol: "doc.on.clipboard.fill",
-                    color: ShiguangSettingsPage.clipboard.color,
+                    symbol: "doc.on.clipboard",
                     shortcut: model.clipboardHotkey.symbol
                 ) {
                     model.showClipboard?()
@@ -781,8 +756,7 @@ private struct SettingsDetailView: View {
                 SettingsActionRow(
                     title: "文字翻译",
                     detail: "直接输入或粘贴一段原文",
-                    symbol: "text.bubble.fill",
-                    color: ShiguangSettingsPage.translation.color
+                    symbol: "text.bubble"
                 ) {
                     model.startTextTranslation()
                 }
@@ -790,7 +764,6 @@ private struct SettingsDetailView: View {
                     title: "翻译剪贴板",
                     detail: "翻译当前复制的文字或图片",
                     symbol: "doc.on.clipboard",
-                    color: ShiguangSettingsPage.clipboard.color,
                     shortcut: model.clipboardTranslateHotkey.symbol
                 ) {
                     model.translateClipboard()
@@ -816,7 +789,8 @@ private struct SettingsDetailView: View {
                 SettingsValueRow(
                     title: "快捷打开",
                     detail: "在任意应用中打开剪贴板历史",
-                    value: model.clipboardHotkey.symbol
+                    value: model.clipboardHotkey.symbol,
+                    monospaced: true
                 )
             } header: {
                 Text("监听")
@@ -849,8 +823,8 @@ private struct SettingsDetailView: View {
 
             if !model.hotkeyAvailable {
                 Section {
-                    Label("有快捷键未注册成功，可能被其他应用占用。", systemImage: "exclamationmark.triangle.fill")
-                        .foregroundStyle(.orange)
+                    Label("有快捷键未注册成功，可能被其他应用占用。", systemImage: "exclamationmark.triangle")
+                        .foregroundStyle(Palette.warning)
                 }
             }
         }
@@ -947,32 +921,28 @@ private struct SettingsDetailView: View {
             SettingsActionRow(
                 title: "导入图片",
                 detail: "识别已有文件中的文字",
-                symbol: "photo.badge.plus",
-                color: ShiguangSettingsPage.tools.color
+                symbol: "photo.badge.plus"
             ) {
                 model.importImage()
             }
             SettingsActionRow(
                 title: "文字翻译",
                 detail: "直接粘贴或输入一段原文",
-                symbol: "text.bubble.fill",
-                color: ShiguangSettingsPage.translation.color
+                symbol: "text.bubble"
             ) {
                 model.startTextTranslation()
             }
             SettingsActionRow(
                 title: "翻译剪贴板",
                 detail: "翻译当前复制的文字或图片",
-                symbol: "doc.on.clipboard",
-                color: ShiguangSettingsPage.clipboard.color
+                symbol: "doc.on.clipboard"
             ) {
                 model.translateClipboard()
             }
             SettingsActionRow(
                 title: "体验示例",
                 detail: "使用内置图片检查文字识别，无需屏幕权限",
-                symbol: "sparkles",
-                color: ShiguangSettingsPage.screenshot.color
+                symbol: "sparkles"
             ) {
                 model.useDemo()
             }
@@ -986,10 +956,11 @@ private struct SettingsDetailView: View {
                     Image(nsImage: NSApp.applicationIconImage)
                         .resizable()
                         .scaledToFit()
-                        .frame(width: 58, height: 58)
+                        .frame(width: 54, height: 54)
                     VStack(alignment: .leading, spacing: 3) {
                         Text("拾光截图").font(.title3.weight(.semibold))
                         Text("截取片刻，读懂世界。")
+                            .font(.callout)
                             .foregroundStyle(.secondary)
                         Text("版本 \(appVersion)")
                             .font(.caption)
@@ -1024,7 +995,7 @@ private struct SettingsHeaderFactModel: Identifiable {
     let id: String
     let symbol: String
     let text: String
-    let tint: Color
+    var tint: Color?
 }
 
 private struct SettingsHeaderFact: View {
@@ -1033,97 +1004,17 @@ private struct SettingsHeaderFact: View {
     var body: some View {
         HStack(spacing: 5) {
             Image(systemName: fact.symbol)
-                .font(.system(size: 9, weight: .semibold))
+                .font(.system(size: 9.5, weight: .medium))
+                .foregroundStyle(fact.tint ?? Palette.muted)
             Text(fact.text)
+                .font(.system(size: 10.5, weight: .medium))
+                .foregroundStyle(Palette.muted)
                 .lineLimit(1)
         }
-        .font(.system(size: 10, weight: .medium))
-        .foregroundStyle(fact.tint)
         .padding(.horizontal, 8)
-        .frame(height: 23)
-        .background(fact.tint.opacity(0.09), in: Capsule())
-        .overlay {
-            Capsule()
-                .stroke(fact.tint.opacity(0.14))
-        }
+        .frame(height: 22)
+        .background(Palette.ink.opacity(0.045), in: Capsule())
         .accessibilityElement(children: .combine)
-    }
-}
-
-private struct SettingsSidebarBackdrop: View {
-    var body: some View {
-        LinearGradient(
-            colors: [Palette.background, Color(hex: "EFEBE1")],
-            startPoint: .top,
-            endPoint: .bottomTrailing
-        )
-        .overlay(alignment: .topTrailing) {
-            Circle()
-                .fill(Palette.accent.opacity(0.035))
-                .frame(width: 210, height: 210)
-                .offset(x: 85, y: -95)
-        }
-        .clipped()
-    }
-}
-
-private struct SettingsPageHeaderBackdrop: View {
-    let color: Color
-
-    var body: some View {
-        ZStack(alignment: .topTrailing) {
-            LinearGradient(
-                colors: [color.opacity(0.075), Palette.background.opacity(0.48), Palette.background],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-            Circle()
-                .stroke(color.opacity(0.06), lineWidth: 18)
-                .frame(width: 132, height: 132)
-                .offset(x: 37, y: -58)
-        }
-        .clipped()
-    }
-}
-
-private struct SettingsKindTile: View {
-    let symbol: String
-    let color: Color
-    let size: CGFloat
-    var prominent = false
-
-    var body: some View {
-        ZStack {
-            tileBackground
-            .frame(width: size, height: size)
-
-            Image(systemName: symbol)
-                .font(.system(size: size * (symbol == "command" ? 0.44 : 0.48), weight: .semibold))
-                .foregroundStyle(prominent ? Color.white : color)
-        }
-        .overlay {
-            RoundedRectangle(cornerRadius: size * 0.26, style: .continuous)
-                .stroke(prominent ? Color.white.opacity(0.22) : color.opacity(0.13), lineWidth: 0.8)
-        }
-        .shadow(color: prominent ? color.opacity(0.2) : .clear, radius: 3, y: 1)
-        .accessibilityHidden(true)
-    }
-
-    @ViewBuilder
-    private var tileBackground: some View {
-        if prominent {
-            RoundedRectangle(cornerRadius: size * 0.26, style: .continuous)
-                .fill(
-                    LinearGradient(
-                        colors: [color.opacity(0.9), color],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
-        } else {
-            RoundedRectangle(cornerRadius: size * 0.26, style: .continuous)
-                .fill(color.opacity(0.11))
-        }
     }
 }
 
@@ -1148,32 +1039,20 @@ private struct SettingsValueRow: View {
     let title: String
     let detail: String
     let value: String
+    var monospaced = false
 
     var body: some View {
         LabeledContent {
-            SettingsValueBadge(value: value)
+            Text(value)
+                .font(.system(size: monospaced ? 10.5 : 11.5,
+                              weight: .medium,
+                              design: monospaced ? .monospaced : .default))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .textSelection(.enabled)
         } label: {
             SettingsRowLabel(title: title, detail: detail)
         }
-    }
-}
-
-private struct SettingsValueBadge: View {
-    let value: String
-
-    var body: some View {
-        Text(value)
-            .font(.system(size: 10, weight: .semibold, design: .rounded))
-            .foregroundStyle(Palette.ink.opacity(0.82))
-            .lineLimit(1)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .background(Palette.sage.opacity(0.9), in: Capsule())
-            .overlay {
-                Capsule()
-                    .stroke(Palette.ink.opacity(0.06))
-            }
-            .textSelection(.enabled)
     }
 }
 
@@ -1181,7 +1060,6 @@ private struct SettingsActionRow: View {
     let title: String
     let detail: String
     let symbol: String
-    let color: Color
     var shortcut: String?
     let action: () -> Void
     @StoredState private var hovered = false
@@ -1189,30 +1067,29 @@ private struct SettingsActionRow: View {
     var body: some View {
         Button(action: action) {
             HStack(spacing: 10) {
-                SettingsKindTile(symbol: symbol, color: color, size: 26)
+                Image(systemName: symbol)
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(Palette.accent)
+                    .frame(width: 24)
                 SettingsRowLabel(title: title, detail: detail)
                 Spacer(minLength: 8)
                 if let shortcut {
                     Text(shortcut)
-                        .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                        .foregroundStyle(Palette.ink.opacity(0.72))
-                        .padding(.horizontal, 7)
-                        .padding(.vertical, 4)
-                        .background(Palette.sage, in: RoundedRectangle(cornerRadius: 5))
-                        .overlay {
-                            RoundedRectangle(cornerRadius: 5)
-                                .stroke(Palette.ink.opacity(0.06))
-                        }
+                        .font(.system(size: 10, weight: .medium, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 3)
+                        .background(Palette.ink.opacity(0.05), in: RoundedRectangle(cornerRadius: 5))
                 }
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(hovered ? color.opacity(0.8) : Palette.muted.opacity(0.6))
+                    .font(.system(size: 9.5, weight: .semibold))
+                    .foregroundStyle(hovered ? Palette.accent : Palette.muted.opacity(0.5))
             }
             .padding(.vertical, 3)
             .padding(.horizontal, 5)
             .background(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(hovered ? color.opacity(0.07) : Color.clear)
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .fill(hovered ? Palette.ink.opacity(0.035) : Color.clear)
             )
             .contentShape(Rectangle())
         }
@@ -1233,9 +1110,9 @@ private struct PermissionActionRow: View {
                 }
                 Button("检查") { model.checkPermission() }
                 Button("系统设置") { model.openPermissionSettings() }
-                Image(systemName: model.screenPermission.isGranted
-                      ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
-                    .foregroundStyle(model.screenPermission.isGranted ? .green : .orange)
+                Circle()
+                    .fill(model.screenPermission.isGranted ? Palette.success : Palette.warning)
+                    .frame(width: 7, height: 7)
                     .accessibilityLabel(model.screenPermission.isGranted ? "已授权" : "未授权")
             }
         } label: {
@@ -1259,10 +1136,18 @@ private struct SettingsHistoryRow: View {
                 Image(nsImage: image)
                     .resizable()
                     .scaledToFill()
-                    .frame(width: 42, height: 36)
-                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                    .frame(width: 44, height: 36)
+                    .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 5, style: .continuous)
+                            .stroke(Palette.line, lineWidth: 0.8)
+                    }
             } else {
-                SettingsKindTile(symbol: "photo", color: ShiguangSettingsPage.history.color, size: 36)
+                Image(systemName: "photo")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(Palette.muted)
+                    .frame(width: 44, height: 36)
+                    .background(Palette.ink.opacity(0.045), in: RoundedRectangle(cornerRadius: 5, style: .continuous))
             }
 
             VStack(alignment: .leading, spacing: 2) {

@@ -207,7 +207,7 @@ private final class SelectionDecorationView: NSView {
     var scale: CGFloat = 1
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
     override func draw(_ dirtyRect: NSRect) {
-        let green = NSColor(hex: "46E49B")
+        let green = NSColor(hex: "7ED3A8")
         if let context = NSGraphicsContext.current?.cgContext {
             context.setStrokeColor(green.cgColor)
             context.setLineWidth(1)
@@ -224,7 +224,7 @@ private final class SelectionDecorationView: NSView {
         let size = text.size(withAttributes: attributes)
         let y = selection.maxY + size.height + 8 < bounds.maxY ? selection.maxY + 4 : selection.maxY - size.height - 8
         let badge = CGRect(x: min(selection.minX, bounds.maxX - size.width - 14), y: y, width: size.width + 14, height: size.height + 6)
-        NSColor(hex: "17191C").setFill()
+        NSColor(hex: "1E2123").setFill()
         NSBezierPath(roundedRect: badge, xRadius: 4, yRadius: 4).fill()
         text.draw(at: CGPoint(x: badge.minX + 7, y: badge.minY + 3), withAttributes: attributes)
         setAccessibilityLabel(text as String)

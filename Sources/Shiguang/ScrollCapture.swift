@@ -312,7 +312,7 @@ struct ScrollCaptureStatusView: View {
         }
         .buttonStyle(.bordered).padding(12)
         .foregroundStyle(.white).preferredColorScheme(.dark)
-        .background(Color(hex: "17191C"), in: RoundedRectangle(cornerRadius: 12))
+        .background(Palette.overlay, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
     }
 
     private var previewView: some View {

@@ -3,15 +3,27 @@ import SwiftUI
 import Translation
 
 enum Palette {
-    static let background = Color(hex: "F5F3ED")
-    static let panel = Color(hex: "FFFEFA")
-    static let ink = Color(hex: "263C35")
-    static let muted = Color(hex: "7D847B")
-    static let accent = Color(hex: "D95E3A")
-    static let line = Color(hex: "DDDCD2")
-    static let sage = Color(hex: "E9EEE6")
-    static let accentSoft = Color(hex: "F8E6DF")
-    static let shadow = Color(hex: "263C35").opacity(0.08)
+    // Quiet, paper-warm neutral ground with a single muted clay accent.
+    static let background = Color(hex: "F7F7F4")
+    static let sidebar = Color(hex: "EFEFEA")
+    static let panel = Color(hex: "FFFFFF")
+    static let ink = Color(hex: "1F2422")
+    static let muted = Color(hex: "767D78")
+    static let accent = Color(hex: "B0573A")
+    static let accentDeep = Color(hex: "8E4229")
+    static let line = Color(hex: "E2E0D9")
+    static let sage = Color(hex: "EFF2EE")
+    static let accentSoft = Color(hex: "F6EBE4")
+    static let shadow = Color(hex: "1F2422").opacity(0.06)
+    static let success = Color(hex: "3F7D5D")
+    static let warning = Color(hex: "A9772F")
+    static let danger = Color(hex: "B4514A")
+
+    // Dark chrome used by the capture overlay, recorder and long-shot panel.
+    static let overlay = Color(hex: "1E2123")
+    static let overlayRaised = Color(hex: "2A2E30")
+    static let overlayInk = Color(hex: "EDEFEC")
+    static let overlayMuted = Color(hex: "9AA3A0")
 }
 
 extension Color {
@@ -29,20 +41,17 @@ struct HotkeyRow: View {
     @FocusState private var focused: Bool
 
     var body: some View {
-        HStack(spacing: 9) {
+        HStack(spacing: 10) {
             Text(title)
-                .font(.system(size: 11, weight: .medium))
+                .font(.callout)
                 .lineLimit(1)
-                .frame(width: 82, alignment: .leading)
-            HStack(spacing: 6) {
-                Image(systemName: "keyboard")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(Palette.muted)
+                .frame(width: 84, alignment: .leading)
+            HStack(spacing: 7) {
                 TextField("⌥⇧S", text: $draft)
                     .textFieldStyle(.plain)
-                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                    .font(.system(size: 11.5, weight: .medium, design: .monospaced))
                     .labelsHidden()
-                    .frame(width: 112)
+                    .frame(width: 118)
                     .focused($focused)
                     .onSubmit { apply() }
                 if draft != settings.symbol {
@@ -51,31 +60,27 @@ struct HotkeyRow: View {
                         .controlSize(.small)
                 }
             }
-            .padding(.horizontal, 9)
-            .frame(height: 28)
-            .background(Palette.panel, in: RoundedRectangle(cornerRadius: 7))
+            .padding(.horizontal, 8)
+            .frame(height: 26)
+            .background(Palette.panel, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
             .overlay {
-                RoundedRectangle(cornerRadius: 7)
-                    .stroke(message?.hasPrefix("已") == true ? Palette.ink.opacity(0.18) :
-                                (message == nil ? Palette.line.opacity(0.8) : Palette.accent.opacity(0.7)))
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .stroke(focused ? Palette.accent.opacity(0.7) : Palette.line)
             }
             if let message {
                 Text(message)
-                    .font(.system(size: 9.5))
+                    .font(.caption2)
                     .foregroundStyle(message.hasPrefix("已") ? Palette.muted : Palette.accent)
                     .lineLimit(1)
             } else {
                 Text("支持 ⌥⇧S 或 option+shift+s")
-                    .font(.system(size: 9.5))
+                    .font(.caption2)
                     .foregroundStyle(Palette.muted)
                     .lineLimit(1)
             }
             Spacer(minLength: 2)
         }
-        .padding(.horizontal, 9)
-        .frame(height: 46)
-        .background(Palette.background.opacity(0.62), in: RoundedRectangle(cornerRadius: 9))
-        .overlay(RoundedRectangle(cornerRadius: 9).stroke(Palette.line.opacity(0.55)))
+        .padding(.vertical, 4)
         .onAppear {
             draft = settings.symbol
         }
@@ -188,20 +193,15 @@ private struct TextWorkspaceView: View {
     }
 
     private var header: some View {
-        HStack(spacing: 13) {
+        HStack(spacing: 12) {
             Image(systemName: isRecognition ? "text.viewfinder" : "character.bubble.fill")
-                .font(.system(size: 20, weight: .medium))
-                .foregroundStyle(.white)
-                .frame(width: 44, height: 44)
-                .background(
-                    LinearGradient(colors: [Palette.accent, Color(hex: "BC482B")],
-                                   startPoint: .topLeading, endPoint: .bottomTrailing),
-                    in: RoundedRectangle(cornerRadius: 12)
-                )
-                .shadow(color: Palette.accent.opacity(0.2), radius: 8, y: 4)
+                .font(.system(size: 17, weight: .medium))
+                .foregroundStyle(Palette.accent)
+                .frame(width: 38, height: 38)
+                .background(Palette.accentSoft, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
             VStack(alignment: .leading, spacing: 3) {
                 Text(isRecognition ? "文字识别" : "截图翻译")
-                    .font(.system(size: 21, weight: .semibold, design: .serif))
+                    .font(.system(size: 19, weight: .semibold))
                 Text(isRecognition ? "提取截图中的文字，可在本机校对后继续翻译。" :
                         (model.translationProvider == .ai
                          ? "使用已配置的 AI 服务翻译，原文与译文并排展示。"
@@ -213,14 +213,14 @@ private struct TextWorkspaceView: View {
             Label(isRecognition ? "本机处理" : model.translationProvider.title,
                   systemImage: isRecognition ? "lock.shield" : model.translationProvider.symbol)
                 .font(.system(size: 10, weight: .medium))
-                .foregroundStyle(Palette.ink)
-                .padding(.horizontal, 9).padding(.vertical, 6)
-                .background(Palette.sage, in: Capsule())
+                .foregroundStyle(Palette.muted)
+                .padding(.horizontal, 8).padding(.vertical, 5)
+                .background(Palette.ink.opacity(0.045), in: Capsule())
             Button { model.closeEditor() } label: {
                 Image(systemName: "xmark")
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(Palette.muted)
-                    .frame(width: 30, height: 30)
+                    .frame(width: 28, height: 28)
                     .background(Palette.panel, in: Circle())
                     .overlay(Circle().stroke(Palette.line))
             }
@@ -240,7 +240,7 @@ private struct TextWorkspaceView: View {
                 Image(systemName: "arrow.left.arrow.right")
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(Palette.accent)
-                    .frame(width: 30, height: 30)
+                    .frame(width: 28, height: 28)
                     .background(Palette.accentSoft, in: Circle())
             }
             .buttonStyle(.plain)
@@ -251,9 +251,9 @@ private struct TextWorkspaceView: View {
                                                set: { model.languageEdited(target: $0) }),
                             choices: LanguageChoice.targets)
         }
-        .padding(9)
-        .background(Palette.panel.opacity(0.92), in: RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Palette.line.opacity(0.8)))
+        .padding(7)
+        .background(Palette.panel, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).stroke(Palette.line))
     }
 
     private func languageControl(title: String, symbol: String, selection: Binding<String>,
@@ -276,9 +276,9 @@ private struct TextWorkspaceView: View {
             }
         }
         .padding(.horizontal, 9)
-        .frame(maxWidth: .infinity, minHeight: 38, alignment: .leading)
-        .background(Palette.background.opacity(0.7), in: RoundedRectangle(cornerRadius: 9))
-        .overlay(RoundedRectangle(cornerRadius: 9).stroke(Palette.line.opacity(0.6)))
+        .frame(maxWidth: .infinity, minHeight: 36, alignment: .leading)
+        .background(Palette.background.opacity(0.7), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous).stroke(Palette.line.opacity(0.8)))
     }
 
     private var sourcePanel: some View {
@@ -318,9 +318,8 @@ private struct TextWorkspaceView: View {
             }
         }
         .frame(minWidth: 260, maxWidth: .infinity, minHeight: 200, maxHeight: .infinity)
-        .background(Palette.panel, in: RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Palette.line.opacity(0.9)))
-        .shadow(color: Palette.shadow, radius: 12, y: 5)
+        .background(Palette.panel, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(Palette.line))
     }
 
     private var resultPanel: some View {
@@ -355,9 +354,8 @@ private struct TextWorkspaceView: View {
             }
         }
         .frame(minWidth: 260, maxWidth: .infinity, minHeight: 200, maxHeight: .infinity)
-        .background(Palette.sage, in: RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Palette.ink.opacity(0.08)))
-        .shadow(color: Palette.shadow, radius: 12, y: 5)
+        .background(Palette.sage, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(Palette.line))
     }
 
     private var actionBar: some View {
@@ -390,9 +388,9 @@ private struct TextWorkspaceView: View {
                 .disabled(!model.canTranslate)
                 .keyboardShortcut(.return, modifiers: .command)
         }
-        .padding(9)
-        .background(Palette.panel.opacity(0.9), in: RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Palette.line.opacity(0.75)))
+        .padding(8)
+        .background(Palette.panel, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).stroke(Palette.line))
     }
 
     private var statusBar: some View {
@@ -447,11 +445,8 @@ private struct TextPanelButtonStyle: ButtonStyle {
 
 struct VisualBackground: View {
     var body: some View {
-        ZStack {
-            Palette.background
-            LinearGradient(colors: [Color(hex: "EFEEE7"), Color(hex: "F8F5EF")], startPoint: .topLeading, endPoint: .bottomTrailing)
-            DotGrid().stroke(Palette.line.opacity(0.75), lineWidth: 1)
-        }
+        LinearGradient(colors: [Color(hex: "F1F1EE"), Color(hex: "F7F7F4")],
+                       startPoint: .top, endPoint: .bottom)
     }
 }
 
@@ -459,8 +454,9 @@ struct AccentButton: ButtonStyle {
     @Environment(\.isEnabled) private var isEnabled
     func makeBody(configuration: Configuration) -> some View {
         configuration.label.font(.system(size: 12, weight: .medium))
-            .padding(.horizontal, 15).padding(.vertical, 10).foregroundStyle(.white)
-            .background(Palette.accent.opacity(configuration.isPressed ? 0.82 : 1), in: RoundedRectangle(cornerRadius: 8))
+            .padding(.horizontal, 14).padding(.vertical, 9).foregroundStyle(.white)
+            .background(Palette.accent.opacity(configuration.isPressed ? 0.82 : 1),
+                        in: RoundedRectangle(cornerRadius: 7, style: .continuous))
             .opacity(isEnabled ? 1 : 0.45)
     }
 }
@@ -469,10 +465,11 @@ struct QuietButton: ButtonStyle {
     @Environment(\.isEnabled) private var isEnabled
     func makeBody(configuration: Configuration) -> some View {
         configuration.label.font(.system(size: 12))
-            .padding(.horizontal, 11).padding(.vertical, 9)
+            .padding(.horizontal, 11).padding(.vertical, 8)
             .foregroundStyle(Palette.ink)
-            .background(configuration.isPressed ? Palette.line : .white.opacity(0.86), in: RoundedRectangle(cornerRadius: 8))
-            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Palette.line.opacity(0.8)))
+            .background(configuration.isPressed ? Palette.line : Palette.panel,
+                        in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous).stroke(Palette.line))
             .opacity(isEnabled ? 1 : 0.45)
     }
 }

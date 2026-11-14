@@ -47,7 +47,7 @@ struct AnnotationToolbar: View {
                     Circle()
                         .fill(Color(hex: model.markColor))
                         .frame(width: 10, height: 10)
-                        .overlay(Circle().stroke(Color(hex: "17191C"), lineWidth: 2))
+                        .overlay(Circle().stroke(Palette.overlay, lineWidth: 2))
                         .offset(x: 2, y: 2)
                 }
                 .frame(width: 30, height: 32)
@@ -85,7 +85,7 @@ struct AnnotationToolbar: View {
                     }
                 }
                 .padding(13)
-                .background(Color(hex: "17191C"))
+                .background(Palette.overlay)
                 .preferredColorScheme(.dark)
             }
             }
@@ -157,10 +157,10 @@ struct AnnotationToolbar: View {
             }
             if showsCompletion, model.draftImage != nil {
                 completionDivider
-                completionAction("取消截图", symbol: "xmark", tint: Color(hex: "FF7979")) {
+                completionAction("取消截图", symbol: "xmark", tint: Color(hex: "E28B86")) {
                     model.discardDraft()
                 }
-                completionAction("复制到剪贴板并完成", symbol: "checkmark", tint: Color(hex: "75E6A5")) {
+                completionAction("复制到剪贴板并完成", symbol: "checkmark", tint: Color(hex: "82C9A6")) {
                     model.confirmDraft()
                 }
             } else if showsCompletion {
@@ -170,7 +170,7 @@ struct AnnotationToolbar: View {
         }
         .padding(7)
         .background(
-            LinearGradient(colors: [Color(hex: "24292F"), Color(hex: "14171A")],
+            LinearGradient(colors: [Color(hex: "26292B"), Color(hex: "1B1D1F")],
                            startPoint: .top, endPoint: .bottom),
             in: RoundedRectangle(cornerRadius: 13, style: .continuous)
         )
@@ -181,7 +181,7 @@ struct AnnotationToolbar: View {
         }
         .overlay(RoundedRectangle(cornerRadius: 13, style: .continuous).stroke(.white.opacity(0.13)))
         .overlay(alignment: .topLeading) { hoverChip }
-        .shadow(color: .black.opacity(0.22), radius: 10, y: 4)
+        .shadow(color: .black.opacity(0.24), radius: 12, y: 5)
         .coordinateSpace(name: "annotationToolbar")
         .fixedSize(horizontal: true, vertical: true)
         .tint(.white)
@@ -202,9 +202,9 @@ struct AnnotationToolbar: View {
                     .fixedSize()
                     .padding(.horizontal, 8)
                     .padding(.vertical, 4)
-                    .background(Color(hex: "0D0F12").opacity(0.97), in: Capsule())
-                    .overlay(Capsule().stroke(.white.opacity(0.18), lineWidth: 1))
-                    .shadow(color: .black.opacity(0.28), radius: 6, y: 2)
+                    .background(Color(hex: "141618").opacity(0.97), in: Capsule())
+                    .overlay(Capsule().stroke(.white.opacity(0.14), lineWidth: 1))
+                    .shadow(color: .black.opacity(0.24), radius: 6, y: 2)
                     .position(x: min(max(28, frame.midX), proxy.size.width - 28),
                               y: frame.minY - 22)
                     .allowsHitTesting(false)
@@ -217,12 +217,10 @@ struct AnnotationToolbar: View {
         HStack(spacing: 1) { content() }
             .padding(.horizontal, 5)
             .padding(.vertical, 3)
-            .background(
-                LinearGradient(colors: [.white.opacity(0.075), .white.opacity(0.035)],
-                               startPoint: .top, endPoint: .bottom),
-                in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+            .background(.white.opacity(0.055),
+                        in: RoundedRectangle(cornerRadius: 8, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous)
-                .stroke(.white.opacity(0.07), lineWidth: 1))
+                .stroke(.white.opacity(0.06), lineWidth: 1))
     }
 
     private var divider: some View {
@@ -268,11 +266,11 @@ struct AnnotationToolbar: View {
             .controlSize(.small)
             .tint(Palette.accent)
             Text(model.tool == .picker ? "点击图片取色，取色后自动回到浏览工具。" : "标注颜色会用于形状、画笔、文字和编号。")
-                .font(.system(size: 10)).foregroundStyle(Color(hex: "BEC5CF"))
+                .font(.system(size: 10)).foregroundStyle(Palette.overlayMuted)
                 .fixedSize(horizontal: false, vertical: true)
         }
         .padding(13).frame(width: 286)
-        .background(Color(hex: "17191C"))
+        .background(Palette.overlay)
         .tint(.white).environment(\.colorScheme, .dark)
         .preferredColorScheme(.dark)
     }
@@ -284,7 +282,7 @@ struct AnnotationToolbar: View {
                 .frame(width: 30, height: 32)
             if selected {
                 Capsule()
-                    .fill(Color(hex: "75E6A5"))
+                    .fill(Color(hex: "9FD0B7"))
                     .frame(width: 11, height: 2)
                     .padding(.bottom, 2)
             }
@@ -304,7 +302,7 @@ struct AnnotationToolbar: View {
                     .frame(width: 30, height: 32)
                 if selected {
                     Capsule()
-                        .fill(Color(hex: "75E6A5"))
+                        .fill(Color(hex: "9FD0B7"))
                         .frame(width: 11, height: 2)
                         .padding(.bottom, 2)
                 }
@@ -359,12 +357,12 @@ private struct CaptureOptionsPanel<Content: View>: View {
         VStack(alignment: .leading, spacing: 10) {
             Text(title).font(.system(size: 12, weight: .semibold)).foregroundStyle(.white)
             content
-            Text(hint).font(.system(size: 11)).foregroundStyle(Color(hex: "BEC5CF"))
+            Text(hint).font(.system(size: 11)).foregroundStyle(Palette.overlayMuted)
                 .fixedSize(horizontal: false, vertical: true)
         }
         .padding(14).frame(width: 284)
-        .background(Color(hex: "17191C"))
-        .presentationBackground(Color(hex: "17191C"))
+        .background(Palette.overlay)
+        .presentationBackground(Palette.overlay)
         .tint(.white).environment(\.colorScheme, .dark)
         .preferredColorScheme(.dark)
     }
@@ -389,7 +387,7 @@ private struct CaptureOptionButton: View {
                 Image(systemName: symbol).font(.system(size: 18, weight: .medium)).frame(width: 24)
                 VStack(alignment: .leading, spacing: 4) {
                     Text(title).font(.system(size: 13, weight: .medium))
-                    Text(detail).font(.system(size: 11)).foregroundStyle(Color(hex: "BEC5CF"))
+                    Text(detail).font(.system(size: 11)).foregroundStyle(Palette.overlayMuted)
                 }
                 Spacer(minLength: 0)
             }
@@ -407,9 +405,9 @@ private struct CaptureOptionStyle: ButtonStyle {
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .background(Color(hex: configuration.isPressed ? "454A53" : hovered ? "383D45" : "292D33"),
+            .background(Color(hex: configuration.isPressed ? "3C4143" : hovered ? "33383A" : "282C2E"),
                         in: RoundedRectangle(cornerRadius: 8))
-            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.white.opacity(hovered ? 0.32 : 0.12)))
+            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.white.opacity(hovered ? 0.26 : 0.1)))
             .onHover { hovered = $0 }
     }
 }
