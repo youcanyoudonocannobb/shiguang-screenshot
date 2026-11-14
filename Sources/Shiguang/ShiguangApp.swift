@@ -81,7 +81,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         window.titleVisibility = .hidden
         window.titlebarSeparatorStyle = .none
         window.isMovableByWindowBackground = true
-        window.backgroundColor = NSColor(hex: "F6F6F3")
+        window.backgroundColor = NSColor(hex: "FAF9F6")
         window.contentMinSize = NSSize(width: 820, height: 560)
         window.isReleasedWhenClosed = false
         window.delegate = self
@@ -273,7 +273,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             panel.hidesOnDeactivate = true
             panel.level = .floating
             panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-            panel.backgroundColor = NSColor(hex: "F6F6F3")
+            panel.backgroundColor = NSColor(hex: "FAF9F6")
             panel.contentView = NSHostingView(rootView: ClipboardView(history: clipboard,
                 onCopy: { [weak self] entry in self?.copyClipboardEntry(entry) },
                 onClose: { [weak self] in self?.closeClipboardWindow() }))
@@ -418,7 +418,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     private func setupStatusItem() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         statusItem.isVisible = true
-        if let image = NSImage(systemSymbolName: "viewfinder", accessibilityDescription: "拾光截图") {
+        if let image = NSImage(systemSymbolName: "viewfinder.circle", accessibilityDescription: "拾光截图") {
             image.isTemplate = true
             statusItem.button?.image = image
             statusItem.button?.toolTip = "拾光截图 · 截图、识别与剪贴板"
@@ -560,7 +560,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
                                  styleMask: [.titled, .closable, .miniaturizable, .resizable],
                                  backing: .buffered, defer: false)
             panel.title = "拾光截图 · 快速编辑"
-            panel.backgroundColor = NSColor(hex: "F6F6F3")
+            panel.backgroundColor = NSColor(hex: "FAF9F6")
             panel.isReleasedWhenClosed = false
             panel.delegate = self
             panel.contentView = NSHostingView(rootView: CaptureEditorView(model: model))

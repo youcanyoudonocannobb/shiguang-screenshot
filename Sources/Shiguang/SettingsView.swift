@@ -52,13 +52,13 @@ enum ShiguangSettingsPage: String, CaseIterable, Identifiable {
     var symbol: String {
         switch self {
         case .general: return "slider.horizontal.3"
-        case .screenshot: return "viewfinder"
+        case .screenshot: return "rectangle.dashed"
         case .translation: return "character.bubble"
-        case .clipboard: return "doc.on.clipboard"
-        case .shortcuts: return "command"
+        case .clipboard: return "list.clipboard"
+        case .shortcuts: return "keyboard"
         case .history: return "clock.arrow.circlepath"
         case .privacy: return "lock.shield"
-        case .tools: return "square.grid.2x2"
+        case .tools: return "wrench.and.screwdriver"
         case .about: return "info.circle"
         }
     }
@@ -113,18 +113,17 @@ struct SettingsView: View {
     }
 
     var body: some View {
-        HSplitView {
-            sidebar
-                .frame(minWidth: 184, idealWidth: 204, maxWidth: 236)
+        HStack(spacing: 0) {
+            sidebar.frame(width: 206)
+            Rectangle().fill(Palette.line).frame(width: 1)
             SettingsDetailView(model: model, clipboard: clipboard, page: selection)
         }
         .navigationTitle(selection.title)
         .tint(Palette.accent)
+        .foregroundStyle(Palette.ink)
         .preferredColorScheme(.light)
         .frame(minWidth: 780, minHeight: 560)
-        .sheet(isPresented: $model.showsPermissionHelp) {
-            permissionHelp
-        }
+        .sheet(isPresented: $model.showsPermissionHelp) { permissionHelp }
         .alert("需要留意", isPresented: Binding(
             get: { !model.isTextWorkspace && model.errorMessage != nil },
             set: { if !$0 { model.errorMessage = nil } }
@@ -143,164 +142,88 @@ struct SettingsView: View {
 
     private var sidebar: some View {
         VStack(spacing: 0) {
-            brandHeader
-            searchBar
-                .padding(.horizontal, 12)
-                .padding(.top, 2)
-                .padding(.bottom, 10)
+            HStack(spacing: 10) {
+                Image(nsImage: NSApp.applicationIconImage)
+                    .resizable().scaledToFit().frame(width: 36, height: 36)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("拾光截图").font(.system(size: 13.5, weight: .semibold))
+                    Text("偏好设置").font(.system(size: 11)).foregroundStyle(Palette.muted)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 16).padding(.top, 20).padding(.bottom, 16)
 
-            List(selection: selectionBinding) {
-                ForEach(ShiguangSettingsPage.groups) { group in
-                    let pages = group.pages.filter { $0.matches(query) }
-                    if !pages.isEmpty {
-                        if let title = group.title {
-                            Section {
-                                rows(pages)
-                            } header: {
-                                Text(title)
-                                    .font(.system(size: 10, weight: .semibold))
-                                    .foregroundStyle(Palette.muted.opacity(0.9))
-                            }
-                        } else {
-                            Section {
-                                rows(pages)
+            HStack(spacing: 7) {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 11.5, weight: .medium))
+                    .foregroundStyle(Palette.muted)
+                TextField("搜索设置", text: $query).textFieldStyle(.plain)
+                if !query.isEmpty {
+                    Button { query = "" } label: {
+                        Image(systemName: "xmark.circle.fill").foregroundStyle(Palette.muted)
+                    }
+                    .buttonStyle(.plain).accessibilityLabel("清除搜索")
+                }
+            }
+            .font(.system(size: 11.5))
+            .padding(.horizontal, 10).frame(height: 30)
+            .background(Palette.panel, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(Palette.line))
+            .padding(.horizontal, 12).padding(.bottom, 12)
+
+            ScrollView(.vertical, showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 14) {
+                    ForEach(ShiguangSettingsPage.groups) { group in
+                        let pages = group.pages.filter { $0.matches(query) }
+                        if !pages.isEmpty {
+                            VStack(alignment: .leading, spacing: 3) {
+                                if let title = group.title {
+                                    Text(title)
+                                        .font(.system(size: 10.5, weight: .semibold))
+                                        .foregroundStyle(Palette.muted)
+                                        .padding(.horizontal, 10)
+                                        .padding(.bottom, 2)
+                                }
+                                ForEach(pages) { page in
+                                    SettingsSidebarRow(page: page, isSelected: selection == page) {
+                                        selectedPageRaw = page.rawValue
+                                    }
+                                }
                             }
                         }
                     }
                 }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 4)
             }
-            .listStyle(.sidebar)
-            .scrollContentBackground(.hidden)
             .overlay {
                 if ShiguangSettingsPage.allCases.allSatisfy({ !$0.matches(query) }) {
-                    Text("没有匹配的设置")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
+                    Text("没有匹配的设置").font(.system(size: 12)).foregroundStyle(Palette.muted)
                 }
             }
 
-            sidebarFooter
+            Rectangle().fill(Palette.line.opacity(0.75)).frame(height: 1)
+            HStack(spacing: 6) {
+                Image(systemName: "menubar.rectangle").font(.system(size: 11))
+                Text("菜单栏常驻").font(.system(size: 10.5))
+                Spacer(minLength: 0)
+                Text("v\(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "-")")
+                    .font(.system(size: 10, design: .monospaced))
+            }
+            .foregroundStyle(Palette.muted)
+            .padding(.horizontal, 16).padding(.vertical, 12)
         }
         .background(Palette.sidebar)
     }
 
-    private var brandHeader: some View {
-        HStack(spacing: 10) {
-            Image(nsImage: NSApp.applicationIconImage)
-                .resizable()
-                .scaledToFit()
-                .frame(width: 30, height: 30)
-
-            VStack(alignment: .leading, spacing: 1) {
-                Text("拾光截图")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(Palette.ink)
-                Text("截图 · 识别 · 剪贴板")
-                    .font(.system(size: 10))
-                    .foregroundStyle(Palette.muted)
-            }
-            Spacer(minLength: 4)
-        }
-        .padding(.horizontal, 14)
-        .padding(.top, 14)
-        .padding(.bottom, 10)
-        .accessibilityElement(children: .combine)
-    }
-
-    private var searchBar: some View {
-        HStack(spacing: 6) {
-            Image(systemName: "magnifyingglass")
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(Palette.muted)
-            TextField("搜索设置", text: $query)
-                .textFieldStyle(.plain)
-                .font(.system(size: 12))
-            if !query.isEmpty {
-                Button {
-                    query = ""
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 11))
-                        .foregroundStyle(Palette.muted)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("清除搜索")
-            }
-        }
-        .padding(.horizontal, 8)
-        .frame(height: 29)
-        .background(Palette.panel, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 7, style: .continuous)
-                .stroke(Palette.line, lineWidth: 1)
-        }
-    }
-
-    private var sidebarFooter: some View {
-        HStack(spacing: 6) {
-            Circle()
-                .fill(Palette.success)
-                .frame(width: 6, height: 6)
-            Text("菜单栏运行中")
-                .font(.system(size: 10))
-                .foregroundStyle(Palette.muted)
-            Spacer(minLength: 4)
-            Text(versionLabel)
-                .font(.system(size: 9.5, design: .monospaced))
-                .foregroundStyle(Palette.muted.opacity(0.8))
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 11)
-        .background(alignment: .top) {
-            Rectangle()
-                .fill(Palette.line.opacity(0.7))
-                .frame(height: 0.5)
-        }
-        .accessibilityElement(children: .combine)
-    }
-
-    private var versionLabel: String {
-        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "-"
-        return "v\(version)"
-    }
-
-    private func rows(_ pages: [ShiguangSettingsPage]) -> some View {
-        ForEach(pages) { page in
-            SettingsSidebarRow(page: page, isSelected: selection == page)
-        }
-    }
-
-    private var selectionBinding: Binding<ShiguangSettingsPage?> {
-        Binding {
-            selection
-        } set: {
-            if let page = $0 { selectedPageRaw = page.rawValue }
-        }
-    }
-
     private var permissionHelp: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            HStack(spacing: 12) {
-                Image(systemName: "lock.shield")
-                    .font(.system(size: 18, weight: .medium))
-                    .foregroundStyle(Palette.accent)
-                    .frame(width: 38, height: 38)
-                    .background(Palette.accentSoft, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("允许拾光访问屏幕").font(.title3.weight(.semibold))
-                    Text("仅在你主动截图、识别或录制时使用。")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            Text(model.screenPermission.title).font(.headline)
-            Text(model.screenPermission.detail)
-                .font(.body)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+        VStack(alignment: .leading, spacing: 20) {
+            SettingsSymbolTile(symbol: "lock.shield", accented: true, size: 40)
+            Text("允许拾光访问屏幕").font(.system(size: 22, weight: .semibold))
+            Text(model.screenPermission.detail).font(.system(size: 13))
+                .foregroundStyle(Palette.muted).fixedSize(horizontal: false, vertical: true)
             HStack {
-                Button("授予屏幕权限") { model.requestPermission() }
-                    .buttonStyle(.borderedProminent)
+                Button("授予屏幕权限") { model.requestPermission() }.buttonStyle(.borderedProminent)
                 Button("打开系统设置") { model.openPermissionSettings() }
                 Button("重新检查") { model.checkPermission() }
             }
@@ -310,63 +233,70 @@ struct SettingsView: View {
                 Button("重启拾光") { model.restartApp?() }
             }
         }
-        .padding(24)
-        .frame(width: 480)
-        .background(Palette.background)
+        .padding(28).frame(width: 480).background(Palette.background)
     }
 }
 
 private struct SettingsSidebarRow: View {
     let page: ShiguangSettingsPage
     let isSelected: Bool
+    let action: () -> Void
+    @StoredState private var hovered = false
 
     var body: some View {
-        Label {
-            Text(page.title)
-                .font(.system(size: 12.5, weight: isSelected ? .semibold : .regular))
-                .foregroundStyle(Palette.ink)
-        } icon: {
-            Image(systemName: page.symbol)
-                .font(.system(size: 12.5, weight: .medium))
-                .foregroundStyle(isSelected ? Palette.accent : Palette.muted)
-                .frame(width: 18)
+        Button(action: action) {
+            HStack(spacing: 10) {
+                SettingsSymbolTile(symbol: page.symbol, selected: isSelected, size: 24)
+                Text(page.title)
+                    .font(.system(size: 12.5, weight: isSelected ? .semibold : .medium))
+                    .foregroundStyle(Palette.ink)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 8)
+            .frame(height: 34)
+            .contentShape(Rectangle())
+            .background {
+                if isSelected {
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(Palette.panel)
+                        .shadow(color: Palette.shadow, radius: 2, y: 1)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .stroke(Palette.line, lineWidth: 1)
+                        )
+                } else if hovered {
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(Palette.ink.opacity(0.045))
+                }
+            }
         }
-        .tag(page)
-        .padding(.vertical, 1)
-        .background(SidebarHighlightDisabler())
-        .listRowBackground(highlight)
-    }
-
-    @ViewBuilder
-    private var highlight: some View {
-        if isSelected {
-            RoundedRectangle(cornerRadius: 7, style: .continuous)
-                .fill(Palette.accentSoft)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 1)
-        }
+        .buttonStyle(.plain)
+        .onHover { hovered = $0 }
+        .accessibilityLabel(page.title)
     }
 }
 
-private struct SidebarHighlightDisabler: NSViewRepresentable {
-    func makeNSView(context: Context) -> Probe { Probe() }
-    func updateNSView(_ view: Probe, context: Context) { view.disableNativeHighlight() }
+private struct SettingsSymbolTile: View {
+    let symbol: String
+    var selected = false
+    var accented = false
+    var size: CGFloat = 24
 
-    final class Probe: NSView {
-        override func viewDidMoveToWindow() {
-            super.viewDidMoveToWindow()
-            disableNativeHighlight()
-        }
-
-        override func hitTest(_ point: NSPoint) -> NSView? { nil }
-
-        func disableNativeHighlight() {
-            let table = sequence(first: self as NSView, next: \.superview)
-                .lazy
-                .compactMap { $0 as? NSTableView }
-                .first
-            table?.selectionHighlightStyle = .none
-        }
+    var body: some View {
+        Image(systemName: symbol)
+            .symbolRenderingMode(.monochrome)
+            .font(.system(size: size * 0.48, weight: .medium))
+            .foregroundStyle(selected ? Color.white : accented ? Palette.accent : Palette.ink.opacity(0.78))
+            .frame(width: size, height: size)
+            .background(selected ? Palette.accent : accented ? Palette.accentSoft : Palette.ink.opacity(0.06),
+                        in: RoundedRectangle(cornerRadius: size * 0.28, style: .continuous))
+            .overlay {
+                if accented && !selected {
+                    RoundedRectangle(cornerRadius: size * 0.28, style: .continuous)
+                        .stroke(Palette.accent.opacity(0.16), lineWidth: 1)
+                }
+            }
+            .accessibilityHidden(true)
     }
 }
 
@@ -377,688 +307,470 @@ private struct SettingsDetailView: View {
     @StoredState private var revealsAIKey = false
 
     var body: some View {
-        VStack(spacing: 0) {
-            header
-            Form {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 22) {
+                VStack(alignment: .leading, spacing: 14) {
+                    HStack(alignment: .center, spacing: 13) {
+                        SettingsSymbolTile(symbol: page.symbol, accented: true, size: 36)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(page.title).font(.system(size: 20, weight: .semibold))
+                            Text(page.summary).font(.system(size: 12)).foregroundStyle(Palette.muted)
+                        }
+                        Spacer(minLength: 0)
+                    }
+                    Rectangle().fill(Palette.line).frame(height: 1)
+                }
                 pageContent
             }
-            .formStyle(.grouped)
-            .scrollContentBackground(.hidden)
-            .id(page)
+            .frame(maxWidth: 620, alignment: .leading)
+            .padding(28)
+            .frame(maxWidth: .infinity, alignment: .top)
         }
-        .navigationTitle(page.title)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .id(page)
         .background(Palette.background)
+        .onChange(of: page) { _, _ in revealsAIKey = false }
     }
 
-    private var header: some View {
-        VStack(alignment: .leading, spacing: 9) {
-            HStack(spacing: 11) {
-                Image(systemName: page.symbol)
-                    .font(.system(size: 15, weight: .medium))
-                    .foregroundStyle(Palette.accent)
-                    .frame(width: 34, height: 34)
-                    .background(Palette.accentSoft, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(page.title)
-                        .font(.system(size: 19, weight: .semibold))
-                        .foregroundStyle(Palette.ink)
-                    Text(page.summary)
-                        .font(.system(size: 11))
-                        .foregroundStyle(Palette.muted)
-                }
-                Spacer(minLength: 0)
-            }
-
-            HStack(spacing: 6) {
-                ForEach(headerFacts) { fact in
-                    SettingsHeaderFact(fact: fact)
-                }
-            }
-        }
-        .padding(.horizontal, 22)
-        .padding(.top, 16)
-        .padding(.bottom, 13)
-        .background(Palette.background)
-        .overlay(alignment: .bottom) {
-            Rectangle()
-                .fill(Palette.line.opacity(0.7))
-                .frame(height: 0.5)
-        }
-    }
-
-    private var headerFacts: [SettingsHeaderFactModel] {
+    @ViewBuilder private var pageContent: some View {
         switch page {
-        case .general:
-            return [
-                SettingsHeaderFactModel(id: "history", symbol: "photo.stack", text: "\(model.records.count) 张截图"),
-                permissionFact
-            ]
-        case .screenshot:
-            return [
-                SettingsHeaderFactModel(id: "history", symbol: "clock.arrow.circlepath",
-                                        text: model.keepHistory ? "历史已开启" : "不写入历史"),
-                permissionFact
-            ]
-        case .translation:
-            return [
-                SettingsHeaderFactModel(id: "target", symbol: "globe",
-                                        text: LanguageChoice.targets.first(where: { $0.id == model.targetLanguage })?.name ?? "自动"),
-                SettingsHeaderFactModel(
-                    id: "engine",
-                    symbol: model.translationProvider.symbol,
-                    text: model.translationProvider == .ai
-                        ? (model.aiReady ? "AI 已配置" : "AI 待配置")
-                        : "系统翻译",
-                    tint: model.translationProvider == .ai && !model.aiReady ? Palette.warning : nil
-                )
-            ]
-        case .clipboard:
-            return [
-                SettingsHeaderFactModel(id: "monitor", symbol: clipboard.monitorsSystem ? "record.circle" : "pause.circle",
-                                        text: clipboard.monitorsSystem ? "正在监听" : "已暂停",
-                                        tint: clipboard.monitorsSystem ? Palette.success : Palette.warning),
-                SettingsHeaderFactModel(id: "entries", symbol: "tray.full", text: "\(clipboard.entries.count) 项记录")
-            ]
-        case .shortcuts:
-            return [
-                SettingsHeaderFactModel(id: "registered", symbol: model.hotkeyAvailable ? "checkmark.circle" : "exclamationmark.triangle",
-                                        text: model.hotkeyAvailable ? "4 个快捷键已注册" : "存在快捷键冲突",
-                                        tint: model.hotkeyAvailable ? Palette.success : Palette.warning),
-                SettingsHeaderFactModel(id: "instant", symbol: "bolt", text: "修改后即时生效")
-            ]
-        case .history:
-            return [
-                SettingsHeaderFactModel(id: "count", symbol: "photo.stack", text: "\(model.records.count) 项记录"),
-                SettingsHeaderFactModel(id: "local", symbol: "internaldrive", text: "仅保存在本机")
-            ]
-        case .privacy:
-            return [
-                permissionFact,
-                SettingsHeaderFactModel(id: "local", symbol: "hand.raised", text: "无云端账号")
-            ]
-        case .tools:
-            return [
-                SettingsHeaderFactModel(id: "count", symbol: "square.grid.2x2", text: "4 个快捷入口"),
-                SettingsHeaderFactModel(id: "login", symbol: "person.crop.circle", text: "无需登录")
-            ]
-        case .about:
-            return [
-                SettingsHeaderFactModel(id: "version", symbol: "number", text: "版本 \(versionLabel)"),
-                SettingsHeaderFactModel(id: "menu", symbol: "menubar.rectangle", text: "菜单栏应用")
-            ]
-        }
-    }
-
-    private var permissionFact: SettingsHeaderFactModel {
-        let granted = model.screenPermission.isGranted
-        return SettingsHeaderFactModel(
-            id: "permission",
-            symbol: granted ? "checkmark.shield" : "exclamationmark.shield",
-            text: granted ? "屏幕访问已授权" : "屏幕访问待授权",
-            tint: granted ? Palette.success : Palette.warning
-        )
-    }
-
-    private var versionLabel: String {
-        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "-"
-    }
-
-    @ViewBuilder
-    private var pageContent: some View {
-        switch page {
-        case .general:
-            generalContent
-        case .screenshot:
-            screenshotContent
-        case .translation:
-            translationContent
-        case .clipboard:
-            clipboardContent
-        case .shortcuts:
-            shortcutsContent
-        case .history:
-            historyContent
-        case .privacy:
-            privacyContent
-        case .tools:
-            toolsContent
-        case .about:
-            aboutContent
+        case .general: generalContent
+        case .screenshot: screenshotContent
+        case .translation: translationContent
+        case .clipboard: clipboardContent
+        case .shortcuts: shortcutsContent
+        case .history: historyContent
+        case .privacy: privacyContent
+        case .tools: toolsContent
+        case .about: aboutContent
         }
     }
 
     private var generalContent: some View {
         Group {
-            Section("快速操作") {
-                SettingsActionRow(
-                    title: "区域截图",
-                    detail: "拖选屏幕区域并进入编辑，确认后复制",
-                    symbol: "viewfinder",
-                    shortcut: model.captureHotkey.symbol
-                ) {
-                    model.capture()
-                }
-                SettingsActionRow(
-                    title: "截图并翻译",
-                    detail: "截取文字区域，直接打开独立翻译窗口",
-                    symbol: "character.bubble",
-                    shortcut: model.translateHotkey.symbol
-                ) {
-                    model.capture(translate: true)
-                }
-                SettingsActionRow(
-                    title: "剪贴板历史",
-                    detail: "搜索并重新复制最近保存的内容",
-                    symbol: "doc.on.clipboard",
-                    shortcut: model.clipboardHotkey.symbol
-                ) {
-                    model.showClipboard?()
-                }
+            SettingsOverviewStrip(model: model, clipboard: clipboard)
+            SettingsSection("常用操作") {
+                SettingsActionRow(title: "区域截图", detail: "选中区域后，直接标注与编辑", symbol: "viewfinder",
+                                  shortcut: model.captureHotkey.symbol) { model.capture() }
+                SettingsSeparator()
+                SettingsActionRow(title: "截图并翻译", detail: "框选文字，打开独立翻译窗口", symbol: "character.bubble",
+                                  shortcut: model.translateHotkey.symbol) { model.capture(translate: true) }
+                SettingsSeparator()
+                SettingsActionRow(title: "剪贴板历史", detail: "找回并复制最近的内容", symbol: "list.clipboard",
+                                  shortcut: model.clipboardHotkey.symbol) { model.showClipboard?() }
             }
-
-            Section("运行状态") {
-                SettingsValueRow(
-                    title: "运行方式",
-                    detail: "顶部菜单栏常驻，不在 Dock 显示",
-                    value: "菜单栏"
-                )
-                SettingsValueRow(
-                    title: "截图历史",
-                    detail: "最近保留的截图与识别结果",
-                    value: "\(model.records.count) 项"
-                )
-                SettingsValueRow(
-                    title: "剪贴板历史",
-                    detail: "文字、图片、GIF、视频和文件引用",
-                    value: "\(clipboard.entries.count) 项"
-                )
-            }
-
-            Section {
+            SettingsSection("使用方式") {
+                SettingsRow("菜单栏运行", detail: "关闭窗口后仍可使用快捷键和菜单栏入口") {
+                    Text("已启用").foregroundStyle(Palette.muted)
+                }
+                SettingsSeparator()
                 PermissionActionRow(model: model)
-            } header: {
-                Text("屏幕访问")
-            } footer: {
-                Text("只在你主动截图、文字识别或录制时读取所选区域。")
             }
+            SettingsFootnote("截图、视频与 GIF 在点击 ✓ 后复制到剪贴板。按 Esc 取消本次操作。",
+                             symbol: "checkmark.circle")
         }
     }
 
     private var screenshotContent: some View {
         Group {
-            Section {
-                Toggle(isOn: $model.autoOCR) {
-                    SettingsRowLabel(
-                        title: "导入图片后自动识别文字",
-                        detail: "只对导入的图片生效，普通截图仍停留在编辑状态"
-                    )
-                }
-                Toggle(isOn: $model.autoTranslate) {
-                    SettingsRowLabel(
-                        title: "识别后自动翻译",
-                        detail: "使用翻译页设置的默认目标语言"
-                    )
-                }
-                Toggle(isOn: $model.keepHistory) {
-                    SettingsRowLabel(
-                        title: "保存最近 30 张截图与译文",
-                        detail: "历史仅保存在本机，可随时清空"
-                    )
-                }
-            } header: {
-                Text("处理方式")
-            } footer: {
-                Text("普通屏幕截图始终先进入编辑；点击工具栏中的识别、翻译、长截图或录制后再进入对应流程。")
+            SettingsSection("图片处理", footer: "自动处理仅用于导入图片。屏幕截图始终先进入编辑。") {
+                SettingsToggle("自动识别文字", detail: "导入图片后，提取其中的文字", isOn: $model.autoOCR)
+                SettingsSeparator()
+                SettingsToggle("识别后自动翻译", detail: "使用当前选择的翻译引擎", isOn: $model.autoTranslate)
+                SettingsSeparator()
+                SettingsToggle("保留截图历史", detail: "本机保留最近 30 张截图、标注与译文", isOn: $model.keepHistory)
             }
-
-            Section("截图流程") {
-                SettingsValueRow(title: "确认", detail: "带标注图片或录制内容直接复制", value: "绿色勾选")
-                SettingsValueRow(title: "取消", detail: "不复制、不保存，也不改变现有剪贴板", value: "Esc / 红色叉号")
-                SettingsValueRow(title: "历史草稿", detail: "确认前不写入历史记录", value: "安全")
+            SettingsSection("开始截图") {
+                SettingsActionRow(title: "截取屏幕区域", symbol: "viewfinder") { model.capture() }
+                SettingsSeparator()
+                SettingsActionRow(title: "导入图片", symbol: "photo.badge.plus") { model.importImage() }
             }
-
-            Section("操作") {
-                Button {
-                    model.capture()
-                } label: {
-                    Label("开始一次新截图", systemImage: "viewfinder")
-                }
-                Button {
-                    model.importImage()
-                } label: {
-                    Label("导入已有图片", systemImage: "photo.badge.plus")
-                }
-            }
+            SettingsFootnote("点击 ✓ 才复制并写入历史；点击 × 或按 Esc 丢弃本次草稿。", symbol: "cursorarrow.click")
         }
     }
 
     private var translationContent: some View {
         Group {
-            Section {
-                Picker("翻译引擎", selection: $model.translationProvider) {
-                    ForEach(TranslationProvider.allCases) { provider in
-                        Label(provider.title, systemImage: provider.symbol).tag(provider)
+            SettingsSection("翻译方式", footer: model.translationProvider == .apple
+                            ? "使用 Apple 系统翻译；首次使用某个语言对时，可能需要下载语言包。"
+                            : "翻译内容会发送到你配置的 AI 服务。") {
+                SettingsRow("翻译引擎") {
+                    Picker("翻译引擎", selection: $model.translationProvider) {
+                        ForEach(TranslationProvider.allCases) { provider in
+                            Text(provider.title).tag(provider)
+                        }
                     }
+                    .labelsHidden().pickerStyle(.segmented).frame(width: 230)
                 }
-                .pickerStyle(.segmented)
+            }
 
-                if model.translationProvider == .ai {
-                    LabeledContent {
+            if model.translationProvider == .ai {
+                SettingsSection("AI 服务", footer: "API Key 仅保存在 macOS 钥匙串。测试连接会发送一次 Hello 翻译请求。") {
+                    SettingsFieldRow("接口地址") {
                         TextField("https://api.openai.com/v1", text: $model.aiBaseURL)
-                            .textFieldStyle(.roundedBorder)
-                            .controlSize(.small)
-                            .labelsHidden()
-                            .frame(width: 250)
-                    } label: {
-                        SettingsRowLabel(
-                            title: "接口地址",
-                            detail: "[OI] Chat Completions 兼容地址，可填到 /v1"
-                        )
+                            .accessibilityLabel("AI 接口地址")
                     }
-
-                    LabeledContent {
-                        TextField("gpt-4o-mini", text: $model.aiModel)
-                            .textFieldStyle(.roundedBorder)
-                            .controlSize(.small)
-                            .labelsHidden()
-                            .frame(width: 250)
-                    } label: {
-                        SettingsRowLabel(title: "模型", detail: "填写服务商提供的模型标识")
+                    SettingsSeparator()
+                    SettingsFieldRow("模型") {
+                        TextField("gpt-4o-mini", text: $model.aiModel).accessibilityLabel("AI 模型")
                     }
-
-                    LabeledContent {
-                        HStack(spacing: 6) {
+                    SettingsSeparator()
+                    SettingsFieldRow("API Key") {
+                        HStack(spacing: 8) {
                             Group {
-                                if revealsAIKey {
-                                    TextField("sk-…", text: $model.aiAPIKey)
-                                } else {
-                                    SecureField("sk-…", text: $model.aiAPIKey)
-                                }
+                                if revealsAIKey { TextField("输入 API Key", text: $model.aiAPIKey) }
+                                else { SecureField("输入 API Key", text: $model.aiAPIKey) }
                             }
-                            .textFieldStyle(.roundedBorder)
-                            .controlSize(.small)
-                            .labelsHidden()
-                            .frame(width: 200)
-
-                            Button {
-                                revealsAIKey.toggle()
-                            } label: {
+                            .accessibilityLabel("AI API Key")
+                            Button { revealsAIKey.toggle() } label: {
                                 Image(systemName: revealsAIKey ? "eye.slash" : "eye")
+                                    .foregroundStyle(Palette.muted)
                             }
-                            .buttonStyle(.borderless)
+                            .buttonStyle(.plain)
                             .help(revealsAIKey ? "隐藏 API Key" : "显示 API Key")
+                            .accessibilityLabel(revealsAIKey ? "隐藏 API Key" : "显示 API Key")
                         }
-                    } label: {
-                        SettingsRowLabel(title: "API Key", detail: "仅保存到本机钥匙串，不写入源码或历史")
                     }
-
-                    LabeledContent {
-                        TextField("可选：术语、语气或专有名词要求", text: $model.aiInstructions)
-                            .textFieldStyle(.roundedBorder)
-                            .controlSize(.small)
-                            .labelsHidden()
-                            .frame(width: 250)
-                    } label: {
-                        SettingsRowLabel(title: "附加要求", detail: "会加入系统提示词，留空则使用默认规则")
+                    SettingsSeparator()
+                    SettingsFieldRow("附加要求") {
+                        TextField("可选：术语、语气或专有名词", text: $model.aiInstructions)
+                            .accessibilityLabel("AI 翻译附加要求")
                     }
-
+                    SettingsSeparator()
                     HStack(spacing: 10) {
-                        Button("测试连接") { model.testAITranslation() }
-                            .disabled(model.aiTesting)
-                        if model.aiTesting {
-                            ProgressView().controlSize(.small)
-                        }
+                        Button("测试连接") { model.testAITranslation() }.disabled(model.aiTesting)
+                        if model.aiTesting { ProgressView().controlSize(.small) }
                         if let message = model.aiTestMessage {
-                            Text(message)
-                                .font(.caption)
-                                .foregroundStyle(model.aiTesting ? Palette.muted : Palette.ink)
-                                .lineLimit(2)
+                            Text(message).font(.system(size: 11)).foregroundStyle(Palette.muted)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
                         Spacer(minLength: 0)
                     }
+                    .controlSize(.small).padding(.horizontal, 16).padding(.vertical, 12)
                 }
-            } header: {
-                Text("翻译引擎")
-            } footer: {
-                Text(model.translationProvider == .ai
-                     ? "AI 翻译会把待翻译文字发送到你配置的服务；API Key 保存在 macOS 钥匙串。测试连接会发送一次 “Hello” 翻译请求。"
-                     : "Apple 翻译在系统框架内处理；首次使用某个语言对时，可能需要下载语言包。")
             }
 
-            Section {
-                LabeledContent {
-                    Picker("目标语言", selection: Binding(
-                        get: { model.targetLanguage },
-                        set: { model.languageEdited(target: $0) }
-                    )) {
-                        ForEach(LanguageChoice.targets) { language in
-                            Text(language.name).tag(language.id)
-                        }
+            SettingsSection("语言", footer: "自动识别原文：中文默认译英语，其他语言默认译简体中文。") {
+                SettingsRow("默认目标语言") {
+                    Picker("目标语言", selection: Binding(get: { model.targetLanguage },
+                                                        set: { model.languageEdited(target: $0) })) {
+                        ForEach(LanguageChoice.targets) { Text($0.name).tag($0.id) }
                     }
-                    .labelsHidden()
-                    .frame(width: 150)
-                } label: {
-                    SettingsRowLabel(
-                        title: "默认目标语言",
-                        detail: "自动识别原文语种；中文默认译英语，其他语言默认译中文"
-                    )
+                    .labelsHidden().frame(width: 150)
                 }
-            } header: {
-                Text("语言")
-            } footer: {
-                Text(model.translationProvider == .ai
-                     ? "AI 翻译会自动检测原文语种，并将识别结果与译文并排展示。"
-                     : "首次使用某个语言对时，Apple 可能要求下载系统语言包。截图翻译可在独立窗口中随时交换语言。")
             }
-
-            Section("快捷入口") {
-                SettingsActionRow(
-                    title: "文字翻译",
-                    detail: "直接输入或粘贴一段原文",
-                    symbol: "text.bubble"
-                ) {
+            SettingsSection("快捷入口") {
+                SettingsActionRow(title: "文字翻译", detail: "直接输入或粘贴原文", symbol: "text.bubble") {
                     model.startTextTranslation()
                 }
-                SettingsActionRow(
-                    title: "翻译剪贴板",
-                    detail: "翻译当前复制的文字或图片",
-                    symbol: "doc.on.clipboard",
-                    shortcut: model.clipboardTranslateHotkey.symbol
-                ) {
-                    model.translateClipboard()
-                }
+                SettingsSeparator()
+                SettingsActionRow(title: "翻译剪贴板", symbol: "doc.on.clipboard",
+                                  shortcut: model.clipboardTranslateHotkey.symbol) { model.translateClipboard() }
             }
         }
     }
 
     private var clipboardContent: some View {
         Group {
-            Section {
-                Toggle(isOn: $clipboard.monitorsSystem) {
-                    SettingsRowLabel(
-                        title: "记录系统剪贴板",
-                        detail: "监听文字、图片、GIF、视频和文件引用"
-                    )
+            SettingsSection("系统剪贴板", footer: "历史仅保存在本机，标记为保密或临时的内容不会被记录。") {
+                SettingsToggle("记录剪贴板历史", detail: "支持文字、图片、GIF、视频和文件", isOn: $clipboard.monitorsSystem)
+                SettingsSeparator()
+                SettingsRow("保留数量", detail: "相同内容自动去重") {
+                    Text("最近 100 项").foregroundStyle(Palette.muted)
                 }
-                SettingsValueRow(
-                    title: "保留数量",
-                    detail: "相同内容会去重并移动到最前",
-                    value: "最近 100 项"
-                )
-                SettingsValueRow(
-                    title: "快捷打开",
-                    detail: "在任意应用中打开剪贴板历史",
-                    value: model.clipboardHotkey.symbol,
-                    monospaced: true
-                )
-            } header: {
-                Text("监听")
-            } footer: {
-                Text("历史仅保存在本机。来源标记为保密或临时的内容不会收入历史。")
+                SettingsSeparator()
+                SettingsRow("当前记录") {
+                    Text("\(clipboard.entries.count) 项").foregroundStyle(Palette.muted)
+                }
             }
-
-            Section("操作") {
-                Button {
-                    model.showClipboard?()
-                } label: {
-                    Label("打开剪贴板历史", systemImage: "arrow.up.right.square")
-                }
+            SettingsSection("快捷入口") {
+                SettingsActionRow(title: "打开剪贴板历史", symbol: "list.clipboard",
+                                  shortcut: model.clipboardHotkey.symbol) { model.showClipboard?() }
             }
         }
     }
 
     private var shortcutsContent: some View {
         Group {
-            Section {
-                HotkeyRow(title: "区域截图", settings: $model.captureHotkey)
-                HotkeyRow(title: "截图并翻译", settings: $model.translateHotkey)
-                HotkeyRow(title: "剪贴板历史", settings: $model.clipboardHotkey)
-                HotkeyRow(title: "翻译剪贴板", settings: $model.clipboardTranslateHotkey)
-            } header: {
-                Text("全局快捷键")
-            } footer: {
-                Text("快捷键修改后立即生效。若组合键被其他应用占用，会在这里提示。")
-            }
-
-            if !model.hotkeyAvailable {
-                Section {
-                    Label("有快捷键未注册成功，可能被其他应用占用。", systemImage: "exclamationmark.triangle")
-                        .foregroundStyle(Palette.warning)
+            SettingsSection("全局快捷键", footer: "手动输入组合键，例如 ⌥⇧S 或 option+shift+s。按回车或点击应用后立即生效。") {
+                VStack(spacing: 0) {
+                    HotkeyRow(title: "区域截图", settings: $model.captureHotkey)
+                    SettingsSeparator()
+                    HotkeyRow(title: "截图并翻译", settings: $model.translateHotkey)
+                    SettingsSeparator()
+                    HotkeyRow(title: "剪贴板历史", settings: $model.clipboardHotkey)
+                    SettingsSeparator()
+                    HotkeyRow(title: "翻译剪贴板", settings: $model.clipboardTranslateHotkey)
                 }
             }
+            SettingsFootnote(model.hotkeyAvailable ? "所有快捷键已就绪，可在其他应用中使用。" : "部分快捷键已被占用，请更换组合键。",
+                             symbol: model.hotkeyAvailable ? "checkmark.circle" : "exclamationmark.triangle",
+                             tint: model.hotkeyAvailable ? Palette.success : Palette.warning)
         }
     }
 
     private var historyContent: some View {
         Group {
-            Section {
+            SettingsSection("最近截图") {
                 HStack(spacing: 8) {
-                    Image(systemName: "magnifyingglass")
-                        .foregroundStyle(.secondary)
-                    TextField("搜索历史标题或识别文字", text: $model.search)
-                        .textFieldStyle(.plain)
+                    Image(systemName: "magnifyingglass").foregroundStyle(Palette.muted)
+                    TextField("搜索标题或识别文字", text: $model.search).textFieldStyle(.plain)
+                        .accessibilityLabel("搜索截图历史")
                     if !model.search.isEmpty {
-                        Button {
-                            model.search = ""
-                        } label: {
-                            Image(systemName: "xmark.circle.fill")
-                                .foregroundStyle(.secondary)
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("清除搜索")
+                        Button { model.search = "" } label: { Image(systemName: "xmark.circle.fill") }
+                            .buttonStyle(.plain).accessibilityLabel("清除历史搜索")
                     }
                 }
-                .padding(.vertical, 3)
-
+                .font(.system(size: 12)).padding(16)
+                SettingsSeparator()
                 if model.filteredRecords.isEmpty {
-                    Text(model.records.isEmpty ? "暂无截图历史" : "没有匹配的历史记录")
-                        .foregroundStyle(.secondary)
-                        .padding(.vertical, 12)
+                    VStack(spacing: 8) {
+                        Image(systemName: "photo.on.rectangle").font(.system(size: 24, weight: .light))
+                        Text(model.records.isEmpty ? "暂无截图历史" : "没有匹配的记录").font(.system(size: 12))
+                    }
+                    .foregroundStyle(Palette.muted).frame(maxWidth: .infinity).padding(.vertical, 32)
                 } else {
                     ForEach(model.filteredRecords) { record in
                         SettingsHistoryRow(model: model, record: record)
+                        if record.id != model.filteredRecords.last?.id { SettingsSeparator() }
                     }
                 }
-            } header: {
-                Text("最近截图")
             }
-
-            Section("存储") {
-                Button {
-                    if let directory = model.store?.directory {
-                        NSWorkspace.shared.open(directory)
-                    }
-                } label: {
-                    Label("在访达中打开本地存储", systemImage: "folder")
+            SettingsSection("管理记录") {
+                SettingsRow("本地存储") {
+                    Button("在访达中打开") { openDataDirectory() }
                 }
-                Button(role: .destructive) {
-                    model.clearHistory()
-                } label: {
-                    Label("清空全部历史", systemImage: "trash")
+                SettingsSeparator()
+                SettingsRow("清空截图历史", detail: "移除已保存的截图、识别文字和译文") {
+                    Button("清空…", role: .destructive) { model.clearHistory() }.disabled(model.records.isEmpty)
                 }
-                .disabled(model.records.isEmpty)
             }
         }
     }
 
     private var privacyContent: some View {
         Group {
-            Section {
+            SettingsSection("屏幕访问", footer: "只在你主动截图、识别或录制时读取所选区域。") {
                 PermissionActionRow(model: model)
-            } header: {
-                Text("权限")
-            } footer: {
-                Text("如果系统已显示授权但截图仍被拒绝，可重新启动应用后再试。")
             }
-
-            Section("本机处理") {
-                SettingsValueRow(title: "文字识别", detail: "使用 Apple Vision 在本机提取文字", value: "本机")
-                SettingsValueRow(title: "翻译", detail: "使用 Apple 系统翻译框架", value: "系统")
-                SettingsValueRow(title: "统计与服务器", detail: "没有第三方统计或自建服务器", value: "无")
+            SettingsSection("数据处理") {
+                SettingsRow("文字识别", detail: "通过 Apple Vision 在本机提取文字") { Text("本机").foregroundStyle(Palette.muted) }
+                SettingsSeparator()
+                SettingsRow("翻译", detail: model.translationProvider == .ai ? "文字发送到你配置的 AI 服务" : "通过 Apple 系统翻译框架处理") {
+                    Text(model.translationProvider.title).foregroundStyle(Palette.muted)
+                }
+                SettingsSeparator()
+                SettingsRow("统计与账号", detail: "没有统计 SDK、自建服务器或账号系统") { Text("无").foregroundStyle(Palette.muted) }
             }
-
-            Section("本地数据") {
-                Button {
-                    if let directory = model.store?.directory {
-                        NSWorkspace.shared.open(directory)
-                    }
-                } label: {
-                    Label("打开应用数据目录", systemImage: "folder")
+            SettingsSection("本地数据") {
+                SettingsRow("应用数据目录") { Button("在访达中打开") { openDataDirectory() } }
+                SettingsSeparator()
+                SettingsRow("截图历史") {
+                    Button("清空…", role: .destructive) { model.clearHistory() }.disabled(model.records.isEmpty)
                 }
-                Button(role: .destructive) {
-                    model.clearHistory()
-                } label: {
-                    Label("清空截图历史", systemImage: "trash")
-                }
-                .disabled(model.records.isEmpty)
             }
         }
     }
 
     private var toolsContent: some View {
-        Section("快捷入口") {
-            SettingsActionRow(
-                title: "导入图片",
-                detail: "识别已有文件中的文字",
-                symbol: "photo.badge.plus"
-            ) {
-                model.importImage()
-            }
-            SettingsActionRow(
-                title: "文字翻译",
-                detail: "直接粘贴或输入一段原文",
-                symbol: "text.bubble"
-            ) {
-                model.startTextTranslation()
-            }
-            SettingsActionRow(
-                title: "翻译剪贴板",
-                detail: "翻译当前复制的文字或图片",
-                symbol: "doc.on.clipboard"
-            ) {
-                model.translateClipboard()
-            }
-            SettingsActionRow(
-                title: "体验示例",
-                detail: "使用内置图片检查文字识别，无需屏幕权限",
-                symbol: "sparkles"
-            ) {
-                model.useDemo()
-            }
+        SettingsSection("快捷入口") {
+            SettingsActionRow(title: "导入图片", detail: "提取已有图片中的文字", symbol: "photo.badge.plus") { model.importImage() }
+            SettingsSeparator()
+            SettingsActionRow(title: "文字翻译", detail: "直接输入或粘贴原文", symbol: "text.bubble") { model.startTextTranslation() }
+            SettingsSeparator()
+            SettingsActionRow(title: "翻译剪贴板", symbol: "doc.on.clipboard") { model.translateClipboard() }
+            SettingsSeparator()
+            SettingsActionRow(title: "体验示例", detail: "用内置示例检查识别效果", symbol: "sparkles") { model.useDemo() }
         }
     }
 
     private var aboutContent: some View {
         Group {
-            Section {
-                HStack(spacing: 14) {
-                    Image(nsImage: NSApp.applicationIconImage)
-                        .resizable()
-                        .scaledToFit()
-                        .frame(width: 54, height: 54)
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("拾光截图").font(.title3.weight(.semibold))
-                        Text("截取片刻，读懂世界。")
-                            .font(.callout)
-                            .foregroundStyle(.secondary)
-                        Text("版本 \(appVersion)")
-                            .font(.caption)
-                            .foregroundStyle(.tertiary)
-                    }
-                    Spacer()
+            HStack(spacing: 18) {
+                Image(nsImage: NSApp.applicationIconImage).resizable().scaledToFit().frame(width: 72, height: 72)
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("拾光截图").font(.system(size: 20, weight: .semibold))
+                    Text("截取片刻，读懂世界。").font(.system(size: 12)).foregroundStyle(Palette.muted)
+                    Text("版本 \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "-") (\(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "-"))")
+                        .font(.system(size: 11)).foregroundStyle(Palette.muted)
                 }
-                .padding(.vertical, 6)
+                Spacer()
             }
-
-            Section("运行方式") {
-                SettingsValueRow(title: "菜单栏", detail: "顶部状态栏常驻入口", value: "已启用")
-                SettingsValueRow(title: "Dock", detail: "关闭窗口后继续在菜单栏运行", value: "不显示")
+            .padding(.vertical, 8)
+            SettingsSection("运行方式") {
+                SettingsRow("菜单栏常驻", detail: "关闭窗口后继续运行，Dock 中不显示图标") {
+                    Text("已启用").foregroundStyle(Palette.muted)
+                }
             }
-
-            Section("隐私") {
-                Text("文字识别使用本机 Vision；翻译交给 Apple 系统翻译。应用没有第三方统计 SDK、自建服务器或账号系统。")
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
+            SettingsFootnote("文字识别在本机处理。Apple 与 AI 翻译可在翻译设置中选择；使用 AI 时，文字会发送到你配置的服务。",
+                             symbol: "hand.raised")
         }
     }
 
-    private var appVersion: String {
-        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "-"
-        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "-"
-        return "\(version) (\(build))"
+    private func openDataDirectory() {
+        if let directory = model.store?.directory { NSWorkspace.shared.open(directory) }
     }
 }
 
-private struct SettingsHeaderFactModel: Identifiable {
-    let id: String
-    let symbol: String
-    let text: String
-    var tint: Color?
-}
+private struct SettingsSection<Content: View>: View {
+    let title: String
+    var footer: String?
+    @ViewBuilder var content: Content
 
-private struct SettingsHeaderFact: View {
-    let fact: SettingsHeaderFactModel
+    init(_ title: String, footer: String? = nil, @ViewBuilder content: () -> Content) {
+        self.title = title
+        self.footer = footer
+        self.content = content()
+    }
 
     var body: some View {
-        HStack(spacing: 5) {
-            Image(systemName: fact.symbol)
-                .font(.system(size: 9.5, weight: .medium))
-                .foregroundStyle(fact.tint ?? Palette.muted)
-            Text(fact.text)
-                .font(.system(size: 10.5, weight: .medium))
-                .foregroundStyle(Palette.muted)
-                .lineLimit(1)
+        VStack(alignment: .leading, spacing: 10) {
+            Text(title).font(.system(size: 11.5, weight: .semibold)).foregroundStyle(Palette.muted)
+            VStack(spacing: 0) { content }
+                .frame(maxWidth: .infinity)
+                .background(Palette.panel, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(Palette.line, lineWidth: 1))
+            if let footer {
+                Text(footer).font(.system(size: 11)).foregroundStyle(Palette.muted)
+                    .lineSpacing(3).fixedSize(horizontal: false, vertical: true)
+            }
         }
-        .padding(.horizontal, 8)
-        .frame(height: 22)
-        .background(Palette.ink.opacity(0.045), in: Capsule())
-        .accessibilityElement(children: .combine)
+    }
+}
+
+private struct SettingsSeparator: View {
+    var body: some View {
+        Rectangle().fill(Palette.line.opacity(0.8)).frame(height: 1).padding(.horizontal, 16)
+    }
+}
+
+private struct SettingsRow<Control: View>: View {
+    let title: String
+    var detail: String?
+    @ViewBuilder var control: Control
+
+    init(_ title: String, detail: String? = nil, @ViewBuilder control: () -> Control) {
+        self.title = title
+        self.detail = detail
+        self.control = control()
+    }
+
+    var body: some View {
+        HStack(spacing: 16) {
+            SettingsRowLabel(title: title, detail: detail)
+            Spacer(minLength: 0)
+            control.fixedSize(horizontal: true, vertical: false).controlSize(.small)
+        }
+        .font(.system(size: 12))
+        .padding(.horizontal, 16).padding(.vertical, 13)
+        .frame(minHeight: 50)
+    }
+}
+
+private struct SettingsToggle: View {
+    let title: String
+    var detail: String?
+    @Binding var isOn: Bool
+
+    init(_ title: String, detail: String? = nil, isOn: Binding<Bool>) {
+        self.title = title
+        self.detail = detail
+        _isOn = isOn
+    }
+
+    var body: some View {
+        SettingsRow(title, detail: detail) {
+            Toggle(title, isOn: $isOn).labelsHidden().toggleStyle(.switch)
+                .accessibilityLabel(title)
+        }
+    }
+}
+
+private struct SettingsFieldRow<Content: View>: View {
+    let title: String
+    @ViewBuilder let content: Content
+
+    init(_ title: String, @ViewBuilder content: () -> Content) {
+        self.title = title
+        self.content = content()
+    }
+
+    var body: some View {
+        HStack(spacing: 16) {
+            Text(title).font(.system(size: 12.5, weight: .medium)).frame(width: 72, alignment: .leading)
+            content.textFieldStyle(.plain).font(.system(size: 12)).multilineTextAlignment(.leading)
+                .padding(.horizontal, 10).frame(maxWidth: .infinity, minHeight: 30, alignment: .leading)
+                .background(Palette.background, in: RoundedRectangle(cornerRadius: 7))
+                .overlay(RoundedRectangle(cornerRadius: 7).stroke(Palette.line))
+        }
+        .padding(.horizontal, 16).padding(.vertical, 10)
+    }
+}
+
+private struct SettingsOverviewStrip: View {
+    @ObservedObject var model: AppModel
+    @ObservedObject var clipboard: ClipboardHistory
+
+    var body: some View {
+        HStack(spacing: 0) {
+            metric(
+                label: "屏幕权限",
+                value: model.screenPermission.isGranted ? "已授权" : "待授权",
+                dot: model.screenPermission.isGranted ? Palette.success : Palette.warning
+            )
+            divider
+            metric(
+                label: "翻译引擎",
+                value: model.translationProvider.title,
+                dot: Palette.accent
+            )
+            divider
+            metric(
+                label: "剪贴板记录",
+                value: "\(clipboard.entries.count) / 100 项",
+                dot: clipboard.monitorsSystem ? Palette.success : Palette.muted
+            )
+        }
+        .background(Palette.panel, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(Palette.line, lineWidth: 1))
+    }
+
+    private var divider: some View {
+        Rectangle().fill(Palette.line).frame(width: 1, height: 34)
+    }
+
+    private func metric(label: String, value: String, dot: Color) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(label).font(.system(size: 11)).foregroundStyle(Palette.muted)
+            HStack(spacing: 6) {
+                Circle().fill(dot).frame(width: 6, height: 6)
+                Text(value).font(.system(size: 13, weight: .semibold)).foregroundStyle(Palette.ink).lineLimit(1)
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 13)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
 private struct SettingsRowLabel: View {
     let title: String
-    let detail: String
+    var detail: String?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(title)
-                .font(.callout.weight(.medium))
-                .foregroundStyle(.primary)
-            Text(detail)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title).font(.system(size: 12.5, weight: .medium))
+            if let detail {
+                Text(detail).font(.system(size: 11)).foregroundStyle(Palette.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
-    }
-}
-
-private struct SettingsValueRow: View {
-    let title: String
-    let detail: String
-    let value: String
-    var monospaced = false
-
-    var body: some View {
-        LabeledContent {
-            Text(value)
-                .font(.system(size: monospaced ? 10.5 : 11.5,
-                              weight: .medium,
-                              design: monospaced ? .monospaced : .default))
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .textSelection(.enabled)
-        } label: {
-            SettingsRowLabel(title: title, detail: detail)
-        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
 private struct SettingsActionRow: View {
     let title: String
-    let detail: String
+    var detail: String?
     let symbol: String
     var shortcut: String?
     let action: () -> Void
@@ -1066,62 +778,67 @@ private struct SettingsActionRow: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 10) {
-                Image(systemName: symbol)
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(Palette.accent)
-                    .frame(width: 24)
+            HStack(spacing: 12) {
+                SettingsSymbolTile(symbol: symbol, accented: true, size: 30)
                 SettingsRowLabel(title: title, detail: detail)
-                Spacer(minLength: 8)
-                if let shortcut {
-                    Text(shortcut)
-                        .font(.system(size: 10, weight: .medium, design: .monospaced))
-                        .foregroundStyle(.secondary)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 3)
-                        .background(Palette.ink.opacity(0.05), in: RoundedRectangle(cornerRadius: 5))
-                }
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 9.5, weight: .semibold))
-                    .foregroundStyle(hovered ? Palette.accent : Palette.muted.opacity(0.5))
+                Spacer(minLength: 0)
+                if let shortcut { SettingsKeycap(text: shortcut) }
+                Image(systemName: "chevron.right").font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(Palette.muted.opacity(0.7))
             }
-            .padding(.vertical, 3)
-            .padding(.horizontal, 5)
-            .background(
-                RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .fill(hovered ? Palette.ink.opacity(0.035) : Color.clear)
-            )
+            .padding(.horizontal, 16).padding(.vertical, 12)
+            .frame(minHeight: 54)
             .contentShape(Rectangle())
+            .background(hovered ? Palette.accent.opacity(0.035) : Color.clear)
         }
         .buttonStyle(.plain)
-        .foregroundStyle(.primary)
         .onHover { hovered = $0 }
+        .accessibilityLabel(title)
+    }
+}
+
+private struct SettingsKeycap: View {
+    let text: String
+    var body: some View {
+        Text(text).font(.system(size: 11, weight: .medium, design: .monospaced))
+            .foregroundStyle(Palette.muted).padding(.horizontal, 7).frame(height: 23)
+            .background(Palette.background, in: RoundedRectangle(cornerRadius: 5))
+            .overlay(RoundedRectangle(cornerRadius: 5).stroke(Palette.line))
+    }
+}
+
+private struct SettingsFootnote: View {
+    let text: String
+    let symbol: String
+    var tint: Color = Palette.muted
+
+    init(_ text: String, symbol: String, tint: Color = Palette.muted) {
+        self.text = text
+        self.symbol = symbol
+        self.tint = tint
+    }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: symbol).foregroundStyle(tint).frame(width: 14)
+            Text(text).foregroundStyle(Palette.muted).lineSpacing(3)
+        }
+        .font(.system(size: 11))
+        .fixedSize(horizontal: false, vertical: true)
     }
 }
 
 private struct PermissionActionRow: View {
     @ObservedObject var model: AppModel
-
     var body: some View {
-        LabeledContent {
-            HStack(spacing: 8) {
+        SettingsRow("屏幕访问", detail: model.screenPermission.isGranted ? "已授权，可开始截图与录制" : "截图与录制需要屏幕访问权限") {
+            HStack(spacing: 10) {
                 if !model.screenPermission.isGranted {
-                    Button("授予") { model.requestPermission() }
+                    Button("授予权限") { model.requestPermission() }
                 }
                 Button("检查") { model.checkPermission() }
                 Button("系统设置") { model.openPermissionSettings() }
-                Circle()
-                    .fill(model.screenPermission.isGranted ? Palette.success : Palette.warning)
-                    .frame(width: 7, height: 7)
-                    .accessibilityLabel(model.screenPermission.isGranted ? "已授权" : "未授权")
             }
-        } label: {
-            SettingsRowLabel(
-                title: "屏幕访问",
-                detail: model.screenPermission.isGranted
-                    ? "可以使用区域截图、文字识别、长截图和录制"
-                    : model.screenPermission.detail
-            )
         }
     }
 }
@@ -1129,56 +846,25 @@ private struct PermissionActionRow: View {
 private struct SettingsHistoryRow: View {
     @ObservedObject var model: AppModel
     let record: CaptureRecord
-
     var body: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 12) {
             if let image = model.store?.image(for: record) {
-                Image(nsImage: image)
-                    .resizable()
-                    .scaledToFill()
-                    .frame(width: 44, height: 36)
-                    .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 5, style: .continuous)
-                            .stroke(Palette.line, lineWidth: 0.8)
-                    }
+                Image(nsImage: image).resizable().scaledToFill().frame(width: 48, height: 38)
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
             } else {
-                Image(systemName: "photo")
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(Palette.muted)
-                    .frame(width: 44, height: 36)
-                    .background(Palette.ink.opacity(0.045), in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+                SettingsSymbolTile(symbol: "photo", size: 38)
             }
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(record.title)
-                    .lineLimit(1)
-                HStack(spacing: 6) {
-                    Text(record.createdAt.formatted(.dateTime.month().day().hour().minute()))
-                    if !record.text.isEmpty {
-                        Text("· \(record.text.prefix(28))…")
-                            .lineLimit(1)
-                    }
-                }
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(record.title).font(.system(size: 12, weight: .medium)).lineLimit(1)
+                Text(record.createdAt.formatted(.dateTime.month().day().hour().minute()))
+                    .font(.system(size: 10.5)).foregroundStyle(Palette.muted)
             }
             Spacer(minLength: 8)
-            Button {
-                model.select(record)
-            } label: {
-                Image(systemName: "arrow.up.right")
-            }
-            .buttonStyle(.borderless)
-            .help("打开")
-            Button(role: .destructive) {
-                model.delete(record)
-            } label: {
-                Image(systemName: "trash")
-            }
-            .buttonStyle(.borderless)
-            .help("删除")
+            Button { model.select(record) } label: { Image(systemName: "arrow.up.right") }
+                .buttonStyle(.borderless).help("打开截图").accessibilityLabel("打开截图")
+            Button(role: .destructive) { model.delete(record) } label: { Image(systemName: "trash") }
+                .buttonStyle(.borderless).help("删除截图").accessibilityLabel("删除截图")
         }
-        .padding(.vertical, 2)
+        .padding(.horizontal, 16).padding(.vertical, 12)
     }
 }

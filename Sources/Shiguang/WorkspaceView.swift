@@ -4,16 +4,16 @@ import Translation
 
 enum Palette {
     // Quiet, paper-warm neutral ground with a single muted clay accent.
-    static let background = Color(hex: "F7F7F4")
-    static let sidebar = Color(hex: "EFEFEA")
+    static let background = Color(hex: "FAF9F6")
+    static let sidebar = Color(hex: "F2F1ED")
     static let panel = Color(hex: "FFFFFF")
     static let ink = Color(hex: "1F2422")
     static let muted = Color(hex: "767D78")
     static let accent = Color(hex: "B0573A")
     static let accentDeep = Color(hex: "8E4229")
-    static let line = Color(hex: "E2E0D9")
+    static let line = Color(hex: "E7E4DE")
     static let sage = Color(hex: "EFF2EE")
-    static let accentSoft = Color(hex: "F6EBE4")
+    static let accentSoft = Color(hex: "F5E9E1")
     static let shadow = Color(hex: "1F2422").opacity(0.06)
     static let success = Color(hex: "3F7D5D")
     static let warning = Color(hex: "A9772F")
@@ -41,46 +41,49 @@ struct HotkeyRow: View {
     @FocusState private var focused: Bool
 
     var body: some View {
-        HStack(spacing: 10) {
-            Text(title)
-                .font(.callout)
-                .lineLimit(1)
-                .frame(width: 84, alignment: .leading)
-            HStack(spacing: 7) {
+        HStack(spacing: 14) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(.system(size: 12.5, weight: .medium))
+                    .foregroundStyle(Palette.ink)
+                if let message {
+                    Text(message)
+                        .font(.system(size: 11))
+                        .foregroundStyle(message.hasPrefix("已") ? Palette.success : Palette.accent)
+                        .lineLimit(1)
+                } else {
+                    Text("支持 \(settings.symbol) 或 option+shift+\(settings.key.lowercased())")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Palette.muted)
+                        .lineLimit(1)
+                }
+            }
+            Spacer(minLength: 8)
+            HStack(spacing: 8) {
                 TextField("⌥⇧S", text: $draft)
                     .textFieldStyle(.plain)
-                    .font(.system(size: 11.5, weight: .medium, design: .monospaced))
+                    .font(.system(size: 12, weight: .medium, design: .monospaced))
                     .labelsHidden()
-                    .frame(width: 118)
+                    .frame(width: 124)
                     .focused($focused)
                     .onSubmit { apply() }
+                    .padding(.horizontal, 10)
+                    .frame(height: 28)
+                    .background(Palette.background, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 7, style: .continuous)
+                            .stroke(focused ? Palette.accent.opacity(0.75) : Palette.line)
+                    }
                 if draft != settings.symbol {
                     Button("应用") { apply() }
                         .buttonStyle(.bordered)
                         .controlSize(.small)
                 }
             }
-            .padding(.horizontal, 8)
-            .frame(height: 26)
-            .background(Palette.panel, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .stroke(focused ? Palette.accent.opacity(0.7) : Palette.line)
-            }
-            if let message {
-                Text(message)
-                    .font(.caption2)
-                    .foregroundStyle(message.hasPrefix("已") ? Palette.muted : Palette.accent)
-                    .lineLimit(1)
-            } else {
-                Text("支持 ⌥⇧S 或 option+shift+s")
-                    .font(.caption2)
-                    .foregroundStyle(Palette.muted)
-                    .lineLimit(1)
-            }
-            Spacer(minLength: 2)
         }
-        .padding(.vertical, 4)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 11)
+        .frame(minHeight: 52)
         .onAppear {
             draft = settings.symbol
         }
