@@ -71,15 +71,17 @@ enum ShiguangSettingsPage: String, CaseIterable, Identifiable {
             return ["自动识别", "OCR", "文字识别", "自动翻译", "历史", "保存", "截图流程", "确认", "复制"]
         case .translation:
             return ["语言", "中文", "英文", "日文", "目标语言", "源语言", "Apple",
-                    "AI", "API", "Key", "模型", "接口", "文字翻译", "翻译剪贴板"]
+                    "AI", "API", "Key", "模型", "接口", "文字翻译", "翻译剪贴板", "划词翻译", "选区"]
         case .clipboard:
             return ["历史", "系统剪贴板", "复制", "监听", "记录", "图片", "GIF", "视频", "文件", "100"]
         case .shortcuts:
-            return ["快捷键", "热键", "按键", "区域截图", "截图并翻译", "剪贴板历史", "翻译剪贴板"]
+            return ["快捷键", "热键", "按键", "区域截图", "截图并翻译", "剪贴板历史",
+                    "翻译剪贴板", "划词翻译"]
         case .history:
             return ["历史", "截图历史", "搜索", "删除", "本地存储", "识别文字", "译文"]
         case .privacy:
-            return ["隐私", "权限", "屏幕录制", "屏幕访问", "Vision", "本机", "数据", "清空"]
+            return ["隐私", "权限", "屏幕录制", "屏幕访问", "辅助功能", "划词翻译",
+                    "Vision", "本机", "数据", "清空"]
         case .tools:
             return ["导入图片", "文字翻译", "翻译剪贴板", "体验示例", "OCR", "工具"]
         case .about:
@@ -355,6 +357,9 @@ private struct SettingsDetailView: View {
                 SettingsActionRow(title: "截图并翻译", detail: "框选文字，打开独立翻译窗口", symbol: "character.bubble",
                                   shortcut: model.translateHotkey.symbol) { model.capture(translate: true) }
                 SettingsSeparator()
+                SettingsActionRow(title: "划词翻译", detail: "翻译其他应用中选中的文字", symbol: "text.cursor",
+                                  shortcut: model.selectionTranslateHotkey.symbol) { model.translateSelection?() }
+                SettingsSeparator()
                 SettingsActionRow(title: "剪贴板历史", detail: "找回并复制最近的内容", symbol: "list.clipboard",
                                   shortcut: model.clipboardHotkey.symbol) { model.showClipboard?() }
             }
@@ -465,6 +470,9 @@ private struct SettingsDetailView: View {
                 SettingsSeparator()
                 SettingsActionRow(title: "翻译剪贴板", symbol: "doc.on.clipboard",
                                   shortcut: model.clipboardTranslateHotkey.symbol) { model.translateClipboard() }
+                SettingsSeparator()
+                SettingsActionRow(title: "划词翻译", detail: "读取其他应用选中的文字并翻译", symbol: "text.cursor",
+                                  shortcut: model.selectionTranslateHotkey.symbol) { model.translateSelection?() }
             }
         }
     }
@@ -503,6 +511,9 @@ private struct SettingsDetailView: View {
                               onRecordingChanged: model.setHotkeyCaptureActive)
                     SettingsSeparator()
                     HotkeyRow(title: "翻译剪贴板", settings: $model.clipboardTranslateHotkey,
+                              onRecordingChanged: model.setHotkeyCaptureActive)
+                    SettingsSeparator()
+                    HotkeyRow(title: "划词翻译", settings: $model.selectionTranslateHotkey,
                               onRecordingChanged: model.setHotkeyCaptureActive)
                 }
             }
@@ -556,6 +567,21 @@ private struct SettingsDetailView: View {
             SettingsSection("屏幕访问", footer: "只在你主动截图、识别或录制时读取所选区域。") {
                 PermissionActionRow(model: model)
             }
+            SettingsSection("划词翻译", footer: "拾光只读取当前选区，不会保存其他输入内容。") {
+                SettingsRow("辅助功能访问",
+                            detail: SelectedTextReader.isTrusted ? "已授权，可读取其他应用的选中文字" : "需要在系统设置中允许拾光读取选中文字") {
+                    HStack(spacing: 10) {
+                        Text(SelectedTextReader.isTrusted ? "已授权" : "待授权")
+                            .foregroundStyle(SelectedTextReader.isTrusted ? Palette.success : Palette.warning)
+                        Button("系统设置") {
+                            _ = SelectedTextReader.requestAccess()
+                            if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
+                                NSWorkspace.shared.open(url)
+                            }
+                        }
+                    }
+                }
+            }
             SettingsSection("数据处理") {
                 SettingsRow("文字识别", detail: "通过 Apple Vision 在本机提取文字") { Text("本机").foregroundStyle(Palette.muted) }
                 SettingsSeparator()
@@ -582,6 +608,8 @@ private struct SettingsDetailView: View {
             SettingsActionRow(title: "文字翻译", detail: "直接输入或粘贴原文", symbol: "text.bubble") { model.startTextTranslation() }
             SettingsSeparator()
             SettingsActionRow(title: "翻译剪贴板", symbol: "doc.on.clipboard") { model.translateClipboard() }
+            SettingsSeparator()
+            SettingsActionRow(title: "划词翻译", symbol: "text.cursor") { model.translateSelection?() }
             SettingsSeparator()
             SettingsActionRow(title: "体验示例", detail: "用内置示例检查识别效果", symbol: "sparkles") { model.useDemo() }
         }

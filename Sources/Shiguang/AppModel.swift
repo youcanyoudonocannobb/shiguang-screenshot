@@ -108,6 +108,12 @@ final class AppModel: ObservableObject {
             hotkeysChanged?()
         }
     }
+    @Published var selectionTranslateHotkey: HotkeySettings = AppModel.loadHotkey(prefix: "selectionTranslateHotkey", defaultKey: "D") {
+        didSet {
+            AppModel.saveHotkey(selectionTranslateHotkey, prefix: "selectionTranslateHotkey")
+            hotkeysChanged?()
+        }
+    }
     @Published var hotkeyAvailable = true
     var showWindow: (() -> Void)?
     var showWorkspace: (() -> Void)?
@@ -125,6 +131,7 @@ final class AppModel: ObservableObject {
     var saveRecording: (() -> Void)?
     var beginScrollCapture: ((ScrollCaptureMode, CGRect?) -> Void)?
     var showClipboard: (() -> Void)?
+    var translateSelection: (() -> Void)?
     var didCopyCapture: (() -> Void)?
     var publishImage: (NSImage) throws -> Void = { image in
         guard let png = image.pngData else { throw LocalError.image }
@@ -449,6 +456,20 @@ final class AppModel: ObservableObject {
 
     func startTextTranslation() {
         newText()
+    }
+
+    func translateSelectedText(_ text: String) {
+        guard let text = SelectedTextReader.normalized(text) else { return }
+        guard !isBusy else {
+            errorMessage = "当前有正在进行的识别、翻译或录制，完成后再使用划词翻译。"
+            return
+        }
+        newText()
+        sourceText = text
+        translatedText = ""
+        sourceLanguage = "auto"
+        notice = "划词翻译 · 已读取当前选中的文字"
+        requestTranslation()
     }
 
     func translateClipboard(from pasteboard: NSPasteboard = .general) {

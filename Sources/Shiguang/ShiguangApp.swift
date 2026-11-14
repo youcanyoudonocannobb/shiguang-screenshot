@@ -53,6 +53,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     private var clipboardWindow: NSPanel?
     private var clipboardMenuItem: NSMenuItem?
     private var clipboardTranslateMenuItem: NSMenuItem?
+    private var selectionTranslateMenuItem: NSMenuItem?
     private var clipboardReturnApplication: NSRunningApplication?
     private weak var clipboardReturnWindow: NSWindow?
 
@@ -106,6 +107,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         model.saveRecording = { [weak self] in self?.copyLastRecording() }
         model.beginScrollCapture = { [weak self] mode, region in self?.beginScrollCapture(mode, region: region) }
         model.showClipboard = { [weak self] in self?.showClipboardWindow() }
+        model.translateSelection = { [weak self] in self?.translateSelection() }
         model.publishImage = { [unowned self] image in try self.clipboard.copyImage(image) }
         model.publishText = { [unowned self] text in try self.clipboard.copyText(text) }
         model.didCopyCapture = { [weak self] in self?.restoreCaptureApplication() }
@@ -245,6 +247,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     @objc func capture() { model.capture() }
     @objc func translateCapture() { model.capture(translate: true) }
     @objc private func translateClipboard() { model.translateClipboard() }
+    @objc private func translateSelection() {
+        guard SelectedTextReader.isTrusted else {
+            requestSelectionTranslationAccess()
+            return
+        }
+        guard let text = SelectedTextReader.selectedText(
+            applicationPID: lastExternalApplication?.processIdentifier
+        ) else {
+            let alert = NSAlert()
+            alert.messageText = "没有读取到选中的文字"
+            alert.informativeText = "请先在网页、文档或输入框中选中文字，再按划词翻译快捷键。"
+            alert.addButton(withTitle: "知道了")
+            NSApp.activate(ignoringOtherApps: true)
+            alert.runModal()
+            return
+        }
+        model.translateSelectedText(text)
+    }
+
+    private func requestSelectionTranslationAccess() {
+        let alert = NSAlert()
+        alert.messageText = "划词翻译需要辅助功能权限"
+        alert.informativeText = "拾光只读取当前应用中被选中的文字，不记录其他输入内容。请在「系统设置 > 隐私与安全性 > 辅助功能」中允许拾光截图。"
+        alert.addButton(withTitle: "打开辅助功能设置")
+        alert.addButton(withTitle: "取消")
+        NSApp.activate(ignoringOtherApps: true)
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        _ = SelectedTextReader.requestAccess()
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
+            NSWorkspace.shared.open(url)
+        }
+    }
+
     @objc func importImage() { showWorkspace(); model.importImage() }
     @objc func pasteImage() { showWorkspace(); model.pasteImage() }
     @objc func preferences() { showWorkspace(); model.showsSettings = true }
@@ -370,6 +405,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         let clipboardTranslate = menuItem("翻译剪贴板", action: #selector(translateClipboard))
         clipboardTranslateMenuItem = clipboardTranslate
         file.addItem(clipboardTranslate)
+        let selectionTranslate = menuItem("划词翻译", action: #selector(translateSelection))
+        selectionTranslateMenuItem = selectionTranslate
+        file.addItem(selectionTranslate)
         let clipboardItem = menuItem("剪贴板历史", action: #selector(showClipboardWindow))
         clipboardMenuItem = clipboardItem
         file.addItem(clipboardItem)
@@ -439,6 +477,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
                               action: #selector(showClipboardWindow), symbol: "doc.on.clipboard"))
         menu.addItem(menuItem("翻译剪贴板              \(model.clipboardTranslateHotkey.symbol)",
                               action: #selector(translateClipboard), symbol: "character.book.closed"))
+        menu.addItem(menuItem("划词翻译                  \(model.selectionTranslateHotkey.symbol)",
+                              action: #selector(translateSelection), symbol: "text.cursor"))
         menu.addItem(.separator())
         menu.addItem(menuItem("录制 MP4 视频…", action: #selector(recordVideo), symbol: "record.circle"))
         menu.addItem(menuItem("录制 GIF 动图…", action: #selector(recordGIF), symbol: "photo.on.rectangle.angled"))
@@ -476,6 +516,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
                 else if id == 5 { delegate.showClipboardWindow() }
                 else if id == 6 { delegate.translateClipboard() }
                 else if id == 7 { delegate.captureController?.cancelByUser() }
+                else if id == 8 { delegate.translateSelection() }
                 else { delegate.model.capture(translate: id == 2) }
             }
             return noErr
@@ -520,7 +561,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             (UInt32(1), model.captureHotkey),
             (UInt32(2), model.translateHotkey),
             (UInt32(5), model.clipboardHotkey),
-            (UInt32(6), model.clipboardTranslateHotkey)
+            (UInt32(6), model.clipboardTranslateHotkey),
+            (UInt32(8), model.selectionTranslateHotkey)
         ] {
             guard settings.carbonModifiers != 0 else {
                 model.hotkeyAvailable = false
@@ -536,16 +578,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     }
 
     private func updateStatusMenuHotkeys() {
-        guard let menu = statusItem?.menu, menu.items.count >= 3 else { return }
+        guard let menu = statusItem?.menu, menu.items.count >= 5 else { return }
         menu.items[0].title = "区域截图                  \(model.captureHotkey.symbol)"
         menu.items[1].title = "截图并翻译              \(model.translateHotkey.symbol)"
         menu.items[2].title = "剪贴板历史              \(model.clipboardHotkey.symbol)"
         menu.items[3].title = "翻译剪贴板              \(model.clipboardTranslateHotkey.symbol)"
+        menu.items[4].title = "划词翻译                  \(model.selectionTranslateHotkey.symbol)"
         clipboardMenuItem?.keyEquivalent = model.clipboardHotkey.carbonModifiers == 0 ? "" : model.clipboardHotkey.key.lowercased()
         clipboardMenuItem?.keyEquivalentModifierMask = model.clipboardHotkey.cocoaModifiers
         clipboardTranslateMenuItem?.keyEquivalent =
             model.clipboardTranslateHotkey.carbonModifiers == 0 ? "" : model.clipboardTranslateHotkey.key.lowercased()
         clipboardTranslateMenuItem?.keyEquivalentModifierMask = model.clipboardTranslateHotkey.cocoaModifiers
+        selectionTranslateMenuItem?.keyEquivalent =
+            model.selectionTranslateHotkey.carbonModifiers == 0 ? "" : model.selectionTranslateHotkey.key.lowercased()
+        selectionTranslateMenuItem?.keyEquivalentModifierMask = model.selectionTranslateHotkey.cocoaModifiers
     }
 
     private func rebindHotkeys() {

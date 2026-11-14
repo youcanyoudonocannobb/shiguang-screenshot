@@ -205,6 +205,29 @@ struct EditorFeatureChecks {
                     "A shortcut must contain exactly one letter key")
     }
 
+    static func selectedTextTranslation() async throws {
+        try require(SelectedTextReader.normalized(nil) == nil,
+                    "Missing selected text must not start translation")
+        try require(SelectedTextReader.normalized(" \n\t ") == nil,
+                    "Whitespace-only selected text must be rejected")
+        try require(SelectedTextReader.normalized("  一段选中的文字。\n") == "一段选中的文字。",
+                    "Selected text must be trimmed without changing its content")
+
+        let folder = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ShiguangSelection-\(UUID().uuidString)", isDirectory: true)
+        let defaults = UserDefaults(suiteName: "Shiguang.Selection.\(UUID().uuidString)")!
+        let model = AppModel(historyDirectory: folder, preferences: defaults)
+        model.translationProvider = .apple
+        model.translateSelectedText("A selected sentence for translation.")
+        try require(model.editorMode == .text,
+                    "Selected text must open the standalone translation workspace")
+        try require(model.sourceText == "A selected sentence for translation.",
+                    "Selected text must be placed in the source editor")
+        try require(model.translationJob != nil,
+                    "Selected text must begin translation immediately")
+        model.cancelTranslation()
+    }
+
     static func aiTranslationRequests() async throws {
         try require(AITranslationService.endpoint(for: "https://api.example.com/v1")?.absoluteString ==
                     "https://api.example.com/v1/chat/completions",
@@ -729,6 +752,7 @@ struct EditorFeatureChecks {
             ("recording_dimensions_are_encodable", recordingDimensions),
             ("unsaved_recording_survives_relaunch", recordingDraftRecovery),
             ("manual_hotkey_input_parser", manualHotkeyInput),
+            ("selected_text_translation", selectedTextTranslation),
             ("ai_translation_request_contract", aiTranslationRequests),
             ("ai_translation_server_error", aiTranslationErrors)
         ]
