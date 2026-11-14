@@ -1109,5 +1109,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
 final class CaptureEditorWindow: NSWindow {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { true }
+
+    override init(contentRect: NSRect, styleMask style: NSWindow.StyleMask,
+                  backing backingStoreType: NSWindow.BackingStoreType, defer flag: Bool) {
+        super.init(contentRect: contentRect, styleMask: style, backing: backingStoreType, defer: flag)
+        // SwiftUI hover states and tooltips only work when the window forwards
+        // mouse-moved events; without this the toolbar showed no hover label.
+        acceptsMouseMovedEvents = true
+    }
 }
 

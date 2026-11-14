@@ -90,9 +90,14 @@ private final class ScreenRegionEditorView: NSView {
         decoration.needsDisplay = true
         toolbar.layoutSubtreeIfNeeded()
         let fitted = toolbar.fittingSize
-        let size = fitted.width > 100 && fitted.height > 20 ? fitted : CGSize(width: 620, height: 46)
+        let size = fitted.width > 100 && fitted.height > 20 ? fitted
+            : CGSize(width: 620, height: 46 + AnnotationToolbar.hoverSpace)
         let visible = screen.visibleFrame.offsetBy(dx: -screen.frame.minX, dy: -screen.frame.minY)
-        toolbar.frame = CaptureSelectionGeometry.toolbarFrame(selection: selection, size: size, visible: visible)
+        let barSize = CGSize(width: size.width, height: max(20, size.height - AnnotationToolbar.hoverSpace))
+        var frame = CaptureSelectionGeometry.toolbarFrame(selection: selection, size: barSize, visible: visible)
+        // Grow upward so the hover label has room without moving the bar.
+        frame.size.height += AnnotationToolbar.hoverSpace
+        toolbar.frame = frame
         needsDisplay = true
     }
 
@@ -187,10 +192,13 @@ private final class ScreenRegionEditorView: NSView {
 private struct ScreenCaptureToolbar: View {
     @ObservedObject var model: AppModel
     var body: some View {
-        AnnotationToolbar(model: model,
-                          onShowText: { model.translateImage() },
-                          showsSelectionTools: false)
-            .fixedSize()
+        VStack(spacing: 0) {
+            Color.clear.frame(height: AnnotationToolbar.hoverSpace)
+            AnnotationToolbar(model: model,
+                              onShowText: { model.translateImage() },
+                              showsSelectionTools: false)
+        }
+        .fixedSize()
     }
 }
 

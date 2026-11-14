@@ -1,6 +1,9 @@
 import SwiftUI
 
 struct AnnotationToolbar: View {
+    /// Transparent room kept above the bar for the hover label.
+    static let hoverSpace: CGFloat = 30
+
     @ObservedObject var model: AppModel
     var onShowText: (() -> Void)? = nil
     var showsSelectionTools = true
@@ -9,9 +12,12 @@ struct AnnotationToolbar: View {
     @StoredState private var showsScrollOptions = false
     @StoredState private var showsColors = false
     @StoredState private var showsMarkTools = false
+    @StoredState private var hoveredTitle: String?
+    @StoredState private var hoverFrames: [String: CGRect] = [:]
 
     var body: some View {
-        HStack(spacing: 2) {
+        HStack(spacing: 5) {
+            groupBox {
             if showsSelectionTools {
                 action("移动选区", symbol: "cursorarrow", selected: model.tool == .pointer) {
                     model.tool = .pointer
@@ -51,6 +57,8 @@ struct AnnotationToolbar: View {
                             in: RoundedRectangle(cornerRadius: 6))
             }
             .buttonStyle(ToolbarActionStyle())
+            .onHover { hoveredTitle = $0 ? "标注颜色" : nil }
+            .onGeometryChange(for: CGRect.self) { $0.frame(in: .named("annotationToolbar")) } action: { hoverFrames["标注颜色"] = $0 }
             .help("标注颜色")
             .accessibilityLabel("标注颜色")
             .popover(isPresented: $showsColors, arrowEdge: .top) {
@@ -80,10 +88,12 @@ struct AnnotationToolbar: View {
                 .background(Color(hex: "17191C"))
                 .preferredColorScheme(.dark)
             }
-            divider
+            }
+            groupBox {
             action("撤销", symbol: "arrow.uturn.backward") { model.undo() }.disabled(!model.canUndo)
             action("重做", symbol: "arrow.uturn.forward") { model.redo() }.disabled(!model.canRedo)
-            divider
+            }
+            groupBox {
             action(model.isRecognizing ? "取消文字识别" : "文字识别", symbol: model.isRecognizing ? "stop.circle" : "text.viewfinder") {
                 if model.isRecognizing { model.cancelRecognition() }
                 else { model.recognizeInWindow() }
@@ -120,8 +130,8 @@ struct AnnotationToolbar: View {
                         }
                     }
                 }
-            divider
-            action("复制图片并完成", symbol: "doc.on.doc") { model.copyImage() }
+            }
+            groupBox {
             action("打开剪贴板", symbol: "doc.on.clipboard") { model.showClipboard?() }
             Menu {
                 Button("适应窗口") { model.resetViewport() }
@@ -142,6 +152,9 @@ struct AnnotationToolbar: View {
             } label: { icon("ellipsis") }
                 .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
                 .help("更多操作").accessibilityLabel("更多操作")
+                .onHover { hoveredTitle = $0 ? "更多操作" : nil }
+                .onGeometryChange(for: CGRect.self) { $0.frame(in: .named("annotationToolbar")) } action: { hoverFrames["更多操作"] = $0 }
+            }
             if showsCompletion, model.draftImage != nil {
                 completionDivider
                 completionAction("取消截图", symbol: "xmark", tint: Color(hex: "FF7979")) {
@@ -157,20 +170,57 @@ struct AnnotationToolbar: View {
         }
         .padding(7)
         .background(
-            LinearGradient(colors: [Color(hex: "23272C"), Color(hex: "15171A")],
+            LinearGradient(colors: [Color(hex: "24292F"), Color(hex: "14171A")],
                            startPoint: .top, endPoint: .bottom),
-            in: RoundedRectangle(cornerRadius: 12)
+            in: RoundedRectangle(cornerRadius: 13, style: .continuous)
         )
         .overlay(alignment: .top) {
-            RoundedRectangle(cornerRadius: 12)
+            RoundedRectangle(cornerRadius: 13, style: .continuous)
                 .stroke(LinearGradient(colors: [.white.opacity(0.16), .clear],
                                        startPoint: .top, endPoint: .bottom), lineWidth: 1)
         }
-        .overlay(RoundedRectangle(cornerRadius: 12).stroke(.white.opacity(0.12)))
+        .overlay(RoundedRectangle(cornerRadius: 13, style: .continuous).stroke(.white.opacity(0.13)))
+        .overlay(alignment: .topLeading) { hoverChip }
         .shadow(color: .black.opacity(0.22), radius: 10, y: 4)
+        .coordinateSpace(name: "annotationToolbar")
         .fixedSize(horizontal: true, vertical: true)
         .tint(.white)
         .preferredColorScheme(.dark)
+        .animation(.easeOut(duration: 0.12), value: hoveredTitle)
+    }
+
+    /// Hover label drawn above the bar. The AppKit tooltip path (`help`) was
+    /// unreliable inside the full-screen selection overlay, so the title is
+    /// rendered by SwiftUI instead.
+    @ViewBuilder private var hoverChip: some View {
+        if let hoveredTitle, let frame = hoverFrames[hoveredTitle] {
+            GeometryReader { proxy in
+                Text(hoveredTitle)
+                    .font(.system(size: 10.5, weight: .medium))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+                    .fixedSize()
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Color(hex: "0D0F12").opacity(0.97), in: Capsule())
+                    .overlay(Capsule().stroke(.white.opacity(0.18), lineWidth: 1))
+                    .shadow(color: .black.opacity(0.28), radius: 6, y: 2)
+                    .position(x: min(max(28, frame.midX), proxy.size.width - 28),
+                              y: frame.minY - 22)
+                    .allowsHitTesting(false)
+                    .transition(.opacity.combined(with: .scale(scale: 0.94, anchor: .bottom)))
+            }
+        }
+    }
+
+    private func groupBox<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        HStack(spacing: 1) { content() }
+            .padding(.horizontal, 5)
+            .padding(.vertical, 3)
+            .background(Color.white.opacity(0.045),
+                        in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous)
+                .stroke(.white.opacity(0.06), lineWidth: 1))
     }
 
     private var divider: some View {
@@ -261,14 +311,24 @@ struct AnnotationToolbar: View {
             .contentShape(RoundedRectangle(cornerRadius: 6))
             .background(selected ? Color.white.opacity(0.14) : .clear,
                         in: RoundedRectangle(cornerRadius: 6))
-        }.buttonStyle(ToolbarActionStyle()).help(title).accessibilityLabel(title)
+        }
+        .buttonStyle(ToolbarActionStyle())
+        .help(title)
+        .accessibilityLabel(title)
+        .onHover { hoveredTitle = $0 ? title : nil }
+        .onGeometryChange(for: CGRect.self) { $0.frame(in: .named("annotationToolbar")) } action: { hoverFrames[title] = $0 }
     }
 
     private func action(_ title: String, symbol: String, selected: Bool = false,
                         perform: @escaping () -> Void) -> some View {
         Button(action: perform) {
             icon(symbol, selected: selected)
-        }.buttonStyle(ToolbarActionStyle()).help(title).accessibilityLabel(title)
+        }
+        .buttonStyle(ToolbarActionStyle())
+        .help(title)
+        .accessibilityLabel(title)
+        .onHover { hoveredTitle = $0 ? title : nil }
+        .onGeometryChange(for: CGRect.self) { $0.frame(in: .named("annotationToolbar")) } action: { hoverFrames[title] = $0 }
     }
 
     private func completionAction(_ title: String, symbol: String, tint: Color,
