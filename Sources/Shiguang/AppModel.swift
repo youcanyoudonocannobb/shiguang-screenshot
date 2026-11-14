@@ -907,7 +907,7 @@ final class AppModel: ObservableObject {
         guard let output = renderedImage(), let data = output.pngData else { return }
         let panel = NSSavePanel()
         panel.allowedContentTypes = [.png]
-        let title = (currentRecord?.title ?? "拾光截图")
+        let title = (currentRecord?.title ?? "汪拍")
             .replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: ":", with: "-")
         panel.nameFieldStringValue = "\(title).png"
         NSApp.activate(ignoringOtherApps: true)

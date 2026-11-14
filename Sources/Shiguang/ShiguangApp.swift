@@ -76,14 +76,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 880, height: 620),
                               styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
                               backing: .buffered, defer: false)
-        window.title = "拾光截图"
+        window.title = "汪拍"
         window.toolbarStyle = .unified
         window.tabbingMode = .disallowed
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
         window.titlebarSeparatorStyle = .none
         window.isMovableByWindowBackground = true
-        window.backgroundColor = NSColor(hex: "FAF9F6")
+        window.backgroundColor = NSColor(hex: "F4F7FA")
         window.contentMinSize = NSSize(width: 820, height: 560)
         window.isReleasedWhenClosed = false
         window.delegate = self
@@ -269,7 +269,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     private func requestSelectionTranslationAccess() {
         let alert = NSAlert()
         alert.messageText = "划词翻译需要辅助功能权限"
-        alert.informativeText = "拾光只读取当前应用中被选中的文字，不记录其他输入内容。请在「系统设置 > 隐私与安全性 > 辅助功能」中允许拾光截图。"
+        alert.informativeText = "汪拍只读取当前应用中被选中的文字，不记录其他输入内容。请在「系统设置 > 隐私与安全性 > 辅助功能」中允许汪拍。"
         alert.addButton(withTitle: "打开辅助功能设置")
         alert.addButton(withTitle: "取消")
         NSApp.activate(ignoringOtherApps: true)
@@ -304,13 +304,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         if clipboardWindow == nil {
             let panel = ScrollCapturePanel(contentRect: NSRect(x: 0, y: 0, width: 580, height: 650),
                 styleMask: [.titled, .closable, .resizable, .utilityWindow], backing: .buffered, defer: false)
-            panel.title = "拾光截图 · 剪贴板"
+            panel.title = "汪拍 · 剪贴板"
             panel.minSize = NSSize(width: 520, height: 460)
             panel.isReleasedWhenClosed = false
             panel.hidesOnDeactivate = true
             panel.level = .floating
             panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-            panel.backgroundColor = NSColor(hex: "FAF9F6")
+            panel.backgroundColor = NSColor(hex: "F4F7FA")
             panel.contentView = NSHostingView(rootView: ClipboardView(history: clipboard,
                 onCopy: { [weak self] entry in self?.copyClipboardEntry(entry) },
                 onClose: { [weak self] in self?.closeClipboardWindow() }))
@@ -358,7 +358,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
                 NSApp.terminate(nil)
             } catch {
                 isRestarting = false
-                model.errorMessage = "无法重启拾光：\(error.localizedDescription)"
+                model.errorMessage = "无法重启汪拍：\(error.localizedDescription)"
                 showWorkspace()
             }
         }
@@ -382,10 +382,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         let main = NSMenu()
         let appItem = NSMenuItem()
         let appMenu = NSMenu()
-        appMenu.addItem(menuItem("关于拾光截图", action: #selector(about)))
+        appMenu.addItem(menuItem("关于汪拍", action: #selector(about)))
         appMenu.addItem(menuItem("偏好设置…", action: #selector(preferences), key: ","))
         appMenu.addItem(.separator())
-        appMenu.addItem(menuItem("退出拾光截图", action: #selector(quit), key: "q"))
+        appMenu.addItem(menuItem("退出汪拍", action: #selector(quit), key: "q"))
         appItem.submenu = appMenu
         main.addItem(appItem)
         let fileItem = NSMenuItem()
@@ -448,7 +448,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
 
     @objc private func about() {
         NSApp.orderFrontStandardAboutPanel(options: [
-            .applicationName: "拾光截图",
+            .applicationName: "汪拍",
             .applicationVersion: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "",
             .version: Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "",
             .credits: NSAttributedString(string: "截取片刻，读懂世界。\n原生 macOS 截图、文字识别与翻译。")
@@ -458,16 +458,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     private func setupStatusItem() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         statusItem.isVisible = true
-        if let image = NSImage(systemSymbolName: "viewfinder.circle", accessibilityDescription: "拾光截图") {
-            image.isTemplate = true
-            statusItem.button?.image = image
-            statusItem.button?.toolTip = "拾光截图 · 截图、识别与剪贴板"
-            statusItem.button?.setAccessibilityLabel("拾光截图菜单")
-        } else {
-            // Keep an actionable entry point even if the symbol asset is unavailable.
-            statusItem.button?.title = "拾光"
-            statusItem.length = NSStatusItem.variableLength
-        }
+        statusItem.button?.image = BrandArtwork.menuBarImage()
+        statusItem.button?.toolTip = "汪拍 · 截图、识别与剪贴板"
+        statusItem.button?.setAccessibilityLabel("汪拍菜单")
         let menu = NSMenu()
         menu.addItem(menuItem("区域截图                  \(model.captureHotkey.symbol)",
                               action: #selector(capture), symbol: "viewfinder"))
@@ -492,7 +485,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         menu.addItem(.separator())
         menu.addItem(menuItem("偏好设置…", action: #selector(preferences), symbol: "gearshape"))
         menu.addItem(.separator())
-        menu.addItem(menuItem("退出拾光截图", action: #selector(quit), symbol: "power"))
+        menu.addItem(menuItem("退出汪拍", action: #selector(quit), symbol: "power"))
         statusItem.menu = menu
     }
 
@@ -617,8 +610,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             let panel = CaptureEditorWindow(contentRect: NSRect(x: 0, y: 0, width: 980, height: 760),
                                  styleMask: [.titled, .closable, .miniaturizable, .resizable],
                                  backing: .buffered, defer: false)
-            panel.title = "拾光截图 · 快速编辑"
-            panel.backgroundColor = NSColor(hex: "FAF9F6")
+            panel.title = "汪拍 · 快速编辑"
+            panel.backgroundColor = NSColor(hex: "F4F7FA")
             panel.isReleasedWhenClosed = false
             panel.delegate = self
             panel.contentView = NSHostingView(rootView: CaptureEditorView(model: model))
@@ -627,8 +620,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         }
         let text = model.isTextWorkspace
         if text { window?.orderOut(nil) }
-        editorWindow.title = model.editorMode == .recognition ? "拾光截图 · 文字识别" :
-            (text ? "拾光截图 · 翻译" : "拾光截图 · 快速编辑")
+        editorWindow.title = model.editorMode == .recognition ? "汪拍 · 文字识别" :
+            (text ? "汪拍 · 翻译" : "汪拍 · 快速编辑")
         editorWindow.minSize = text ? NSSize(width: model.editorMode == .recognition ? 500 : 700,
                                              height: model.editorMode == .recognition ? 340 : 440) :
             NSSize(width: 700, height: 400)
@@ -752,7 +745,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         let baseHeight = displayHeight + 72
         let panel = CaptureEditorWindow(contentRect: NSRect(origin: .zero, size: NSSize(width: displayWidth, height: baseHeight)),
                              styleMask: [.borderless, .resizable], backing: .buffered, defer: false)
-        panel.title = "拾光截图 · 悬浮编辑"
+        panel.title = "汪拍 · 悬浮编辑"
         panel.minSize = NSSize(width: min(700, available.width - 24), height: 260)
         panel.backgroundColor = .clear
         panel.isOpaque = false
@@ -813,7 +806,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             case .alertSecondButtonReturn:
                 if CGRequestPostEventAccess() { beginScrollCapture(.automatic, region: region) }
                 else {
-                    model.notice = "请在系统设置的「辅助功能」中允许拾光，再选择自动长截图。"
+                    model.notice = "请在系统设置的「辅助功能」中允许汪拍，再选择自动长截图。"
                     if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
                         NSWorkspace.shared.open(url)
                     }
@@ -885,7 +878,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         let panelSize = CGSize(width: 260, height: min(560, visible.height - 24))
         let panel = ScrollCapturePanel(contentRect: CGRect(origin: .zero, size: panelSize),
                                        styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
-        panel.title = "拾光截图 · \(mode.title)"
+        panel.title = "汪拍 · \(mode.title)"
         panel.backgroundColor = .clear
         panel.isOpaque = false
         panel.hidesOnDeactivate = false
@@ -967,7 +960,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         recordingBorder = border
         let bar = ScrollCapturePanel(contentRect: CGRect(x: 0, y: 0, width: 400, height: 42),
                                       styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
-        bar.title = "拾光截图 · 录制"
+        bar.title = "汪拍 · 录制"
         bar.backgroundColor = .clear
         bar.isOpaque = false
         bar.level = .floating
@@ -1144,7 +1137,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         let height = min(width * ratio, maxSize.height * 0.7)
         let panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: width, height: height),
                             styleMask: [.titled, .closable, .resizable, .utilityWindow], backing: .buffered, defer: false)
-        panel.title = "拾光贴图 · 关闭以取消置顶"
+        panel.title = "汪拍贴图 · 关闭以取消置顶"
         panel.level = .floating
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         panel.hidesOnDeactivate = false

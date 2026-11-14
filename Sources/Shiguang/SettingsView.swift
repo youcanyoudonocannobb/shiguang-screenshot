@@ -148,7 +148,7 @@ struct SettingsView: View {
                 Image(nsImage: NSApp.applicationIconImage)
                     .resizable().scaledToFit().frame(width: 36, height: 36)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("拾光截图").font(.system(size: 13.5, weight: .semibold))
+                    Text("汪拍").font(.system(size: 13.5, weight: .semibold))
                     Text("偏好设置").font(.system(size: 11)).foregroundStyle(Palette.muted)
                 }
                 Spacer(minLength: 0)
@@ -221,7 +221,7 @@ struct SettingsView: View {
     private var permissionHelp: some View {
         VStack(alignment: .leading, spacing: 20) {
             SettingsSymbolTile(symbol: "lock.shield", accented: true, size: 40)
-            Text("允许拾光访问屏幕").font(.system(size: 22, weight: .semibold))
+            Text("允许汪拍访问屏幕").font(.system(size: 22, weight: .semibold))
             Text(model.screenPermission.detail).font(.system(size: 13))
                 .foregroundStyle(Palette.muted).fixedSize(horizontal: false, vertical: true)
             HStack {
@@ -232,7 +232,7 @@ struct SettingsView: View {
             HStack {
                 Button("稍后", role: .cancel) { model.showsPermissionHelp = false }
                 Spacer()
-                Button("重启拾光") { model.restartApp?() }
+                Button("重启汪拍") { model.restartApp?() }
             }
         }
         .padding(28).frame(width: 480).background(Palette.background)
@@ -567,9 +567,9 @@ private struct SettingsDetailView: View {
             SettingsSection("屏幕访问", footer: "只在你主动截图、识别或录制时读取所选区域。") {
                 PermissionActionRow(model: model)
             }
-            SettingsSection("划词翻译", footer: "拾光只读取当前选区，不会保存其他输入内容。") {
+            SettingsSection("划词翻译", footer: "汪拍只读取当前选区，不会保存其他输入内容。") {
                 SettingsRow("辅助功能访问",
-                            detail: SelectedTextReader.isTrusted ? "已授权，可读取其他应用的选中文字" : "需要在系统设置中允许拾光读取选中文字") {
+                            detail: SelectedTextReader.isTrusted ? "已授权，可读取其他应用的选中文字" : "需要在系统设置中允许汪拍读取选中文字") {
                     HStack(spacing: 10) {
                         Text(SelectedTextReader.isTrusted ? "已授权" : "待授权")
                             .foregroundStyle(SelectedTextReader.isTrusted ? Palette.success : Palette.warning)
@@ -620,7 +620,7 @@ private struct SettingsDetailView: View {
             HStack(spacing: 18) {
                 Image(nsImage: NSApp.applicationIconImage).resizable().scaledToFit().frame(width: 72, height: 72)
                 VStack(alignment: .leading, spacing: 5) {
-                    Text("拾光截图").font(.system(size: 20, weight: .semibold))
+                    Text("汪拍").font(.system(size: 20, weight: .semibold))
                     Text("截取片刻，读懂世界。").font(.system(size: 12)).foregroundStyle(Palette.muted)
                     Text("版本 \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "-") (\(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "-"))")
                         .font(.system(size: 11)).foregroundStyle(Palette.muted)

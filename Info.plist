@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
 	<key>CFBundleDisplayName</key>
-	<string>拾光截图</string>
+	<string>汪拍</string>
 	<key>CFBundleExecutable</key>
 	<string>Shiguang</string>
 	<key>CFBundleIconFile</key>
@@ -11,13 +11,13 @@
 	<key>CFBundleIdentifier</key>
 	<string>dev.shiguang.screenshot</string>
 	<key>CFBundleName</key>
-	<string>拾光截图</string>
+	<string>汪拍</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>1.1.0</string>
+	<string>1.2.0</string>
 	<key>CFBundleVersion</key>
-	<string>24</string>
+	<string>25</string>
 	<key>LSApplicationCategoryType</key>
 	<string>public.app-category.productivity</string>
 	<key>LSMinimumSystemVersion</key>

@@ -67,7 +67,7 @@ struct AnnotationToolbar: View {
                         .font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(.white.opacity(0.86))
                     HStack(spacing: 9) {
-                        ForEach(["E45F3C", "347A64", "3975B7", "D8A72C", "FFFFFF", "1C2723"], id: \.self) { hex in
+                        ForEach(["216D91", "347A69", "D58B3D", "C95959", "FFFFFF", "172A38"], id: \.self) { hex in
                             Button {
                                 model.markColor = hex
                                 showsColors = false
@@ -170,7 +170,7 @@ struct AnnotationToolbar: View {
         }
         .padding(7)
         .background(
-            LinearGradient(colors: [Color(hex: "26292B"), Color(hex: "1B1D1F")],
+            LinearGradient(colors: [Palette.overlayRaised, Palette.overlay],
                            startPoint: .top, endPoint: .bottom),
             in: RoundedRectangle(cornerRadius: 13, style: .continuous)
         )
@@ -202,7 +202,7 @@ struct AnnotationToolbar: View {
                     .fixedSize()
                     .padding(.horizontal, 8)
                     .padding(.vertical, 4)
-                    .background(Color(hex: "141618").opacity(0.97), in: Capsule())
+                    .background(Palette.overlay.opacity(0.97), in: Capsule())
                     .overlay(Capsule().stroke(.white.opacity(0.14), lineWidth: 1))
                     .shadow(color: .black.opacity(0.24), radius: 6, y: 2)
                     .position(x: min(max(28, frame.midX), proxy.size.width - 28),
@@ -282,7 +282,7 @@ struct AnnotationToolbar: View {
                 .frame(width: 30, height: 32)
             if selected {
                 Capsule()
-                    .fill(Color(hex: "9FD0B7"))
+                    .fill(Palette.overlayAccent)
                     .frame(width: 11, height: 2)
                     .padding(.bottom, 2)
             }
@@ -302,7 +302,7 @@ struct AnnotationToolbar: View {
                     .frame(width: 30, height: 32)
                 if selected {
                     Capsule()
-                        .fill(Color(hex: "9FD0B7"))
+                        .fill(Palette.overlayAccent)
                         .frame(width: 11, height: 2)
                         .padding(.bottom, 2)
                 }
@@ -405,7 +405,8 @@ private struct CaptureOptionStyle: ButtonStyle {
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .background(Color(hex: configuration.isPressed ? "3C4143" : hovered ? "33383A" : "282C2E"),
+            .background(configuration.isPressed ? Palette.overlayAccent.opacity(0.24) :
+                            (hovered ? Palette.overlayAccent.opacity(0.14) : Palette.overlayRaised.opacity(0.52)),
                         in: RoundedRectangle(cornerRadius: 8))
             .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.white.opacity(hovered ? 0.26 : 0.1)))
             .onHover { hovered = $0 }

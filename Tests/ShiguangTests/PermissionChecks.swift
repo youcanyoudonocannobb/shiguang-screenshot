@@ -146,7 +146,7 @@ struct PermissionChecks {
     }
 
     static func relaunchArguments() throws {
-        let path = "/tmp/Chinese 空格 ' $(literal)/拾光截图.app"
+        let path = "/tmp/Chinese 空格 ' $(literal)/汪拍.app"
         let url = URL(fileURLWithPath: path)
         let arguments = ["Shiguang"] + AppRelauncher.arguments(parentPID: 123, bundleURL: url)
         let parsed = AppRelauncher.target(from: arguments)

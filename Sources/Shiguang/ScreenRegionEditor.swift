@@ -9,7 +9,7 @@ final class ScreenRegionEditorController {
 
     init(snapshot: NSImage, screen: NSScreen, selection: CGRect, model: AppModel) {
         window = CaptureEditorWindow(contentRect: screen.frame, styleMask: [.borderless], backing: .buffered, defer: false)
-        window.title = "拾光截图 · 选区编辑"
+        window.title = "汪拍 · 选区编辑"
         window.isReleasedWhenClosed = false
         window.backgroundColor = .clear
         window.isOpaque = false
