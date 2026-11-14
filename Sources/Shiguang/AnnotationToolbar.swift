@@ -217,10 +217,12 @@ struct AnnotationToolbar: View {
         HStack(spacing: 1) { content() }
             .padding(.horizontal, 5)
             .padding(.vertical, 3)
-            .background(Color.white.opacity(0.045),
-                        in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+            .background(
+                LinearGradient(colors: [.white.opacity(0.075), .white.opacity(0.035)],
+                               startPoint: .top, endPoint: .bottom),
+                in: RoundedRectangle(cornerRadius: 9, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous)
-                .stroke(.white.opacity(0.06), lineWidth: 1))
+                .stroke(.white.opacity(0.07), lineWidth: 1))
     }
 
     private var divider: some View {
@@ -298,7 +300,7 @@ struct AnnotationToolbar: View {
         Button(action: perform) {
             ZStack(alignment: .bottom) {
                 Text(text)
-                    .font(.custom("Georgia-Bold", size: 17))
+                    .font(.system(size: 16.5, weight: .semibold, design: .rounded))
                     .frame(width: 30, height: 32)
                 if selected {
                     Capsule()
@@ -338,8 +340,8 @@ struct AnnotationToolbar: View {
                 .font(.system(size: 17, weight: .bold))
                 .foregroundStyle(tint)
                 .frame(width: 34, height: 32)
-                .background(tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
-                .overlay(RoundedRectangle(cornerRadius: 8).stroke(tint.opacity(0.28), lineWidth: 1))
+                .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
+                .overlay(RoundedRectangle(cornerRadius: 8).stroke(tint.opacity(0.5), lineWidth: 1))
                 .contentShape(RoundedRectangle(cornerRadius: 8))
         }
         .buttonStyle(ToolbarActionStyle())
@@ -418,10 +420,12 @@ private struct ToolbarActionStyle: ButtonStyle {
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .background(configuration.isPressed ? Color.white.opacity(0.16) :
-                            (hovered ? Color.white.opacity(0.08) : .clear),
+            .background(configuration.isPressed ? Color.white.opacity(0.18) :
+                            (hovered ? Color.white.opacity(0.10) : .clear),
                         in: RoundedRectangle(cornerRadius: 6))
-            .opacity(enabled ? 1 : 0.35)
+            .scaleEffect(hovered && enabled ? 1.05 : 1)
+            .opacity(enabled ? 1 : 0.32)
+            .animation(.easeOut(duration: 0.12), value: hovered)
             .onHover { hovered = $0 }
     }
 }

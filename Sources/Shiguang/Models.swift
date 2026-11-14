@@ -28,7 +28,7 @@ enum MarkTool: String, Codable, CaseIterable {
         case .highlighter: return "highlighter"
         case .number: return "number.circle"
         case .text: return "textformat"
-        case .mosaic: return "square.grid.3x3.fill"
+        case .mosaic: return "checkerboard.rectangle"
         case .redact: return "rectangle.fill"
         case .picker: return "eyedropper"
         }
