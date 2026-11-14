@@ -51,29 +51,29 @@ enum ShiguangSettingsPage: String, CaseIterable, Identifiable {
 
     var symbol: String {
         switch self {
-        case .general: return "gearshape.fill"
+        case .general: return "slider.horizontal.3"
         case .screenshot: return "viewfinder"
         case .translation: return "character.bubble.fill"
-        case .clipboard: return "doc.on.clipboard.fill"
-        case .shortcuts: return "keyboard.fill"
+        case .clipboard: return "clipboard.fill"
+        case .shortcuts: return "command"
         case .history: return "clock.arrow.circlepath"
         case .privacy: return "lock.shield.fill"
-        case .tools: return "square.grid.2x2.fill"
+        case .tools: return "wrench.and.screwdriver.fill"
         case .about: return "info.circle.fill"
         }
     }
 
     var color: Color {
         switch self {
-        case .general: return Color(hex: "70747C")
-        case .screenshot: return Palette.accent
-        case .translation: return Color(hex: "3E8068")
-        case .clipboard: return Color(hex: "C47B3C")
-        case .shortcuts: return Color(hex: "5E70B2")
-        case .history: return Color(hex: "A17B32")
-        case .privacy: return Color(hex: "4B7565")
-        case .tools: return Color(hex: "876A57")
-        case .about: return Palette.ink
+        case .general: return Color(hex: "66736D")
+        case .screenshot: return Color(hex: "D45D3C")
+        case .translation: return Color(hex: "2F795E")
+        case .clipboard: return Color(hex: "B97832")
+        case .shortcuts: return Color(hex: "596FA8")
+        case .history: return Color(hex: "8A7131")
+        case .privacy: return Color(hex: "456D60")
+        case .tools: return Color(hex: "806855")
+        case .about: return Color(hex: "314139")
         }
     }
 
@@ -156,10 +156,11 @@ struct SettingsView: View {
 
     private var sidebar: some View {
         VStack(spacing: 0) {
+            brandHeader
             searchBar
                 .padding(.horizontal, 12)
-                .padding(.top, 12)
-                .padding(.bottom, 8)
+                .padding(.top, 4)
+                .padding(.bottom, 9)
 
             List(selection: selectionBinding) {
                 ForEach(ShiguangSettingsPage.groups) { group in
@@ -181,7 +182,6 @@ struct SettingsView: View {
             // Keep the sidebar on the app's cream surface; the default sidebar
             // material made the list look like a separate grey panel.
             .scrollContentBackground(.hidden)
-            .background(Palette.background)
             .overlay {
                 if ShiguangSettingsPage.allCases.allSatisfy({ !$0.matches(query) }) {
                     Text("没有匹配的设置")
@@ -189,15 +189,49 @@ struct SettingsView: View {
                         .foregroundStyle(.secondary)
                 }
             }
+
+            sidebarFooter
         }
+        .background(SettingsSidebarBackdrop())
+    }
+
+    private var brandHeader: some View {
+        HStack(spacing: 10) {
+            Image(nsImage: NSApp.applicationIconImage)
+                .resizable()
+                .scaledToFit()
+                .frame(width: 34, height: 34)
+                .background(Palette.panel, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .stroke(Palette.line.opacity(0.9))
+                }
+                .shadow(color: Palette.shadow, radius: 4, y: 2)
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text("拾光截图")
+                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                    .foregroundStyle(Palette.ink)
+                Text("截图、识别与剪贴板")
+                    .font(.system(size: 10))
+                    .foregroundStyle(Palette.muted)
+            }
+            Spacer(minLength: 4)
+        }
+        .padding(.horizontal, 12)
+        .padding(.top, 11)
+        .padding(.bottom, 6)
+        .accessibilityElement(children: .combine)
     }
 
     private var searchBar: some View {
         HStack(spacing: 7) {
             Image(systemName: "magnifyingglass")
-                .foregroundStyle(.secondary)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(Palette.muted)
             TextField("搜索设置", text: $query)
                 .textFieldStyle(.plain)
+                .font(.system(size: 12))
             if !query.isEmpty {
                 Button {
                     query = ""
@@ -210,15 +244,45 @@ struct SettingsView: View {
             }
         }
         .padding(.horizontal, 10)
-        .frame(height: 32)
+        .frame(height: 34)
         .background(
-            RoundedRectangle(cornerRadius: 9, style: .continuous)
-                .fill(Color(nsColor: .controlBackgroundColor).opacity(0.9))
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(Palette.panel.opacity(0.96))
         )
         .overlay {
-            RoundedRectangle(cornerRadius: 9, style: .continuous)
-                .stroke(Palette.line.opacity(0.8))
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(Palette.line.opacity(query.isEmpty ? 0.9 : 0.35))
         }
+        .shadow(color: Palette.shadow.opacity(0.65), radius: 4, y: 1)
+    }
+
+    private var sidebarFooter: some View {
+        HStack(spacing: 7) {
+            Circle()
+                .fill(Color(hex: "4E9A72"))
+                .frame(width: 7, height: 7)
+                .shadow(color: Color(hex: "4E9A72").opacity(0.3), radius: 2)
+            Text("菜单栏运行中")
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(Palette.muted)
+            Spacer(minLength: 4)
+            Text(versionLabel)
+                .font(.system(size: 9, weight: .medium, design: .monospaced))
+                .foregroundStyle(Palette.muted.opacity(0.8))
+        }
+        .padding(.horizontal, 13)
+        .padding(.vertical, 10)
+        .background(alignment: .top) {
+            Rectangle()
+                .fill(Palette.line.opacity(0.65))
+                .frame(height: 0.5)
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    private var versionLabel: String {
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "-"
+        return "v\(version)"
     }
 
     private func rows(_ pages: [ShiguangSettingsPage]) -> some View {
@@ -274,11 +338,13 @@ private struct SettingsSidebarRow: View {
     var body: some View {
         Label {
             Text(page.title)
+                .font(.system(size: 12.5, weight: isSelected ? .semibold : .medium))
                 .foregroundStyle(isSelected ? Palette.ink : .primary)
         } icon: {
-            SettingsKindTile(symbol: page.symbol, color: page.color, size: 20)
+            SettingsKindTile(symbol: page.symbol, color: page.color, size: 24, prominent: isSelected)
         }
         .tag(page)
+        .padding(.vertical, 1)
         .background(SidebarHighlightDisabler())
         .listRowBackground(highlight)
     }
@@ -286,13 +352,19 @@ private struct SettingsSidebarRow: View {
     @ViewBuilder
     private var highlight: some View {
         if isSelected {
-            RoundedRectangle(cornerRadius: 5, style: .continuous)
-                .fill(Palette.sage)
-                .overlay {
-                    RoundedRectangle(cornerRadius: 5, style: .continuous)
-                        .stroke(Palette.ink.opacity(0.08))
+            ZStack(alignment: .leading) {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(page.color.opacity(0.11))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .stroke(page.color.opacity(0.16))
+                    }
+                Capsule()
+                    .fill(page.color)
+                    .frame(width: 3, height: 18)
+                    .padding(.leading, 3)
                 }
-                .padding(.horizontal, 8)
+            .padding(.horizontal, 7)
         }
     }
 }
@@ -331,28 +403,117 @@ private struct SettingsDetailView: View {
                 pageContent
             }
             .formStyle(.grouped)
+            .scrollContentBackground(.hidden)
             .id(page)
         }
         .navigationTitle(page.title)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(nsColor: .windowBackgroundColor))
+        .background(Palette.background)
     }
 
     private var header: some View {
-        HStack(spacing: 12) {
-            SettingsKindTile(symbol: page.symbol, color: page.color, size: 40)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(page.title).font(.title2.weight(.semibold))
-                Text(page.summary)
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 11) {
+            HStack(spacing: 13) {
+                SettingsKindTile(symbol: page.symbol, color: page.color, size: 44, prominent: true)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(page.title)
+                        .font(.system(size: 21, weight: .semibold, design: .rounded))
+                        .foregroundStyle(Palette.ink)
+                    Text(page.summary)
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(Palette.muted)
+                }
+                Spacer(minLength: 0)
             }
-            Spacer(minLength: 0)
+
+            HStack(spacing: 7) {
+                ForEach(headerFacts) { fact in
+                    SettingsHeaderFact(fact: fact)
+                }
+            }
         }
         .padding(.horizontal, 20)
-        .padding(.top, 16)
-        .padding(.bottom, 6)
-        .accessibilityElement(children: .combine)
+        .padding(.top, 15)
+        .padding(.bottom, 12)
+        .background {
+            SettingsPageHeaderBackdrop(color: page.color)
+        }
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(Palette.line.opacity(0.65))
+                .frame(height: 0.5)
+        }
+    }
+
+    private var headerFacts: [SettingsHeaderFactModel] {
+        switch page {
+        case .general:
+            return [
+                SettingsHeaderFactModel(id: "history", symbol: "photo.stack", text: "\(model.records.count) 张截图", tint: page.color),
+                permissionFact
+            ]
+        case .screenshot:
+            return [
+                SettingsHeaderFactModel(id: "history", symbol: "clock.arrow.circlepath",
+                                        text: model.keepHistory ? "历史已开启" : "不写入历史", tint: page.color),
+                permissionFact
+            ]
+        case .translation:
+            return [
+                SettingsHeaderFactModel(id: "target", symbol: "globe",
+                                        text: LanguageChoice.targets.first(where: { $0.id == model.targetLanguage })?.name ?? "自动",
+                                        tint: page.color),
+                SettingsHeaderFactModel(id: "engine", symbol: "apple.logo", text: "系统翻译", tint: Color(hex: "66736D"))
+            ]
+        case .clipboard:
+            return [
+                SettingsHeaderFactModel(id: "monitor", symbol: clipboard.monitorsSystem ? "record.circle.fill" : "pause.circle.fill",
+                                        text: clipboard.monitorsSystem ? "正在监听" : "已暂停",
+                                        tint: clipboard.monitorsSystem ? Color(hex: "3B8B67") : Color(hex: "A56A32")),
+                SettingsHeaderFactModel(id: "entries", symbol: "tray.full", text: "\(clipboard.entries.count) 项记录", tint: page.color)
+            ]
+        case .shortcuts:
+            return [
+                SettingsHeaderFactModel(id: "registered", symbol: model.hotkeyAvailable ? "checkmark.circle.fill" : "exclamationmark.triangle.fill",
+                                        text: model.hotkeyAvailable ? "4 个快捷键已注册" : "存在快捷键冲突",
+                                        tint: model.hotkeyAvailable ? Color(hex: "3B8B67") : Color(hex: "C17A32")),
+                SettingsHeaderFactModel(id: "instant", symbol: "bolt.fill", text: "修改后即时生效", tint: page.color)
+            ]
+        case .history:
+            return [
+                SettingsHeaderFactModel(id: "count", symbol: "photo.stack", text: "\(model.records.count) 项记录", tint: page.color),
+                SettingsHeaderFactModel(id: "local", symbol: "internaldrive.fill", text: "仅保存在本机", tint: Color(hex: "4C7566"))
+            ]
+        case .privacy:
+            return [
+                permissionFact,
+                SettingsHeaderFactModel(id: "local", symbol: "hand.raised.fill", text: "无云端账号", tint: Color(hex: "4C7566"))
+            ]
+        case .tools:
+            return [
+                SettingsHeaderFactModel(id: "count", symbol: "square.grid.2x2", text: "4 个快捷入口", tint: page.color),
+                SettingsHeaderFactModel(id: "login", symbol: "person.crop.circle.badge.checkmark", text: "无需登录", tint: Color(hex: "4C7566"))
+            ]
+        case .about:
+            return [
+                SettingsHeaderFactModel(id: "version", symbol: "number", text: "版本 \(versionLabel)", tint: page.color),
+                SettingsHeaderFactModel(id: "menu", symbol: "menubar.rectangle", text: "菜单栏应用", tint: Color(hex: "4C7566"))
+            ]
+        }
+    }
+
+    private var permissionFact: SettingsHeaderFactModel {
+        let granted = model.screenPermission.isGranted
+        return SettingsHeaderFactModel(
+            id: "permission",
+            symbol: granted ? "checkmark.shield.fill" : "exclamationmark.shield.fill",
+            text: granted ? "屏幕访问已授权" : "屏幕访问待授权",
+            tint: granted ? Color(hex: "3B8B67") : Color(hex: "C17A32")
+        )
+    }
+
+    private var versionLabel: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "-"
     }
 
     @ViewBuilder
@@ -756,32 +917,110 @@ private struct SettingsDetailView: View {
     }
 }
 
+private struct SettingsHeaderFactModel: Identifiable {
+    let id: String
+    let symbol: String
+    let text: String
+    let tint: Color
+}
+
+private struct SettingsHeaderFact: View {
+    let fact: SettingsHeaderFactModel
+
+    var body: some View {
+        HStack(spacing: 5) {
+            Image(systemName: fact.symbol)
+                .font(.system(size: 9, weight: .semibold))
+            Text(fact.text)
+                .lineLimit(1)
+        }
+        .font(.system(size: 10, weight: .medium))
+        .foregroundStyle(fact.tint)
+        .padding(.horizontal, 8)
+        .frame(height: 23)
+        .background(fact.tint.opacity(0.09), in: Capsule())
+        .overlay {
+            Capsule()
+                .stroke(fact.tint.opacity(0.14))
+        }
+        .accessibilityElement(children: .combine)
+    }
+}
+
+private struct SettingsSidebarBackdrop: View {
+    var body: some View {
+        LinearGradient(
+            colors: [Palette.background, Color(hex: "EFEBE1")],
+            startPoint: .top,
+            endPoint: .bottomTrailing
+        )
+        .overlay(alignment: .topTrailing) {
+            Circle()
+                .fill(Palette.accent.opacity(0.035))
+                .frame(width: 210, height: 210)
+                .offset(x: 85, y: -95)
+        }
+        .clipped()
+    }
+}
+
+private struct SettingsPageHeaderBackdrop: View {
+    let color: Color
+
+    var body: some View {
+        ZStack(alignment: .topTrailing) {
+            LinearGradient(
+                colors: [color.opacity(0.075), Palette.background.opacity(0.48), Palette.background],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            Circle()
+                .stroke(color.opacity(0.06), lineWidth: 18)
+                .frame(width: 132, height: 132)
+                .offset(x: 37, y: -58)
+        }
+        .clipped()
+    }
+}
+
 private struct SettingsKindTile: View {
     let symbol: String
     let color: Color
     let size: CGFloat
+    var prominent = false
 
     var body: some View {
-        RoundedRectangle(cornerRadius: size * 0.24, style: .continuous)
-            .fill(
-                LinearGradient(
-                    colors: [color.opacity(0.92), color],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-            )
+        ZStack {
+            tileBackground
             .frame(width: size, height: size)
-            .overlay {
-                Image(systemName: symbol)
-                    .font(.system(size: size * 0.52, weight: .semibold))
-                    .foregroundStyle(.white)
-            }
-            .overlay {
-                RoundedRectangle(cornerRadius: size * 0.24, style: .continuous)
-                    .stroke(.white.opacity(0.22), lineWidth: 0.8)
-            }
-            .shadow(color: color.opacity(0.16), radius: 2, y: 1)
-            .accessibilityHidden(true)
+
+            Image(systemName: symbol)
+                .font(.system(size: size * (symbol == "command" ? 0.44 : 0.48), weight: .semibold))
+                .foregroundStyle(prominent ? Color.white : color)
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: size * 0.26, style: .continuous)
+                .stroke(prominent ? Color.white.opacity(0.22) : color.opacity(0.13), lineWidth: 0.8)
+        }
+        .shadow(color: prominent ? color.opacity(0.2) : .clear, radius: 3, y: 1)
+        .accessibilityHidden(true)
+    }
+
+    @ViewBuilder
+    private var tileBackground: some View {
+        if prominent {
+            RoundedRectangle(cornerRadius: size * 0.26, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [color.opacity(0.9), color],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+        } else {
+            RoundedRectangle(cornerRadius: size * 0.26, style: .continuous)
+                .fill(color.opacity(0.11))
+        }
     }
 }
 
@@ -792,9 +1031,12 @@ private struct SettingsRowLabel: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(title)
+                .font(.callout.weight(.medium))
+                .foregroundStyle(.primary)
             Text(detail)
-                .font(.subheadline)
+                .font(.caption)
                 .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 }
@@ -806,12 +1048,29 @@ private struct SettingsValueRow: View {
 
     var body: some View {
         LabeledContent {
-            Text(value)
-                .foregroundStyle(.secondary)
-                .textSelection(.enabled)
+            SettingsValueBadge(value: value)
         } label: {
             SettingsRowLabel(title: title, detail: detail)
         }
+    }
+}
+
+private struct SettingsValueBadge: View {
+    let value: String
+
+    var body: some View {
+        Text(value)
+            .font(.system(size: 10, weight: .semibold, design: .rounded))
+            .foregroundStyle(Palette.ink.opacity(0.82))
+            .lineLimit(1)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(Palette.sage.opacity(0.9), in: Capsule())
+            .overlay {
+                Capsule()
+                    .stroke(Palette.ink.opacity(0.06))
+            }
+            .textSelection(.enabled)
     }
 }
 
@@ -822,6 +1081,7 @@ private struct SettingsActionRow: View {
     let color: Color
     var shortcut: String?
     let action: () -> Void
+    @StoredState private var hovered = false
 
     var body: some View {
         Button(action: action) {
@@ -832,19 +1092,30 @@ private struct SettingsActionRow: View {
                 if let shortcut {
                     Text(shortcut)
                         .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Palette.ink.opacity(0.72))
                         .padding(.horizontal, 7)
                         .padding(.vertical, 4)
-                        .background(.quaternary.opacity(0.55), in: RoundedRectangle(cornerRadius: 5))
+                        .background(Palette.sage, in: RoundedRectangle(cornerRadius: 5))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 5)
+                                .stroke(Palette.ink.opacity(0.06))
+                        }
                 }
                 Image(systemName: "chevron.right")
                     .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(hovered ? color.opacity(0.8) : Palette.muted.opacity(0.6))
             }
+            .padding(.vertical, 3)
+            .padding(.horizontal, 5)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(hovered ? color.opacity(0.07) : Color.clear)
+            )
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .foregroundStyle(.primary)
+        .onHover { hovered = $0 }
     }
 }
 
