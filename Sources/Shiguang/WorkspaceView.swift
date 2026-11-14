@@ -24,57 +24,78 @@ typealias StoredState<Value> = SwiftUI.State<Value>
 struct HotkeyRow: View {
     let title: String
     @Binding var settings: HotkeySettings
+    @StoredState private var draft = ""
+    @StoredState private var message: String?
+    @FocusState private var focused: Bool
 
     var body: some View {
-        HStack(spacing: 7) {
+        HStack(spacing: 9) {
             Text(title)
                 .font(.system(size: 11, weight: .medium))
                 .lineLimit(1)
                 .frame(width: 82, alignment: .leading)
-            Picker("按键", selection: $settings.key) {
-                ForEach(Array("ABCDEFGHIJKLMNOPQRSTUVWXYZ"), id: \.self) { character in
-                    Text(String(character)).tag(String(character))
+            HStack(spacing: 6) {
+                Image(systemName: "keyboard")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(Palette.muted)
+                TextField("⌥⇧S", text: $draft)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                    .labelsHidden()
+                    .frame(width: 112)
+                    .focused($focused)
+                    .onSubmit { apply() }
+                if draft != settings.symbol {
+                    Button("应用") { apply() }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
                 }
             }
-            .labelsHidden()
-            .pickerStyle(.menu)
-            .controlSize(.small)
-            .frame(width: 54)
-            Toggle("⌃", isOn: $settings.control).toggleStyle(HotkeyModifierStyle()).help("Control")
-            Toggle("⌥", isOn: $settings.option).toggleStyle(HotkeyModifierStyle()).help("Option")
-            Toggle("⇧", isOn: $settings.shift).toggleStyle(HotkeyModifierStyle()).help("Shift")
-            Toggle("⌘", isOn: $settings.command).toggleStyle(HotkeyModifierStyle()).help("Command")
+            .padding(.horizontal, 9)
+            .frame(height: 28)
+            .background(Palette.panel, in: RoundedRectangle(cornerRadius: 7))
+            .overlay {
+                RoundedRectangle(cornerRadius: 7)
+                    .stroke(message?.hasPrefix("已") == true ? Palette.ink.opacity(0.18) :
+                                (message == nil ? Palette.line.opacity(0.8) : Palette.accent.opacity(0.7)))
+            }
+            if let message {
+                Text(message)
+                    .font(.system(size: 9.5))
+                    .foregroundStyle(message.hasPrefix("已") ? Palette.muted : Palette.accent)
+                    .lineLimit(1)
+            } else {
+                Text("支持 ⌥⇧S 或 option+shift+s")
+                    .font(.system(size: 9.5))
+                    .foregroundStyle(Palette.muted)
+                    .lineLimit(1)
+            }
             Spacer(minLength: 2)
-            Text(settings.symbol)
-                .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                .foregroundStyle(Palette.ink)
-                .padding(.horizontal, 8).padding(.vertical, 5)
-                .background(Palette.panel, in: RoundedRectangle(cornerRadius: 6))
-                .overlay(RoundedRectangle(cornerRadius: 6).stroke(Palette.line.opacity(0.8)))
         }
         .padding(.horizontal, 9)
-        .frame(height: 42)
+        .frame(height: 46)
         .background(Palette.background.opacity(0.62), in: RoundedRectangle(cornerRadius: 9))
         .overlay(RoundedRectangle(cornerRadius: 9).stroke(Palette.line.opacity(0.55)))
-    }
-}
-
-private struct HotkeyModifierStyle: ToggleStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        Button {
-            configuration.isOn.toggle()
-        } label: {
-            configuration.label
-                .font(.system(size: 11, weight: .semibold, design: .rounded))
-                .foregroundStyle(configuration.isOn ? .white : Palette.muted)
-                .frame(width: 22, height: 24)
-                .background(configuration.isOn ? Palette.ink : Palette.panel,
-                            in: RoundedRectangle(cornerRadius: 6))
-                .overlay(RoundedRectangle(cornerRadius: 6)
-                    .stroke(configuration.isOn ? Palette.ink : Palette.line.opacity(0.75)))
+        .onAppear {
+            draft = settings.symbol
         }
-        .buttonStyle(.plain)
-        .accessibilityValue(configuration.isOn ? "已启用" : "未启用")
+        .onChange(of: settings) { _, value in
+            if !focused { draft = value.symbol }
+        }
+        .onChange(of: draft) { _, _ in
+            if message?.hasPrefix("已") != true { message = nil }
+        }
+    }
+
+    private func apply() {
+        guard let parsed = HotkeySettings.parseInput(draft) else {
+            message = "格式无效，请包含至少一个修饰键"
+            return
+        }
+        settings = parsed
+        draft = parsed.symbol
+        message = "已应用 \(parsed.symbol)"
+        focused = false
     }
 }
 
@@ -119,7 +140,8 @@ struct CaptureEditorView: View {
 
     private func configureTranslation() {
         guard model.activeEditor == (floating ? "overlay" : "editor"),
-              let job = model.translationJob else { configuration = nil; return }
+              let job = model.translationJob,
+              job.provider == .apple else { configuration = nil; return }
         let source = job.source == "auto" ? nil : Locale.Language(identifier: job.source)
         let target = Locale.Language(identifier: job.target)
         if #available(macOS 26.4, *) {
@@ -140,9 +162,15 @@ private struct TextWorkspaceView: View {
             if !isRecognition {
                 languageBar
             }
-            sourcePanel
-            if !isRecognition {
-                resultPanel
+            if isRecognition {
+                sourcePanel
+                    .frame(minHeight: 210, maxHeight: .infinity)
+            } else {
+                HStack(alignment: .top, spacing: 12) {
+                    sourcePanel
+                    resultPanel
+                }
+                .frame(maxHeight: .infinity)
             }
             actionBar
             statusBar
@@ -155,7 +183,8 @@ private struct TextWorkspaceView: View {
             }
         }
         .padding(18)
-        .frame(minWidth: 420, minHeight: isRecognition ? 330 : 500)
+        .frame(minWidth: isRecognition ? 420 : 680,
+               minHeight: isRecognition ? 330 : 420)
     }
 
     private var header: some View {
@@ -174,13 +203,15 @@ private struct TextWorkspaceView: View {
                 Text(isRecognition ? "文字识别" : "截图翻译")
                     .font(.system(size: 21, weight: .semibold, design: .serif))
                 Text(isRecognition ? "提取截图中的文字，可在本机校对后继续翻译。" :
-                        "自动检测原文语种，默认在中文与英文之间切换。")
+                        (model.translationProvider == .ai
+                         ? "使用已配置的 AI 服务翻译，原文与译文并排展示。"
+                         : "自动检测原文语种，默认在中文与英文之间切换。"))
                     .font(.system(size: 11))
                     .foregroundStyle(Palette.muted)
             }
             Spacer()
-            Label(isRecognition ? "本机处理" : "Apple 翻译",
-                  systemImage: isRecognition ? "lock.shield" : "apple.logo")
+            Label(isRecognition ? "本机处理" : model.translationProvider.title,
+                  systemImage: isRecognition ? "lock.shield" : model.translationProvider.symbol)
                 .font(.system(size: 10, weight: .medium))
                 .foregroundStyle(Palette.ink)
                 .padding(.horizontal, 9).padding(.vertical, 6)
@@ -286,7 +317,7 @@ private struct TextWorkspaceView: View {
                     .padding(.horizontal, 9).padding(.vertical, 5)
             }
         }
-        .frame(minHeight: 120, maxHeight: .infinity)
+        .frame(minWidth: 260, maxWidth: .infinity, minHeight: 200, maxHeight: .infinity)
         .background(Palette.panel, in: RoundedRectangle(cornerRadius: 12))
         .overlay(RoundedRectangle(cornerRadius: 12).stroke(Palette.line.opacity(0.9)))
         .shadow(color: Palette.shadow, radius: 12, y: 5)
@@ -323,7 +354,7 @@ private struct TextWorkspaceView: View {
                     .padding(.horizontal, 15).padding(.vertical, 12)
             }
         }
-        .frame(minHeight: 120, maxHeight: .infinity)
+        .frame(minWidth: 260, maxWidth: .infinity, minHeight: 200, maxHeight: .infinity)
         .background(Palette.sage, in: RoundedRectangle(cornerRadius: 12))
         .overlay(RoundedRectangle(cornerRadius: 12).stroke(Palette.ink.opacity(0.08)))
         .shadow(color: Palette.shadow, radius: 12, y: 5)

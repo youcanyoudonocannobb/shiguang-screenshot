@@ -7,8 +7,35 @@ private struct FeatureFailure: LocalizedError {
     var errorDescription: String? { message }
 }
 
+private final class MockAIURLProtocol: URLProtocol {
+    static var handler: ((URLRequest) -> (Int, Data))?
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+    override func startLoading() {
+        guard let handler = Self.handler, let url = request.url else {
+            client?.urlProtocol(self, didFailWithError: URLError(.badServerResponse))
+            return
+        }
+        let (status, data) = handler(request)
+        let response = HTTPURLResponse(url: url, statusCode: status, httpVersion: "HTTP/1.1",
+                                       headerFields: ["Content-Type": "application/json"])!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: data)
+        client?.urlProtocolDidFinishLoading(self)
+    }
+
+    override func stopLoading() {}
+}
+
 private func require(_ condition: @autoclosure () -> Bool, _ message: String) throws {
     if !condition() { throw FeatureFailure(message: message) }
+}
+
+private func requireValue<T>(_ value: T?, _ message: String) throws -> T {
+    guard let value else { throw FeatureFailure(message: message) }
+    return value
 }
 
 @main
@@ -136,6 +163,93 @@ struct EditorFeatureChecks {
         model.beginScrollCapture = { mode, _ in scrollMode = mode }
         model.captureScrolling(.manual)
         try require(scrollMode == .manual, "Manual long screenshot must reach its controller")
+    }
+
+    static func manualHotkeyInput() async throws {
+        let compact = try requireValue(HotkeySettings.parseInput("⌥⇧K"),
+                                       "Compact modifier notation must be accepted")
+        try require(compact.key == "K" && compact.option && compact.shift &&
+                    !compact.control && !compact.command,
+                    "⌥⇧K must parse into the expected modifier flags")
+
+        let words = try requireValue(HotkeySettings.parseInput("control + option + s"),
+                                     "Word modifier notation must be accepted")
+        try require(words.key == "S" && words.control && words.option &&
+                    !words.shift && !words.command,
+                    "Word modifier notation must parse consistently")
+
+        try require(HotkeySettings.parseInput("K") == nil,
+                    "A shortcut without a modifier must be rejected")
+        try require(HotkeySettings.parseInput("⌥⇧KK") == nil,
+                    "A shortcut must contain exactly one letter key")
+    }
+
+    static func aiTranslationRequests() async throws {
+        try require(AITranslationService.endpoint(for: "https://api.example.com/v1")?.absoluteString ==
+                    "https://api.example.com/v1/chat/completions",
+                    "AI endpoint must append Chat Completions to a base URL")
+        try require(AITranslationService.endpoint(for: "https://api.example.com/v1/chat/completions")?.absoluteString ==
+                    "https://api.example.com/v1/chat/completions",
+                    "A complete Chat Completions endpoint must remain unchanged")
+        try require(AITranslationService.endpoint(for: "http://insecure.example.com") == nil,
+                    "AI translation must require HTTPS")
+
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [MockAIURLProtocol.self]
+        let session = URLSession(configuration: configuration)
+        var capturedPath = ""
+        var capturedAuthorization = ""
+        var capturedBody = ""
+        MockAIURLProtocol.handler = { request in
+            capturedPath = request.url?.path ?? ""
+            capturedAuthorization = request.value(forHTTPHeaderField: "Authorization") ?? ""
+            if let body = request.httpBody {
+                capturedBody = String(data: body, encoding: .utf8) ?? ""
+            }
+            let data = Data(#"{"choices":[{"message":{"role":"assistant","content":"你好"}}]}"#.utf8)
+            return (200, data)
+        }
+        defer { MockAIURLProtocol.handler = nil }
+        let translated = try await AITranslationService(session: session).translate(
+            text: "Hello",
+            source: "en",
+            target: "zh-Hans",
+            configuration: AITranslationConfiguration(baseURL: "https://api.example.com/v1",
+                                                       model: "test-model", instructions: "Keep names unchanged"),
+            apiKey: "test-key"
+        )
+        try require(translated == "你好", "AI translation must decode assistant content")
+        try require(capturedPath == "/v1/chat/completions", "AI request must use the configured endpoint")
+        try require(capturedAuthorization == "Bearer test-key", "AI request must carry the API key as a bearer token")
+        if !capturedBody.isEmpty {
+            try require(capturedBody.contains("test-model") && capturedBody.contains("Hello") &&
+                        capturedBody.contains("Keep names unchanged"),
+                        "AI request body must include model, source text and custom instructions")
+        }
+    }
+
+    static func aiTranslationErrors() async throws {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [MockAIURLProtocol.self]
+        let session = URLSession(configuration: configuration)
+        MockAIURLProtocol.handler = { _ in
+            (401, Data(#"{"error":{"message":"Invalid API key"}}"#.utf8))
+        }
+        defer { MockAIURLProtocol.handler = nil }
+        var failed = false
+        do {
+            _ = try await AITranslationService(session: session).translate(
+                text: "Hello", source: "en", target: "zh-Hans",
+                configuration: AITranslationConfiguration(baseURL: "https://api.example.com/v1",
+                                                           model: "test-model", instructions: ""),
+                apiKey: "bad-key"
+            )
+        } catch {
+            failed = true
+            try require(error.localizedDescription.contains("Invalid API key"),
+                        "AI server errors must surface the service message")
+        }
+        try require(failed, "A 401 response must fail translation")
     }
 
     static func draftCancellationDismissesWindows() async throws {
@@ -592,7 +706,10 @@ struct EditorFeatureChecks {
             ("text_only_windows_and_detected_language_defaults", textWindowsAndLanguageDefaults),
             ("annotation_toolkit_redo_and_language_swap", annotationToolkitAndLanguageSwap),
             ("recording_dimensions_are_encodable", recordingDimensions),
-            ("unsaved_recording_survives_relaunch", recordingDraftRecovery)
+            ("unsaved_recording_survives_relaunch", recordingDraftRecovery),
+            ("manual_hotkey_input_parser", manualHotkeyInput),
+            ("ai_translation_request_contract", aiTranslationRequests),
+            ("ai_translation_server_error", aiTranslationErrors)
         ]
         if !ProcessInfo.processInfo.arguments.contains("--skip-video") { checks.append(("playable_mp4_and_animated_gif_export", movieAndGIF)) }
         var failures = 0

@@ -39,7 +39,7 @@ enum ShiguangSettingsPage: String, CaseIterable, Identifiable {
         switch self {
         case .general: return "快速截图、运行状态和常用操作"
         case .screenshot: return "截图流程、识别和历史记录"
-        case .translation: return "原文语种、默认目标语言和翻译入口"
+        case .translation: return "翻译引擎、默认语言和 AI 接口"
         case .clipboard: return "系统剪贴板历史、快捷键和本机保存"
         case .shortcuts: return "区域截图、截图翻译和剪贴板快捷键"
         case .history: return "查看最近截图、识别文字和译文"
@@ -84,7 +84,8 @@ enum ShiguangSettingsPage: String, CaseIterable, Identifiable {
         case .screenshot:
             return ["自动识别", "OCR", "文字识别", "自动翻译", "历史", "保存", "截图流程", "确认", "复制"]
         case .translation:
-            return ["语言", "中文", "英文", "日文", "目标语言", "源语言", "Apple", "文字翻译", "翻译剪贴板"]
+            return ["语言", "中文", "英文", "日文", "目标语言", "源语言", "Apple",
+                    "AI", "API", "Key", "模型", "接口", "文字翻译", "翻译剪贴板"]
         case .clipboard:
             return ["历史", "系统剪贴板", "复制", "监听", "记录", "图片", "GIF", "视频", "文件", "100"]
         case .shortcuts:
@@ -395,6 +396,7 @@ private struct SettingsDetailView: View {
     @ObservedObject var model: AppModel
     @ObservedObject var clipboard: ClipboardHistory
     let page: ShiguangSettingsPage
+    @StoredState private var revealsAIKey = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -463,7 +465,15 @@ private struct SettingsDetailView: View {
                 SettingsHeaderFactModel(id: "target", symbol: "globe",
                                         text: LanguageChoice.targets.first(where: { $0.id == model.targetLanguage })?.name ?? "自动",
                                         tint: page.color),
-                SettingsHeaderFactModel(id: "engine", symbol: "apple.logo", text: "系统翻译", tint: Color(hex: "66736D"))
+                SettingsHeaderFactModel(
+                    id: "engine",
+                    symbol: model.translationProvider.symbol,
+                    text: model.translationProvider == .ai
+                        ? (model.aiReady ? "AI 已配置" : "AI 待配置")
+                        : "系统翻译",
+                    tint: model.translationProvider == .ai && !model.aiReady
+                        ? Color(hex: "C17A32") : Color(hex: "66736D")
+                )
             ]
         case .clipboard:
             return [
@@ -651,6 +661,97 @@ private struct SettingsDetailView: View {
     private var translationContent: some View {
         Group {
             Section {
+                Picker("翻译引擎", selection: $model.translationProvider) {
+                    ForEach(TranslationProvider.allCases) { provider in
+                        Label(provider.title, systemImage: provider.symbol).tag(provider)
+                    }
+                }
+                .pickerStyle(.segmented)
+
+                if model.translationProvider == .ai {
+                    LabeledContent {
+                        TextField("https://api.openai.com/v1", text: $model.aiBaseURL)
+                            .textFieldStyle(.roundedBorder)
+                            .controlSize(.small)
+                            .labelsHidden()
+                            .frame(width: 250)
+                    } label: {
+                        SettingsRowLabel(
+                            title: "接口地址",
+                            detail: "[OI] Chat Completions 兼容地址，可填到 /v1"
+                        )
+                    }
+
+                    LabeledContent {
+                        TextField("gpt-4o-mini", text: $model.aiModel)
+                            .textFieldStyle(.roundedBorder)
+                            .controlSize(.small)
+                            .labelsHidden()
+                            .frame(width: 250)
+                    } label: {
+                        SettingsRowLabel(title: "模型", detail: "填写服务商提供的模型标识")
+                    }
+
+                    LabeledContent {
+                        HStack(spacing: 6) {
+                            Group {
+                                if revealsAIKey {
+                                    TextField("sk-…", text: $model.aiAPIKey)
+                                } else {
+                                    SecureField("sk-…", text: $model.aiAPIKey)
+                                }
+                            }
+                            .textFieldStyle(.roundedBorder)
+                            .controlSize(.small)
+                            .labelsHidden()
+                            .frame(width: 200)
+
+                            Button {
+                                revealsAIKey.toggle()
+                            } label: {
+                                Image(systemName: revealsAIKey ? "eye.slash" : "eye")
+                            }
+                            .buttonStyle(.borderless)
+                            .help(revealsAIKey ? "隐藏 API Key" : "显示 API Key")
+                        }
+                    } label: {
+                        SettingsRowLabel(title: "API Key", detail: "仅保存到本机钥匙串，不写入源码或历史")
+                    }
+
+                    LabeledContent {
+                        TextField("可选：术语、语气或专有名词要求", text: $model.aiInstructions)
+                            .textFieldStyle(.roundedBorder)
+                            .controlSize(.small)
+                            .labelsHidden()
+                            .frame(width: 250)
+                    } label: {
+                        SettingsRowLabel(title: "附加要求", detail: "会加入系统提示词，留空则使用默认规则")
+                    }
+
+                    HStack(spacing: 10) {
+                        Button("测试连接") { model.testAITranslation() }
+                            .disabled(model.aiTesting)
+                        if model.aiTesting {
+                            ProgressView().controlSize(.small)
+                        }
+                        if let message = model.aiTestMessage {
+                            Text(message)
+                                .font(.caption)
+                                .foregroundStyle(model.aiTesting ? Palette.muted : Palette.ink)
+                                .lineLimit(2)
+                        }
+                        Spacer(minLength: 0)
+                    }
+                }
+            } header: {
+                Text("翻译引擎")
+            } footer: {
+                Text(model.translationProvider == .ai
+                     ? "AI 翻译会把待翻译文字发送到你配置的服务；API Key 保存在 macOS 钥匙串。测试连接会发送一次 “Hello” 翻译请求。"
+                     : "Apple 翻译在系统框架内处理；首次使用某个语言对时，可能需要下载语言包。")
+            }
+
+            Section {
                 LabeledContent {
                     Picker("目标语言", selection: Binding(
                         get: { model.targetLanguage },
@@ -671,7 +772,9 @@ private struct SettingsDetailView: View {
             } header: {
                 Text("语言")
             } footer: {
-                Text("首次使用某个语言对时，Apple 可能要求下载系统语言包。截图翻译可在独立窗口中随时交换语言。")
+                Text(model.translationProvider == .ai
+                     ? "AI 翻译会自动检测原文语种，并将识别结果与译文并排展示。"
+                     : "首次使用某个语言对时，Apple 可能要求下载系统语言包。截图翻译可在独立窗口中随时交换语言。")
             }
 
             Section("快捷入口") {

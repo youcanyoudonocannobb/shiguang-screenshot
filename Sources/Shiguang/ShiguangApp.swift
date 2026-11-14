@@ -571,9 +571,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         if text { window?.orderOut(nil) }
         editorWindow.title = model.editorMode == .recognition ? "拾光截图 · 文字识别" :
             (text ? "拾光截图 · 翻译" : "拾光截图 · 快速编辑")
-        editorWindow.minSize = text ? NSSize(width: 480, height: model.editorMode == .recognition ? 360 : 540) :
+        editorWindow.minSize = text ? NSSize(width: model.editorMode == .recognition ? 500 : 700,
+                                             height: model.editorMode == .recognition ? 340 : 440) :
             NSSize(width: 700, height: 400)
-        editorWindow.setContentSize(text ? NSSize(width: 580, height: model.editorMode == .recognition ? 460 : 650) :
+        editorWindow.setContentSize(text ? NSSize(width: model.editorMode == .recognition ? 600 : 860,
+                                                  height: model.editorMode == .recognition ? 430 : 520) :
             NSSize(width: 980, height: 760))
         editorWindow.center()
         editorWindow?.makeKeyAndOrderFront(nil)

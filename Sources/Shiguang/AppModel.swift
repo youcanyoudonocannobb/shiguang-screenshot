@@ -1,5 +1,4 @@
 import AppKit
-import Carbon
 import Combine
 import NaturalLanguage
 import Translation
@@ -11,53 +10,13 @@ struct TranslationJob: Identifiable {
     let text: String
     let source: String
     let target: String
+    let provider: TranslationProvider
 }
 
 struct OCRTimingPolicy {
     var initialTimeout: Duration = .seconds(120)
     var subsequentTimeout: Duration = .seconds(45)
     var preparationNoticeDelay: Duration = .seconds(3)
-}
-
-struct HotkeySettings: Codable, Equatable {
-    var key: String
-    var option = true
-    var shift = true
-    var control = false
-    var command = false
-
-    var keyCode: UInt32 {
-        ["A":0,"B":11,"C":8,"D":2,"E":14,"F":3,"G":5,"H":4,"I":34,"J":38,"K":40,
-         "L":37,"M":46,"N":45,"O":31,"P":35,"Q":12,"R":15,"S":1,"T":17,"U":32,
-         "V":9,"W":13,"X":7,"Y":16,"Z":6][key.uppercased()] ?? 1
-    }
-
-    var carbonModifiers: UInt32 {
-        var value = 0
-        if option { value |= optionKey }
-        if shift { value |= shiftKey }
-        if control { value |= controlKey }
-        if command { value |= cmdKey }
-        return UInt32(value)
-    }
-
-    var symbol: String {
-        var parts: [String] = []
-        if control { parts.append("⌃") }
-        if option { parts.append("⌥") }
-        if shift { parts.append("⇧") }
-        if command { parts.append("⌘") }
-        return parts.joined() + key.uppercased()
-    }
-
-    var cocoaModifiers: NSEvent.ModifierFlags {
-        var flags: NSEvent.ModifierFlags = []
-        if option { flags.insert(.option) }
-        if shift { flags.insert(.shift) }
-        if control { flags.insert(.control) }
-        if command { flags.insert(.command) }
-        return flags
-    }
 }
 
 @MainActor
@@ -69,6 +28,30 @@ final class AppModel: ObservableObject {
     @Published var translatedText = ""
     @Published var sourceLanguage = "auto"
     @Published var targetLanguage = "zh-Hans"
+    @Published var translationProvider: TranslationProvider = TranslationProvider(
+        rawValue: UserDefaults.standard.string(forKey: "translationProvider") ?? ""
+    ) ?? .apple {
+        didSet { UserDefaults.standard.set(translationProvider.rawValue, forKey: "translationProvider") }
+    }
+    @Published var aiBaseURL: String = UserDefaults.standard.string(forKey: "aiBaseURL")
+        ?? AITranslationConfiguration().baseURL {
+        didSet { UserDefaults.standard.set(aiBaseURL, forKey: "aiBaseURL") }
+    }
+    @Published var aiModel: String = UserDefaults.standard.string(forKey: "aiModel")
+        ?? AITranslationConfiguration().model {
+        didSet { UserDefaults.standard.set(aiModel, forKey: "aiModel") }
+    }
+    @Published var aiInstructions: String = UserDefaults.standard.string(forKey: "aiInstructions") ?? "" {
+        didSet { UserDefaults.standard.set(aiInstructions, forKey: "aiInstructions") }
+    }
+    @Published var aiAPIKey: String = AITranslationKeychain.load() {
+        didSet {
+            do { try AITranslationKeychain.save(aiAPIKey) }
+            catch { errorMessage = error.localizedDescription }
+        }
+    }
+    @Published var aiTesting = false
+    @Published var aiTestMessage: String?
     @Published var marks: [Mark] = []
     @Published var tool: MarkTool = .pointer
     @Published var markColor = "E45F3C"
@@ -163,6 +146,8 @@ final class AppModel: ObservableObject {
     private var ocrWatchdog: Task<Void, Never>?
     private var ocrID: UUID?
     private var translationWatchdog: Task<Void, Never>?
+    private var aiTranslationTask: Task<Void, Never>?
+    private var aiTestTask: Task<Void, Never>?
     private var undoMarks: [[Mark]] = []
     private var redoMarks: [[Mark]] = []
     private var draftTitle = ""
@@ -172,6 +157,12 @@ final class AppModel: ObservableObject {
     }
     var isTextWorkspace: Bool { editorMode != .annotation }
     var canTranslate: Bool { !sourceText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !isBusy }
+    var aiConfiguration: AITranslationConfiguration {
+        AITranslationConfiguration(baseURL: aiBaseURL, model: aiModel, instructions: aiInstructions)
+    }
+    var aiReady: Bool {
+        aiConfiguration.isConfigured && !aiAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
     var currentRecord: CaptureRecord? { records.first { $0.id == selectedID } }
     var filteredRecords: [CaptureRecord] {
         search.isEmpty ? records : records.filter {
@@ -672,14 +663,55 @@ final class AppModel: ObservableObject {
             errorMessage = "检测到原文与目标语言相同。请调整语言；这个初版不提供简繁转换。"
             return
         }
-        activity = "正在翻译 · 首次使用可能需要下载语言包"
-        let job = TranslationJob(documentID: selectedID, text: text, source: source, target: target)
+        let provider = translationProvider
+        if provider == .ai {
+            guard aiConfiguration.isConfigured else {
+                errorMessage = "请先在设置中填写 AI 接口地址和模型名称。"
+                return
+            }
+            guard aiReady else {
+                errorMessage = "请先在设置中填写 AI 服务的 API Key。"
+                return
+            }
+        }
+        activity = provider == .ai
+            ? "正在使用 AI 翻译 · \(aiModel)"
+            : "正在翻译 · 首次使用可能需要下载语言包"
+        let job = TranslationJob(documentID: selectedID, text: text,
+                                 source: source, target: target, provider: provider)
         translationJob = job
         translationWatchdog = Task {
             do { try await Task.sleep(for: .seconds(120)) } catch { return }
             guard translationJob?.id == job.id else { return }
             cancelTranslation()
-            errorMessage = "系统翻译服务等待超时。若正在下载语言包，请等待下载完成后重试。"
+            errorMessage = job.provider == .ai
+                ? "AI 翻译等待超时。请检查网络、接口地址和模型状态后重试。"
+                : "系统翻译服务等待超时。若正在下载语言包，请等待下载完成后重试。"
+        }
+        if provider == .ai {
+            startAITranslation(job)
+        }
+    }
+
+    private func startAITranslation(_ job: TranslationJob) {
+        aiTranslationTask?.cancel()
+        let configuration = aiConfiguration
+        let apiKey = aiAPIKey
+        aiTranslationTask = Task { [weak self] in
+            do {
+                let result = try await AITranslationService().translate(
+                    text: job.text,
+                    source: job.source,
+                    target: job.target,
+                    configuration: configuration,
+                    apiKey: apiKey
+                )
+                guard !Task.isCancelled else { return }
+                self?.finishTranslation(job, text: result)
+            } catch {
+                guard !Task.isCancelled else { return }
+                self?.failTranslation(job, error: error)
+            }
         }
     }
 
@@ -689,7 +721,10 @@ final class AppModel: ObservableObject {
         translatedText = text
         activity = nil
         translationJob = nil
-        notice = "翻译完成 · 由 Apple 翻译在设备上处理"
+        aiTranslationTask = nil
+        notice = job.provider == .ai
+            ? "翻译完成 · 由已配置的 AI 服务处理"
+            : "翻译完成 · 由 Apple 翻译在设备上处理"
         persistCurrent()
     }
 
@@ -698,20 +733,60 @@ final class AppModel: ObservableObject {
         translationWatchdog?.cancel()
         activity = nil
         translationJob = nil
+        aiTranslationTask = nil
         let cocoaError = error as NSError
         if error is CancellationError || (cocoaError.domain == NSCocoaErrorDomain && cocoaError.code == NSUserCancelledError) {
             notice = "翻译已取消。"
         } else {
-            errorMessage = "翻译未完成：\(error.localizedDescription)\n首次使用请联网下载语言包，并确认系统支持所选语言。"
+            errorMessage = job.provider == .ai
+                ? "AI 翻译未完成：\(error.localizedDescription)\n请检查接口地址、模型、API Key 和网络连接。"
+                : "翻译未完成：\(error.localizedDescription)\n首次使用请联网下载语言包，并确认系统支持所选语言。"
         }
     }
 
     func cancelTranslation() {
         translationWatchdog?.cancel()
+        aiTranslationTask?.cancel()
+        aiTranslationTask = nil
         translationJob = nil
         activity = nil
         errorMessage = nil
         notice = "已取消翻译。"
+    }
+
+    func testAITranslation() {
+        guard !aiTesting else { return }
+        guard aiConfiguration.isConfigured else {
+            aiTestMessage = "请先填写接口地址和模型名称。"
+            return
+        }
+        guard aiReady else {
+            aiTestMessage = "请先填写 API Key。"
+            return
+        }
+        aiTesting = true
+        aiTestMessage = "正在连接 AI 服务…"
+        let configuration = aiConfiguration
+        let apiKey = aiAPIKey
+        aiTestTask?.cancel()
+        aiTestTask = Task { [weak self] in
+            do {
+                let result = try await AITranslationService().translate(
+                    text: "Hello",
+                    source: "en",
+                    target: "zh-Hans",
+                    configuration: configuration,
+                    apiKey: apiKey
+                )
+                guard !Task.isCancelled else { return }
+                self?.aiTesting = false
+                self?.aiTestMessage = "连接成功 · 返回“\(result.prefix(24))”"
+            } catch {
+                guard !Task.isCancelled else { return }
+                self?.aiTesting = false
+                self?.aiTestMessage = error.localizedDescription
+            }
+        }
     }
 
     func sourceEdited(_ value: String) {
