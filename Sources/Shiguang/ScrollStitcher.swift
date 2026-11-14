@@ -82,31 +82,66 @@ struct ScrollFrameSample {
     func displacement(to next: Self) -> Int? {
         guard height == next.height else { return nil }
         let maximum = height * 85 / 100
-        func score(_ shift: Int) -> Double {
-            let margin = max(4, height / 12)
-            let start = max(margin, margin - shift)
-            let end = min(height - margin, height - margin - shift)
-            guard end - start >= max(16, height / 12) else { return .infinity }
-            var error = 0, count = 0, rows = 0
-            for row in stride(from: start, to: end, by: max(1, height / 220)) {
-                let oldRow = row + shift
-                if contrast[oldRow] < 12 && next.contrast[row] < 12 { continue }
-                rows += 1
-                for column in stride(from: 2, to: width - 2, by: 2) {
-                    let lhs = Int(pixels[oldRow * width + column]), rhs = Int(next.pixels[row * width + column])
-                    // Normalize against visible detail so white margins cannot hide a mismatched text line.
-                    if abs(lhs - background[oldRow]) < 10 && abs(rhs - next.background[row]) < 10 { continue }
-                    error += min(100, abs(lhs - rhs))
-                    count += 1
-                }
+        guard maximum >= 4 else { return nil }
+        let minimumRun = max(40, height / 8)
+        // A pinned footer retraces itself in every frame, so it must not be read as overlap.
+        let footer = fixedFooter(comparedTo: next)
+
+        func rowError(oldRow: Int, newRow: Int) -> Double {
+            var error = 0, count = 0
+            for column in stride(from: 2, to: width - 2, by: 2) {
+                let lhs = Int(pixels[oldRow * width + column])
+                let rhs = Int(next.pixels[newRow * width + column])
+                if abs(lhs - background[oldRow]) < 10 && abs(rhs - next.background[newRow]) < 10 { continue }
+                error += min(100, abs(lhs - rhs))
+                count += 1
             }
-            return rows >= 8 && count >= 40 ? Double(error) / Double(count) : .infinity
+            // Featureless rows carry no signal, so treat them as matching and rely on `textured`.
+            // Any real difference, even a couple of glyph pixels, must not be diluted away.
+            return count > 0 ? Double(error) / Double(count) : 0
         }
-        let ranked = (-maximum...maximum).filter { abs($0) >= 2 }
-            .map { (shift: $0, error: score($0)) }.sorted { $0.error < $1.error }
-        guard let best = ranked.first, best.error < 18 else { return nil }
-        if let alternate = ranked.first(where: { abs($0.shift - best.shift) > 8 }),
-           alternate.error <= best.error * 1.15 + 0.03 { return nil }
+
+        // For a downward scroll the new frame's top rows retrace the old frame's bottom rows.
+        // Walking back from the bottom keeps this linear for mismatching shifts and immune to
+        // periodic page backgrounds that made the previous mean-error search jump a whole band.
+        func trailingRun(_ shift: Int) -> (rows: Int, textured: Int) {
+            let overlap = height - shift - footer
+            guard overlap >= minimumRun else { return (0, 0) }
+            var rows = 0, textured = 0, gaps = 0
+            var row = overlap - 1
+            while row >= 0 {
+                if rowError(oldRow: shift + row, newRow: row) < 4 {
+                    rows += 1
+                    gaps = 0
+                    if contrast[shift + row] >= 10 || next.contrast[row] >= 10 { textured += 1 }
+                } else {
+                    gaps += 1
+                    if gaps > 2 { break }
+                }
+                row -= 1
+            }
+            return (rows, textured)
+        }
+
+        var best: (shift: Int, rows: Int, textured: Int)?
+        var runnerUp = 0
+        for shift in 2...maximum {
+            let run = trailingRun(shift)
+            guard run.rows >= minimumRun, run.textured >= 8 else { continue }
+            if let current = best {
+                if run.rows > current.rows {
+                    if abs(shift - current.shift) > 8 { runnerUp = max(runnerUp, current.rows) }
+                    best = (shift, run.rows, run.textured)
+                } else if abs(shift - current.shift) > 8 {
+                    runnerUp = max(runnerUp, run.rows)
+                }
+            } else {
+                best = (shift, run.rows, run.textured)
+            }
+        }
+        guard let best else { return nil }
+        // A second equally long overlap means the content repeats and any pick could drop rows.
+        if runnerUp > 0 && Double(runnerUp) > Double(best.rows) * 0.8 { return nil }
         return best.shift
     }
 
@@ -153,7 +188,10 @@ struct ScrollStitcher {
         }
         guard image.width == width, image.height == lastFrame.height else { throw ScrollStitchError.changedSize }
         if previous.distance(to: sample) < 0.8 { return .unchanged }
-        guard let shift = previous.displacement(to: sample) else { return .noOverlap }
+        guard let shift = previous.displacement(to: sample) else {
+            if sample.displacement(to: previous) != nil { return .backwards }
+            return .noOverlap
+        }
         guard shift > 0 else { return .backwards }
         guard height + shift <= maximumHeight, width * (height + shift) <= maximumPixels else {
             throw ScrollStitchError.limit

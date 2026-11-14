@@ -11,6 +11,7 @@ struct ScrollCaptureTarget {
     static func at(_ point: CGPoint, covering region: CGRect) -> Self? {
         let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID)
             as? [[String: Any]] ?? []
+        var best: (layer: Int, target: Self)?
         for window in windows {
             guard let layer = window[kCGWindowLayer as String] as? Int,
                   let process = window[kCGWindowOwnerPID as String] as? Int32,
@@ -23,9 +24,12 @@ struct ScrollCaptureTarget {
                   bounds.contains(point),
                   bounds.intersection(region).width * bounds.intersection(region).height >= region.width * region.height * 0.6
             else { continue }
-            return Self(windowID: number, processID: process, bounds: bounds)
+            // List order is not reliable once floating panels are involved: a layer 0 window
+            // behind the selection could otherwise win over the floating window on top of it.
+            if let best, layer <= best.layer { continue }
+            best = (layer, Self(windowID: number, processID: process, bounds: bounds))
         }
-        return nil
+        return best?.target
     }
 }
 
@@ -49,6 +53,9 @@ final class ScrollCaptureController: ObservableObject {
     private var filter: SCContentFilter?
     private var configuration: SCStreamConfiguration?
     private var windowCrop = CGRect.zero
+    private var outputSize = CGSize.zero
+    private var scrollPoint = CGPoint.zero
+    private var clampedToWindow = false
     private var lastCandidate: ScrollFrameSample?
 
     init(mode: ScrollCaptureMode) { self.mode = mode }
@@ -62,6 +69,14 @@ final class ScrollCaptureController: ObservableObject {
             do {
                 guard local.width >= 80, local.height >= 120 else { throw CaptureFailure.invalidSelection }
                 guard let target else { throw ScrollStitchError.targetUnavailable }
+                // A selection may straddle windows; keep the part that actually belongs to the
+                // scrolling window instead of failing with a confusing "not on this display" error.
+                let visibleBounds = captureBounds.intersection(target.bounds)
+                guard !visibleBounds.isNull,
+                      visibleBounds.width >= captureBounds.width * 0.5,
+                      visibleBounds.height >= captureBounds.height * 0.5 else {
+                    throw CaptureFailure.selectionSpansWindows
+                }
                 let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false)
                 try Task.checkCancellation()
                 guard let window = content.windows.first(where: { $0.windowID == target.windowID }) else {
@@ -72,15 +87,18 @@ final class ScrollCaptureController: ObservableObject {
                 let filter = SCContentFilter(desktopIndependentWindow: window)
                 let scale = CGFloat(filter.pointPixelScale)
                 let size = window.frame.size
-                let crop = captureBounds.offsetBy(dx: -target.bounds.minX, dy: -target.bounds.minY)
-                guard crop.minX >= 0, crop.minY >= 0, crop.maxX <= size.width + 1,
-                      crop.maxY <= size.height + 1 else { throw CaptureFailure.invalidSelection }
+                let crop = visibleBounds.offsetBy(dx: -target.bounds.minX, dy: -target.bounds.minY)
+                guard crop.minX >= -1, crop.minY >= -1, crop.maxX <= size.width + 1,
+                      crop.maxY <= size.height + 1 else { throw CaptureFailure.selectionSpansWindows }
                 let config = SCStreamConfiguration()
                 config.width = Int(size.width * scale)
                 config.height = Int(size.height * scale)
                 config.ignoreShadowsSingleWindow = true
                 config.showsCursor = false
                 config.capturesAudio = false
+                clampedToWindow = visibleBounds != captureBounds
+                outputSize = visibleBounds.size
+                scrollPoint = CGPoint(x: visibleBounds.midX, y: visibleBounds.midY)
                 windowCrop = CGRect(x: crop.minX * scale, y: crop.minY * scale,
                                     width: crop.width * scale, height: crop.height * scale).integral
                 self.filter = filter
@@ -88,7 +106,7 @@ final class ScrollCaptureController: ObservableObject {
                 NSRunningApplication(processIdentifier: target.processID)?.activate(options: [])
                 try await Task.sleep(for: .milliseconds(250))
                 let first = try await capture()
-                preview = NSImage(cgImage: first, size: global.size)
+                preview = NSImage(cgImage: first, size: outputSize)
                 _ = try await accept(first)
                 lastCandidate = try ScrollFrameSample(first)
                 let started = Date()
@@ -118,7 +136,7 @@ final class ScrollCaptureController: ObservableObject {
                                                   wheel1: -Int32(min(240, local.height * 0.25)), wheel2: 0, wheel3: 0) else {
                             throw ScrollStitchError.invalidImage
                         }
-                        event.location = cursor
+                        event.location = scrollPoint
                         event.postToPid(target.processID)
                         try await Task.sleep(for: .milliseconds(350))
                     } else {
@@ -178,10 +196,10 @@ final class ScrollCaptureController: ObservableObject {
                 let image = try await assembler.result()
                 try Task.checkCancellation()
                 self.task = nil
-                preview = NSImage(cgImage: image, size: CGSize(width: global.width,
-                           height: CGFloat(image.height) * global.width / CGFloat(image.width)))
-                onComplete?(NSImage(cgImage: image, size: CGSize(width: global.width,
-                           height: CGFloat(image.height) * global.width / CGFloat(image.width))))
+                let resultSize = CGSize(width: outputSize.width,
+                                        height: CGFloat(image.height) * outputSize.width / CGFloat(image.width))
+                preview = NSImage(cgImage: image, size: resultSize)
+                onComplete?(NSImage(cgImage: image, size: resultSize))
             } catch is CancellationError {
                 return
             } catch ScrollStitchError.limit {
@@ -244,7 +262,12 @@ final class ScrollCaptureController: ObservableObject {
         frames = count
         switch result {
         case .first, .appended:
-            status = mode == .automatic ? "正在自动滚动拼接" : "向下缓慢滚动，完成后点击完成"
+            if mode == .automatic {
+                status = clampedToWindow ? "选区超出窗口，已按窗口内区域自动拼接" : "正在自动滚动拼接"
+            } else {
+                status = clampedToWindow ? "选区超出窗口，已按窗口内区域拼接 · 向下滚动，完成后点击完成" :
+                    "向下缓慢滚动，完成后点击完成"
+            }
         case .unchanged: break
         case .backwards: status = "正在回看已截内容，向下滚动可继续"
         case .noOverlap:

@@ -156,6 +156,52 @@ struct ScrollCaptureChecks {
         }
     }
 
+    // Mirrors a Retina capture of a text window: 2x glyphs, alternating row bands and
+    // unique line numbers at the left edge, which used to fool the matcher into a
+    // periodic alignment and silently drop a band of rows.
+    static func retinaTextDocument() -> CGImage {
+        let width = 1040, height = 9000, rowHeight = 81
+        let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8,
+                                bytesPerRow: 0, space: CGColorSpaceCreateDeviceRGB(),
+                                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        context.setFillColor(CGColor(gray: 1, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+        for row in 0..<(height / rowHeight) {
+            if row % 2 == 1 {
+                context.setFillColor(CGColor(gray: 0.965, alpha: 1))
+                context.fill(CGRect(x: 0, y: height - (row + 1) * rowHeight, width: width, height: rowHeight))
+            }
+            let string = String(format: "%03d | %06d | Capture each unique row exactly once.", row, row * row)
+            let text = NSAttributedString(string: string, attributes: [
+                .font: NSFont.monospacedSystemFont(ofSize: 36, weight: .regular),
+                .foregroundColor: NSColor.black
+            ])
+            context.textPosition = CGPoint(x: 10, y: height - 60 - row * rowHeight)
+            CTLineDraw(CTLineCreateWithAttributedString(text), context)
+        }
+        return context.makeImage()!
+    }
+
+    static func retinaTextKeepsRowsAndRejectsLostOverlap() throws {
+        let source = retinaTextDocument()
+        var stitcher = ScrollStitcher()
+        for (index, offset) in [0, 300, 600, 900].enumerated() {
+            let result = try stitcher.append(frame(source, offset: offset, height: 890))
+            if index == 0 { try require(result == .first, "First frame must start the stitch") }
+            else { try require(result == .appended(300), "Retina text must match a 300px scroll, got \(result)") }
+        }
+        let output = try stitcher.result()
+        try require(pixels(output) == pixels(frame(source, offset: 0, height: 1790)),
+                    "A stitched Retina text page must keep every row in order")
+        for offset in [1650, 1700, 1750] {
+            var lost = ScrollStitcher()
+            _ = try lost.append(frame(source, offset: 0, height: 890))
+            let result = try lost.append(frame(source, offset: offset, height: 890))
+            try require(result == .noOverlap && lost.height == 890,
+                        "A scroll that loses all overlap must be rejected instead of shifting by a page period (offset \(offset), got \(result))")
+        }
+    }
+
     static func accumulatedPreviewAndNoProgress() async throws {
         let source = textDocument()
         let assembler = ScrollCaptureAssembler()
@@ -197,6 +243,7 @@ struct ScrollCaptureChecks {
             ("fixed_footer_appears_only_once", fixedFooter),
             ("size_and_memory_limits_preserve_partial_capture", limitsAndResize),
             ("sparse_repeated_text_and_edge_line_numbers", sparseText),
+            ("retina_text_keeps_rows_and_rejects_lost_overlap", retinaTextKeepsRowsAndRejectsLostOverlap),
             ("accumulated_preview_and_no_progress_error", accumulatedPreviewAndNoProgress),
             ("dock_stage_manager_and_invisible_windows_are_excluded", systemOverlaysCannotBeCaptureTargets)
         ]
