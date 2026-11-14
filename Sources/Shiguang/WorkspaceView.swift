@@ -33,11 +33,78 @@ extension Color {
 // Select the property wrapper explicitly on SDKs that also expose a State macro.
 typealias StoredState<Value> = SwiftUI.State<Value>
 
+@MainActor
+private final class HotkeyCaptureCoordinator: ObservableObject {
+    private var monitor: Any?
+    private weak var window: NSWindow?
+    private var onCapture: ((HotkeySettings) -> Void)?
+    private var onInvalid: ((String) -> Void)?
+    private var onCancel: (() -> Void)?
+
+    var isActive: Bool { monitor != nil }
+
+    func start(window: NSWindow?,
+               onCapture: @escaping (HotkeySettings) -> Void,
+               onInvalid: @escaping (String) -> Void,
+               onCancel: @escaping () -> Void) {
+        stop()
+        self.window = window
+        self.onCapture = onCapture
+        self.onInvalid = onInvalid
+        self.onCancel = onCancel
+        monitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .leftMouseDown]) { [weak self] event in
+            guard let self else { return event }
+            if let window = self.window, let eventWindow = event.window, eventWindow !== window {
+                return event
+            }
+
+            if event.type == .leftMouseDown {
+                self.onCancel?()
+                self.stop()
+                return event
+            }
+
+            let flags = event.modifierFlags.intersection([.command, .option, .control, .shift])
+            if event.keyCode == 53 && flags.isEmpty {
+                self.onCancel?()
+                self.stop()
+                return nil
+            }
+
+            // Plain typing (including Shift for capitals) remains available for
+            // manual notation such as "option+shift+s".
+            guard flags.contains(.option) || flags.contains(.control) || flags.contains(.command) else {
+                return event
+            }
+            guard let captured = HotkeySettings.fromKeyEvent(keyCode: event.keyCode, modifiers: flags) else {
+                self.onInvalid?("这个按键不能作为快捷键，请换一个按键")
+                return nil
+            }
+            self.onCapture?(captured)
+            return nil
+        }
+    }
+
+    func stop() {
+        if let monitor {
+            NSEvent.removeMonitor(monitor)
+            self.monitor = nil
+        }
+        window = nil
+        onCapture = nil
+        onInvalid = nil
+        onCancel = nil
+    }
+}
+
 struct HotkeyRow: View {
     let title: String
     @Binding var settings: HotkeySettings
+    var onRecordingChanged: (Bool) -> Void = { _ in }
     @StoredState private var draft = ""
     @StoredState private var message: String?
+    @StoredState private var isRecording = false
+    @StateObject private var captureCoordinator = HotkeyCaptureCoordinator()
     @FocusState private var focused: Bool
 
     var body: some View {
@@ -46,7 +113,12 @@ struct HotkeyRow: View {
                 Text(title)
                     .font(.system(size: 12.5, weight: .medium))
                     .foregroundStyle(Palette.ink)
-                if let message {
+                if isRecording {
+                    Text("请按下组合键，按 Esc 取消")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Palette.accent)
+                        .lineLimit(1)
+                } else if let message {
                     Text(message)
                         .font(.system(size: 11))
                         .foregroundStyle(message.hasPrefix("已") ? Palette.success : Palette.accent)
@@ -67,12 +139,14 @@ struct HotkeyRow: View {
                     .frame(width: 124)
                     .focused($focused)
                     .onSubmit { apply() }
+                    .help("点击后直接按下组合键，也可以输入 option+shift+s")
                     .padding(.horizontal, 10)
                     .frame(height: 28)
                     .background(Palette.background, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
                     .overlay {
                         RoundedRectangle(cornerRadius: 7, style: .continuous)
-                            .stroke(focused ? Palette.accent.opacity(0.75) : Palette.line)
+                            .stroke(isRecording ? Palette.accent : focused ? Palette.accent.opacity(0.75) : Palette.line,
+                                    lineWidth: isRecording ? 1.5 : 1)
                     }
                 if draft != settings.symbol {
                     Button("应用") { apply() }
@@ -90,12 +164,24 @@ struct HotkeyRow: View {
         .onChange(of: settings) { _, value in
             if !focused { draft = value.symbol }
         }
+        .onChange(of: focused) { _, active in
+            if active { beginRecording() }
+            else { finishRecording() }
+        }
         .onChange(of: draft) { _, _ in
             if message?.hasPrefix("已") != true { message = nil }
+        }
+        .onDisappear {
+            captureCoordinator.stop()
+            if isRecording {
+                isRecording = false
+                onRecordingChanged(false)
+            }
         }
     }
 
     private func apply() {
+        finishRecording()
         guard let parsed = HotkeySettings.parseInput(draft) else {
             message = "格式无效，请包含至少一个修饰键"
             return
@@ -104,6 +190,32 @@ struct HotkeyRow: View {
         draft = parsed.symbol
         message = "已应用 \(parsed.symbol)"
         focused = false
+    }
+
+    private func beginRecording() {
+        guard !isRecording else { return }
+        isRecording = true
+        message = nil
+        onRecordingChanged(true)
+        captureCoordinator.start(window: NSApp.keyWindow, onCapture: { captured in
+            settings = captured
+            draft = captured.symbol
+            message = "已应用 \(captured.symbol)"
+            finishRecording()
+            focused = false
+        }, onInvalid: { text in
+            message = text
+        }, onCancel: {
+            finishRecording()
+            focused = false
+        })
+    }
+
+    private func finishRecording() {
+        guard isRecording else { return }
+        captureCoordinator.stop()
+        isRecording = false
+        onRecordingChanged(false)
     }
 }
 

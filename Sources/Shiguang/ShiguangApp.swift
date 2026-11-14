@@ -28,6 +28,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     private var screenRegionEditor: ScreenRegionEditorController?
     private var preparedCapture: (snapshot: NSImage, screen: NSScreen)?
     private var hotkeys: [EventHotKeyRef] = []
+    private var hotkeyCaptureActive = false
     private var eventHandler: EventHandlerRef?
     private var isRestarting = false
     private var escapeMonitor: Any?
@@ -162,6 +163,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         setupStatusItem()
         setupHotkeys()
         model.hotkeysChanged = { [weak self] in self?.rebindHotkeys() }
+        model.hotkeyCaptureChanged = { [weak self] active in self?.setHotkeyCaptureActive(active) }
         clipboard.start()
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
@@ -549,6 +551,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     private func rebindHotkeys() {
         for key in hotkeys { UnregisterEventHotKey(key) }
         hotkeys.removeAll()
+        guard !hotkeyCaptureActive else { return }
+        registerHotkeys()
+    }
+
+    private func setHotkeyCaptureActive(_ active: Bool) {
+        guard hotkeyCaptureActive != active else { return }
+        hotkeyCaptureActive = active
+        for key in hotkeys { UnregisterEventHotKey(key) }
+        hotkeys.removeAll()
+        guard !active else { return }
         registerHotkeys()
     }
 

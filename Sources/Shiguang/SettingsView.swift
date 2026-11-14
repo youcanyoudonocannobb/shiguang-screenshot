@@ -491,15 +491,19 @@ private struct SettingsDetailView: View {
 
     private var shortcutsContent: some View {
         Group {
-            SettingsSection("全局快捷键", footer: "手动输入组合键，例如 ⌥⇧S 或 option+shift+s。按回车或点击应用后立即生效。") {
+            SettingsSection("全局快捷键", footer: "点击输入框后直接按下组合键，也可以手动输入 option+shift+s。按 Esc 取消录入。") {
                 VStack(spacing: 0) {
-                    HotkeyRow(title: "区域截图", settings: $model.captureHotkey)
+                    HotkeyRow(title: "区域截图", settings: $model.captureHotkey,
+                              onRecordingChanged: model.setHotkeyCaptureActive)
                     SettingsSeparator()
-                    HotkeyRow(title: "截图并翻译", settings: $model.translateHotkey)
+                    HotkeyRow(title: "截图并翻译", settings: $model.translateHotkey,
+                              onRecordingChanged: model.setHotkeyCaptureActive)
                     SettingsSeparator()
-                    HotkeyRow(title: "剪贴板历史", settings: $model.clipboardHotkey)
+                    HotkeyRow(title: "剪贴板历史", settings: $model.clipboardHotkey,
+                              onRecordingChanged: model.setHotkeyCaptureActive)
                     SettingsSeparator()
-                    HotkeyRow(title: "翻译剪贴板", settings: $model.clipboardTranslateHotkey)
+                    HotkeyRow(title: "翻译剪贴板", settings: $model.clipboardTranslateHotkey,
+                              onRecordingChanged: model.setHotkeyCaptureActive)
                 }
             }
             SettingsFootnote(model.hotkeyAvailable ? "所有快捷键已就绪，可在其他应用中使用。" : "部分快捷键已被占用，请更换组合键。",

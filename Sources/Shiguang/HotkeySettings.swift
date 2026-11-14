@@ -9,10 +9,7 @@ struct HotkeySettings: Codable, Equatable {
     var command = false
 
     var keyCode: UInt32 {
-        ["A": 0, "B": 11, "C": 8, "D": 2, "E": 14, "F": 3, "G": 5, "H": 4,
-         "I": 34, "J": 38, "K": 40, "L": 37, "M": 46, "N": 45, "O": 31, "P": 35,
-         "Q": 12, "R": 15, "S": 1, "T": 17, "U": 32, "V": 9, "W": 13, "X": 7,
-         "Y": 16, "Z": 6][key.uppercased()] ?? 1
+        Self.keyCodes[key.uppercased()] ?? Self.keyCodes["S"]!
     }
 
     var carbonModifiers: UInt32 {
@@ -42,6 +39,37 @@ struct HotkeySettings: Codable, Equatable {
         return flags
     }
 
+    private static let keyNames: [UInt16: String] = [
+        0: "A", 1: "S", 2: "D", 3: "F", 4: "H", 5: "G", 6: "Z", 7: "X",
+        8: "C", 9: "V", 11: "B", 12: "Q", 13: "W", 14: "E", 15: "R",
+        16: "Y", 17: "T", 18: "1", 19: "2", 20: "3", 21: "4", 22: "6",
+        23: "5", 24: "=", 25: "9", 26: "7", 27: "-", 28: "8", 29: "0",
+        30: "]", 31: "O", 32: "U", 33: "[", 34: "I", 35: "P", 36: "↩",
+        37: "L", 38: "J", 39: "'", 40: "K", 41: ";", 42: "\\", 43: ",",
+        44: "/", 45: "N", 46: "M", 47: ".", 48: "⇥", 49: "Space",
+        50: "`", 51: "⌫", 53: "Esc", 79: "F18", 80: "F19",
+        96: "F5", 97: "F6", 98: "F7", 99: "F3",
+        100: "F8", 101: "F9", 103: "F11", 105: "F13", 106: "F16",
+        107: "F14", 109: "F10", 111: "F12", 113: "F15", 115: "↖",
+        116: "⇞", 117: "⌦", 118: "F4", 119: "↘", 120: "F2",
+        121: "⇟", 122: "F1", 123: "←", 124: "→", 125: "↓", 126: "↑"
+    ]
+    private static let keyCodes: [String: UInt32] = Dictionary(
+        uniqueKeysWithValues: keyNames.map { (String($0.value).uppercased(), UInt32($0.key)) }
+    )
+
+    static func fromKeyEvent(keyCode: UInt16, modifiers: NSEvent.ModifierFlags) -> HotkeySettings? {
+        let flags = modifiers.intersection([.command, .option, .control, .shift])
+        guard !flags.isEmpty, let key = keyNames[keyCode] else { return nil }
+        return HotkeySettings(
+            key: key,
+            option: flags.contains(.option),
+            shift: flags.contains(.shift),
+            control: flags.contains(.control),
+            command: flags.contains(.command)
+        )
+    }
+
     static func parseInput(_ input: String) -> HotkeySettings? {
         let normalized = input
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -66,9 +94,7 @@ struct HotkeySettings: Codable, Equatable {
             remaining = remaining.replacingOccurrences(of: removable, with: "")
         }
         let key = remaining.uppercased()
-        guard key.count == 1, key.range(of: "^[A-Z]$", options: .regularExpression) != nil else {
-            return nil
-        }
+        guard keyCodes[key] != nil else { return nil }
         return HotkeySettings(key: key, option: option, shift: shift, control: control, command: command)
     }
 }

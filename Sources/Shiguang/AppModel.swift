@@ -119,6 +119,7 @@ final class AppModel: ObservableObject {
     var closeCaptureOverlay: (() -> Void)?
     var pinImage: ((NSImage) -> Void)?
     var hotkeysChanged: (() -> Void)?
+    var hotkeyCaptureChanged: ((Bool) -> Void)?
     var restartApp: (() -> Void)?
     var beginRecording: ((RecordingFormat, CGRect?) -> Void)?
     var saveRecording: (() -> Void)?
@@ -136,6 +137,10 @@ final class AppModel: ObservableObject {
     var publishText: (String) throws -> Void = { text in
         NSPasteboard.general.clearContents()
         guard NSPasteboard.general.setString(text, forType: .string) else { throw LocalError.storage("无法写入系统剪贴板。") }
+    }
+
+    func setHotkeyCaptureActive(_ active: Bool) {
+        hotkeyCaptureChanged?(active)
     }
     private(set) var store: HistoryStore?
     private let preferences: UserDefaults

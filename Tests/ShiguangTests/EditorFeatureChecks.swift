@@ -178,6 +178,27 @@ struct EditorFeatureChecks {
                     !words.shift && !words.command,
                     "Word modifier notation must parse consistently")
 
+        let optionLetter = try requireValue(HotkeySettings.fromKeyEvent(keyCode: 1, modifiers: [.option]),
+                                            "Option+S must be captured from its physical key code")
+        try require(optionLetter.key == "S" && optionLetter.option && !optionLetter.shift &&
+                    optionLetter.keyCode == 1,
+                    "Option+S capture must not depend on the modified text character")
+
+        let optionDigit = try requireValue(HotkeySettings.fromKeyEvent(keyCode: 18, modifiers: [.option]),
+                                           "Option+1 must be accepted")
+        try require(optionDigit.key == "1" && optionDigit.option && optionDigit.keyCode == 18,
+                    "Number keys must retain their physical key code")
+
+        let optionFunction = try requireValue(
+            HotkeySettings.fromKeyEvent(keyCode: 122, modifiers: [.option, .shift]),
+            "Option+Shift+F1 must be accepted"
+        )
+        try require(optionFunction.key == "F1" && optionFunction.option && optionFunction.shift &&
+                    optionFunction.keyCode == 122,
+                    "Function keys must retain their physical key code")
+
+        try require(HotkeySettings.fromKeyEvent(keyCode: 1, modifiers: []) == nil,
+                    "A physical key without modifiers must be rejected")
         try require(HotkeySettings.parseInput("K") == nil,
                     "A shortcut without a modifier must be rejected")
         try require(HotkeySettings.parseInput("⌥⇧KK") == nil,
