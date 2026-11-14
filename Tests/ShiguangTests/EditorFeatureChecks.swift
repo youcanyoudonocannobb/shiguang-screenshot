@@ -515,15 +515,33 @@ struct EditorFeatureChecks {
             "user profile", defaultStyle: .upperCamel).value == "UserProfile",
                     "Upper camel conversion must capitalize every word")
         try require(VariableNameTransformer.convert(
-            "用户 名称", defaultStyle: .lowerCamel).value == "yongHuMingCheng",
-                    "Chinese phrases must transliterate into pinyin variable names: " +
+            "用户 名称", defaultStyle: .lowerCamel).value == "userName",
+                    "Chinese phrases must translate into English before variable naming: " +
                     VariableNameTransformer.convert("用户 名称", defaultStyle: .lowerCamel).value)
+        try require(VariableNameTransformer.convert(
+            "lt 用户登录页面", defaultStyle: .upperCamel).value == "userLoginPage",
+                    "lt must alias lower camel and translate Chinese arguments into English")
+        try require(QuickLauncherParser.invocation(from: "xt 用户登录") ==
+                    QuickLauncherInvocation(command: .variable(.lowerCamel), argument: "用户登录"),
+                    "Launcher parser must split command aliases and Chinese arguments")
+        try require(QuickLauncherParser.invocation(from: "lt用户登录")?.command == .variable(.lowerCamel),
+                    "Launcher parser must accept a command immediately followed by Chinese")
+        try require(QuickLauncherCommand.matching("sfz") == .random(.identityCard),
+                    "Launcher commands must expose short Chinese aliases")
         try require(VariableNameTransformer.convert(
             "snake API response", defaultStyle: .lowerCamel).value == "api_response",
                     "Command prefixes must override the selected variable style")
         try require(VariableNameTransformer.convert(
             "upper API response", defaultStyle: .lowerCamel).value == "API_RESPONSE",
                     "Constant command must generate upper snake case")
+        try require(RandomDataType.fromKeyword("地址") == .address,
+                    "Quick input must recognize the address keyword")
+        try require(RandomDataType.fromKeyword("  IP  ") == .ipv4,
+                    "Quick input keyword matching must ignore whitespace and case")
+        try require(RandomDataType.fromKeyword("身份证") == .identityCard,
+                    "Quick input must recognize the identity card keyword")
+        try require(RandomDataType.fromKeyword("random-email") == nil,
+                    "Quick input keywords must be exact to avoid accidental random generation")
 
         for type in RandomDataType.allCases {
             let value = RandomDataGenerator.generate(type)

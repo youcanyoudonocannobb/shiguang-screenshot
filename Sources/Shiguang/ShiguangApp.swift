@@ -57,6 +57,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     private var variableNameMenuItem: NSMenuItem?
     private var clipboardReturnApplication: NSRunningApplication?
     private weak var clipboardReturnWindow: NSWindow?
+    private var quickToolWindow: NSPanel?
+    private var quickToolReturnApplication: NSRunningApplication?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let ownPID = ProcessInfo.processInfo.processIdentifier
@@ -108,7 +110,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         model.saveRecording = { [weak self] in self?.copyLastRecording() }
         model.beginScrollCapture = { [weak self] mode, region in self?.beginScrollCapture(mode, region: region) }
         model.showClipboard = { [weak self] in self?.showClipboardWindow() }
-        model.showClipboardTools = { [weak self] in self?.presentClipboardWindow(section: .tools) }
+        model.showQuickTool = { [weak self] in self?.showQuickToolWindow() }
         model.translateSelection = { [weak self] in self?.translateSelection() }
         model.statusItemPreferencesChanged = { [weak self] in self?.applyStatusItemPreferences() }
         model.publishImage = { [unowned self] image in try self.clipboard.copyImage(image) }
@@ -128,6 +130,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         }
         escapeMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self else { return event }
+            if let quickToolWindow = self.quickToolWindow, quickToolWindow.isVisible,
+               event.window === quickToolWindow, quickToolWindow.attachedSheet == nil,
+               event.keyCode == 53 {
+                self.closeQuickToolWindow()
+                return nil
+            }
             if let clipboardWindow = self.clipboardWindow, clipboardWindow.isVisible,
                event.window === clipboardWindow, clipboardWindow.attachedSheet == nil {
                 switch event.keyCode {
@@ -182,7 +190,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         if captureController?.isActive == true { return false }
-        let activeWindows: [NSWindow?] = [clipboardWindow, recordingWindow, scrollPanel, overlayWindow, editorWindow]
+        let activeWindows: [NSWindow?] = [quickToolWindow, clipboardWindow, recordingWindow, scrollPanel, overlayWindow, editorWindow]
         if let active = activeWindows.compactMap({ $0 }).first(where: { $0.isVisible }) {
             active.makeKeyAndOrderFront(nil)
             return false
@@ -271,32 +279,80 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         model.translateSelectedText(text)
     }
 
-    @objc private func copySelectionAsVariableName() {
-        guard SelectedTextReader.isTrusted else {
-            requestSelectionAccess(for: "快捷取变量名")
+    @objc private func showQuickToolWindow() {
+        if quickToolWindow?.isKeyWindow == true {
+            closeQuickToolWindow()
             return
         }
-        guard let text = SelectedTextReader.selectedText(
-            applicationPID: lastExternalApplication?.processIdentifier
-        ) else {
-            presentClipboardWindow(section: .tools)
-            clipboard.report("没有读取到选中文字。可在“快捷工具”中输入词组，或先选中文字再按快捷键。")
-            return
-        }
-        let conversion = VariableNameTransformer.convert(text, defaultStyle: model.variableNamingStyle)
-        guard !conversion.value.isEmpty else {
-            presentClipboardWindow(section: .tools)
-            clipboard.report("选中的内容无法转换为变量名。")
-            return
-        }
-        do {
-            try clipboard.copyText(
-                conversion.value,
-                successMessage: "已复制变量名：\(conversion.value) · \(conversion.style.title)"
+        if captureController?.isActive == true { captureController?.cancelByUser() }
+        let ownPID = ProcessInfo.processInfo.processIdentifier
+        let front = NSWorkspace.shared.frontmostApplication
+        quickToolReturnApplication = front?.processIdentifier == ownPID ? lastExternalApplication : front
+        NSApp.activate(ignoringOtherApps: true)
+
+        let panel: NSPanel
+        if let existing = quickToolWindow {
+            panel = existing
+        } else {
+            let created = NSPanel(
+                contentRect: NSRect(x: 0, y: 0, width: 640, height: 454),
+                styleMask: [.titled, .fullSizeContentView, .utilityWindow],
+                backing: .buffered,
+                defer: false
             )
-        } catch {
-            clipboard.reportCopyError(error)
+            created.title = "PawShot · 快捷输入"
+            created.titleVisibility = .hidden
+            created.titlebarAppearsTransparent = true
+            created.isReleasedWhenClosed = false
+            created.isMovableByWindowBackground = true
+            created.level = .floating
+            created.hidesOnDeactivate = true
+            created.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+            created.backgroundColor = NSColor(hex: "F4F7FA")
+            created.hasShadow = true
+            quickToolWindow = created
+            panel = created
         }
+
+        panel.contentView = NSHostingView(rootView: QuickToolView(
+            model: model,
+            onCopy: { [weak self] text in
+                guard let self else { return "应用已退出，无法复制。" }
+                do {
+                    try self.clipboard.copyText(
+                        text,
+                        successMessage: "已复制：\(String(text.prefix(60)))"
+                    )
+                    return nil
+                } catch {
+                    return error.localizedDescription
+                }
+            },
+            onClose: { [weak self] in self?.closeQuickToolWindow() }
+        ))
+        centerQuickToolWindow(panel)
+        panel.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    private func centerQuickToolWindow(_ panel: NSPanel) {
+        let screen = NSScreen.screens.first(where: { $0.frame.contains(NSEvent.mouseLocation) })
+            ?? NSScreen.main
+        let visible = screen?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1200, height: 800)
+        let size = panel.frame.size
+        panel.setFrameOrigin(NSPoint(
+            x: visible.midX - size.width / 2,
+            y: visible.midY - size.height / 2
+        ))
+    }
+
+    private func closeQuickToolWindow() {
+        quickToolWindow?.orderOut(nil)
+        if let app = quickToolReturnApplication,
+           app.processIdentifier != ProcessInfo.processInfo.processIdentifier {
+            app.activate(options: [])
+        }
+        quickToolReturnApplication = nil
     }
 
     private func requestSelectionAccess(for feature: String) {
@@ -461,7 +517,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         let selectionTranslate = menuItem("划词翻译", action: #selector(translateSelection))
         selectionTranslateMenuItem = selectionTranslate
         file.addItem(selectionTranslate)
-        let variableName = menuItem("快捷取变量名", action: #selector(copySelectionAsVariableName))
+        let variableName = menuItem("快捷输入工具", action: #selector(showQuickToolWindow))
         variableNameMenuItem = variableName
         file.addItem(variableName)
         let clipboardItem = menuItem("剪贴板历史", action: #selector(showClipboardWindow))
@@ -537,8 +593,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
                               action: #selector(translateClipboard), symbol: "character.book.closed"))
         menu.addItem(menuItem("划词翻译                  \(model.selectionTranslateHotkey.symbol)",
                               action: #selector(translateSelection), symbol: "text.cursor"))
-        menu.addItem(menuItem("快捷取变量名              \(model.variableNamingHotkey.symbol)",
-                              action: #selector(copySelectionAsVariableName), symbol: "textformat.abc"))
+        menu.addItem(menuItem("快捷输入工具            \(model.variableNamingHotkey.symbol)",
+                              action: #selector(showQuickToolWindow), symbol: "textformat.abc"))
         menu.addItem(.separator())
         menu.addItem(menuItem("录制 MP4 视频…", action: #selector(recordVideo), symbol: "record.circle"))
         menu.addItem(menuItem("录制 GIF 动图…", action: #selector(recordGIF), symbol: "photo.on.rectangle.angled"))
@@ -586,7 +642,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
                 else if id == 6 { delegate.translateClipboard() }
                 else if id == 7 { delegate.captureController?.cancelByUser() }
                 else if id == 8 { delegate.translateSelection() }
-                else if id == 9 { delegate.copySelectionAsVariableName() }
+                else if id == 9 { delegate.showQuickToolWindow() }
                 else { delegate.model.capture(translate: id == 2) }
             }
             return noErr
@@ -655,7 +711,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         menu.items[2].title = "剪贴板历史              \(model.clipboardHotkey.symbol)"
         menu.items[3].title = "翻译剪贴板              \(model.clipboardTranslateHotkey.symbol)"
         menu.items[4].title = "划词翻译                  \(model.selectionTranslateHotkey.symbol)"
-        menu.items[5].title = "快捷取变量名              \(model.variableNamingHotkey.symbol)"
+        menu.items[5].title = "快捷输入工具            \(model.variableNamingHotkey.symbol)"
         clipboardMenuItem?.keyEquivalent = model.clipboardHotkey.carbonModifiers == 0 ? "" : model.clipboardHotkey.key.lowercased()
         clipboardMenuItem?.keyEquivalentModifierMask = model.clipboardHotkey.cocoaModifiers
         clipboardTranslateMenuItem?.keyEquivalent =

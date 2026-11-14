@@ -412,7 +412,7 @@ struct ClipboardView: View {
                 }
             } else {
                 HStack(spacing: 7) {
-                    keyHint(model.variableNamingHotkey.symbol, label: "选中文字转变量名")
+                    keyHint(model.variableNamingHotkey.symbol, label: "打开快捷输入")
                     Spacer()
                     Text("测试数据仅用于开发与演示")
                         .font(.system(size: 9.5))
