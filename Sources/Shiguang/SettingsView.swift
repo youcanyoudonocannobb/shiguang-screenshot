@@ -352,7 +352,6 @@ private struct SettingsDetailView: View {
 
     private var generalContent: some View {
         Group {
-            SettingsOverviewStrip(model: model, clipboard: clipboard)
             SettingsSection("启动与菜单栏", footer: model.launchAtLoginMessage) {
                 SettingsToggle(
                     "登录时自动启动",
@@ -378,14 +377,6 @@ private struct SettingsDetailView: View {
                     MenuBarIconPicker(selection: $model.menuBarDogStyle,
                                       customImageData: $model.customMenuBarIconData)
                 }
-            }
-            SettingsSection("使用方式") {
-                SettingsRow("菜单栏运行", detail: "关闭窗口后仍可使用快捷键和菜单栏入口") {
-                    Text(model.showsMenuBarIcon ? "已启用" : "图标已隐藏")
-                        .foregroundStyle(Palette.muted)
-                }
-                SettingsSeparator()
-                PermissionActionRow(model: model)
             }
             SettingsFootnote("截图、视频与 GIF 在点击 ✓ 后复制到剪贴板。按 Esc 取消本次操作。",
                              symbol: "checkmark.circle")
@@ -973,52 +964,6 @@ private struct SettingsFieldRow<Content: View>: View {
                 .overlay(RoundedRectangle(cornerRadius: 7).stroke(Palette.line))
         }
         .padding(.horizontal, 16).padding(.vertical, 10)
-    }
-}
-
-private struct SettingsOverviewStrip: View {
-    @ObservedObject var model: AppModel
-    @ObservedObject var clipboard: ClipboardHistory
-
-    var body: some View {
-        HStack(spacing: 0) {
-            metric(
-                label: "屏幕权限",
-                value: model.screenPermission.isGranted ? "已授权" : "待授权",
-                dot: model.screenPermission.isGranted ? Palette.success : Palette.warning
-            )
-            divider
-            metric(
-                label: "翻译引擎",
-                value: model.translationProvider.title,
-                dot: Palette.accent
-            )
-            divider
-            metric(
-                label: "剪贴板记录",
-                value: "\(clipboard.entries.count) / 100 项",
-                dot: clipboard.monitorsSystem ? Palette.success : Palette.muted
-            )
-        }
-        .background(Palette.panel, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(Palette.line, lineWidth: 1))
-    }
-
-    private var divider: some View {
-        Rectangle().fill(Palette.line).frame(width: 1, height: 34)
-    }
-
-    private func metric(label: String, value: String, dot: Color) -> some View {
-        VStack(alignment: .leading, spacing: 5) {
-            Text(label).font(.system(size: 11)).foregroundStyle(Palette.muted)
-            HStack(spacing: 6) {
-                Circle().fill(dot).frame(width: 6, height: 6)
-                Text(value).font(.system(size: 13, weight: .semibold)).foregroundStyle(Palette.ink).lineLimit(1)
-            }
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 13)
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 

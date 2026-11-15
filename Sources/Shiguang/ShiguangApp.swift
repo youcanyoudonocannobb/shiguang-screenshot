@@ -22,6 +22,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     private var window: NSWindow!
     private var editorWindow: NSWindow!
     private var statusItem: NSStatusItem!
+    private var statusMenu: NSMenu?
     private var pinnedWindows: [NSWindow] = []
     private var captureController: SelectionCaptureController?
     private var overlayWindow: NSWindow?
@@ -129,6 +130,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         }
         escapeMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self else { return event }
+            if event.keyCode == 53, let target = event.window,
+               self.pinnedWindows.contains(where: { $0 === target }) {
+                self.closePinnedWindow(target)
+                return nil
+            }
             if let quickToolWindow = self.quickToolWindow, quickToolWindow.isVisible,
                event.window === quickToolWindow, quickToolWindow.attachedSheet == nil,
                event.keyCode == 53 {
@@ -650,8 +656,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         menu.addItem(menuItem("偏好设置…", action: #selector(preferences), symbol: "gearshape"))
         menu.addItem(.separator())
         menu.addItem(menuItem("退出 PawShot", action: #selector(quit), symbol: "power"))
-        statusItem.menu = menu
+        statusMenu = menu
+        statusItem.menu = nil
+        statusItem.button?.target = self
+        statusItem.button?.action = #selector(toggleStatusMenu)
+        statusItem.button?.sendAction(on: [.leftMouseUp, .rightMouseUp])
         applyStatusItemPreferences()
+    }
+
+    @objc private func toggleStatusMenu() {
+        guard let menu = statusMenu, let button = statusItem.button else { return }
+        let point = NSPoint(x: 0, y: button.bounds.height + 4)
+        button.highlight(true)
+        menu.popUp(positioning: nil, at: point, in: button)
+        button.highlight(false)
     }
 
     private func applyStatusItemPreferences() {
@@ -749,7 +767,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     }
 
     private func updateStatusMenuHotkeys() {
-        guard let menu = statusItem?.menu, menu.items.count >= 6 else { return }
+        guard let menu = statusMenu, menu.items.count >= 6 else { return }
         menu.items[0].title = "区域截图                  \(model.captureHotkey.symbol)"
         menu.items[1].title = "截图并翻译              \(model.translateHotkey.symbol)"
         menu.items[2].title = "剪贴板历史              \(model.clipboardHotkey.symbol)"
@@ -1322,28 +1340,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         let maxSize = NSScreen.main?.visibleFrame.size ?? NSSize(width: 1000, height: 750)
         let width = min(460, maxSize.width * 0.6)
         let height = min(width * ratio, maxSize.height * 0.7)
-        let panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: width, height: height),
-                            styleMask: [.titled, .closable, .resizable, .utilityWindow], backing: .buffered, defer: false)
-        panel.title = "PawShot 贴图 · 100% · 滚轮缩放"
+        let panel = PinnedPanel(contentRect: NSRect(x: 0, y: 0, width: width, height: height),
+                                styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+        panel.title = "PawShot 贴图 · 100%"
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
+        panel.hasShadow = true
         panel.level = .floating
+        panel.isFloatingPanel = true
+        panel.becomesKeyOnlyIfNeeded = true
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         panel.hidesOnDeactivate = false
         panel.isReleasedWhenClosed = false
+        panel.acceptsMouseMovedEvents = true
         panel.delegate = self
-        let view = PinnedImageView()
-        view.image = image
-        view.imageScaling = .scaleProportionallyUpOrDown
+        let view = PinnedImageView(image: image)
         view.onZoom = { [weak panel] scale, anchor in
             guard let panel else { return }
             Self.resizePinnedWindow(panel, imageAspectRatio: ratio, scale: scale, anchor: anchor)
             let zoom = panel.contentRect(forFrameRect: panel.frame).width / width * 100
-            panel.title = "PawShot 贴图 · \(Int(zoom.rounded()))% · 滚轮缩放"
+            panel.title = "PawShot 贴图 · \(Int(zoom.rounded()))%"
         }
         panel.contentView = view
         panel.contentAspectRatio = NSSize(width: image.size.width, height: image.size.height)
         panel.center()
-        panel.makeKeyAndOrderFront(nil)
         pinnedWindows.append(panel)
+        NSApp.activate(ignoringOtherApps: true)
+        panel.makeKeyAndOrderFront(nil)
+        panel.makeFirstResponder(view)
+    }
+
+    private func closePinnedWindow(_ window: NSWindow) {
+        pinnedWindows.removeAll { $0 === window }
+        window.orderOut(nil)
+        window.close()
     }
 
     private static func resizePinnedWindow(_ panel: NSWindow, imageAspectRatio: CGFloat,
@@ -1378,8 +1408,160 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     }
 }
 
-private final class PinnedImageView: NSImageView {
+private final class PinnedPanel: NSPanel {
+    override var canBecomeKey: Bool { true }
+
+    override func keyDown(with event: NSEvent) {
+        if event.keyCode == 53 {
+            close()
+            return
+        }
+        super.keyDown(with: event)
+    }
+
+    override func cancelOperation(_ sender: Any?) {
+        close()
+    }
+}
+
+private final class PinnedImageView: NSView {
+    private let image: NSImage
+    private var imageAlpha: CGFloat = 1
+    private var isHovering = false
+    private var trackingAreaReference: NSTrackingArea?
     var onZoom: ((CGFloat, CGPoint) -> Void)?
+
+    private lazy var closeButton: NSButton = controlButton(
+        symbol: "xmark", label: "关闭贴图", action: #selector(closePinnedImage)
+    )
+    private lazy var opacityButton: NSButton = controlButton(
+        symbol: "circle.lefthalf.filled", label: "设置贴图透明度", action: #selector(toggleOpacityControls)
+    )
+    private lazy var opacityLabel: NSTextField = {
+        let label = NSTextField(labelWithString: "100%")
+        label.font = .monospacedDigitSystemFont(ofSize: 10, weight: .medium)
+        label.textColor = .white
+        label.alignment = .right
+        label.translatesAutoresizingMaskIntoConstraints = false
+        label.widthAnchor.constraint(equalToConstant: 30).isActive = true
+        return label
+    }()
+    private lazy var opacitySlider: NSSlider = {
+        let slider = NSSlider(value: 1, minValue: 0.2, maxValue: 1, target: self,
+                              action: #selector(changeOpacity(_:)))
+        slider.controlSize = .small
+        slider.isContinuous = true
+        slider.translatesAutoresizingMaskIntoConstraints = false
+        slider.widthAnchor.constraint(equalToConstant: 72).isActive = true
+        slider.setAccessibilityLabel("贴图透明度")
+        return slider
+    }()
+    private lazy var opacityPanel: NSView = {
+        let panel = NSView()
+        panel.wantsLayer = true
+        panel.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.62).cgColor
+        panel.layer?.cornerRadius = 9
+        panel.layer?.borderColor = NSColor.white.withAlphaComponent(0.16).cgColor
+        panel.layer?.borderWidth = 1
+        panel.translatesAutoresizingMaskIntoConstraints = false
+        panel.isHidden = true
+        let stack = NSStackView(views: [opacityLabel, opacitySlider])
+        stack.orientation = .horizontal
+        stack.alignment = .centerY
+        stack.spacing = 6
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        panel.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: panel.leadingAnchor, constant: 8),
+            stack.trailingAnchor.constraint(equalTo: panel.trailingAnchor, constant: -8),
+            stack.centerYAnchor.constraint(equalTo: panel.centerYAnchor),
+            panel.widthAnchor.constraint(equalToConstant: 124),
+            panel.heightAnchor.constraint(equalToConstant: 34)
+        ])
+        return panel
+    }()
+
+    init(image: NSImage) {
+        self.image = image
+        super.init(frame: .zero)
+        setAccessibilityElement(true)
+        setAccessibilityRole(.group)
+        setAccessibilityLabel("PawShot 贴图")
+        addSubview(closeButton)
+        addSubview(opacityButton)
+        addSubview(opacityPanel)
+        NSLayoutConstraint.activate([
+            closeButton.topAnchor.constraint(equalTo: topAnchor, constant: 10),
+            closeButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
+            closeButton.widthAnchor.constraint(equalToConstant: 28),
+            closeButton.heightAnchor.constraint(equalToConstant: 28),
+            opacityButton.centerYAnchor.constraint(equalTo: closeButton.centerYAnchor),
+            opacityButton.trailingAnchor.constraint(equalTo: closeButton.leadingAnchor, constant: -6),
+            opacityButton.widthAnchor.constraint(equalToConstant: 28),
+            opacityButton.heightAnchor.constraint(equalToConstant: 28),
+            opacityPanel.topAnchor.constraint(equalTo: closeButton.bottomAnchor, constant: 6),
+            opacityPanel.trailingAnchor.constraint(equalTo: closeButton.trailingAnchor)
+        ])
+        updateControlVisibility()
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    override var isOpaque: Bool { false }
+    override var acceptsFirstResponder: Bool { true }
+
+    override func keyDown(with event: NSEvent) {
+        if event.keyCode == 53 {
+            window?.close()
+            return
+        }
+        super.keyDown(with: event)
+    }
+
+    override func accessibilityChildren() -> [Any]? {
+        [closeButton, opacityButton, opacitySlider]
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        let path = NSBezierPath(roundedRect: bounds, xRadius: 10, yRadius: 10)
+        NSGraphicsContext.saveGraphicsState()
+        path.addClip()
+        NSGraphicsContext.current?.imageInterpolation = .high
+        image.draw(in: bounds, from: .zero, operation: .sourceOver,
+                   fraction: imageAlpha, respectFlipped: true, hints: nil)
+        NSGraphicsContext.restoreGraphicsState()
+        NSColor.white.withAlphaComponent(0.13).setStroke()
+        path.lineWidth = 1
+        path.stroke()
+    }
+
+    override func updateTrackingAreas() {
+        if let trackingAreaReference { removeTrackingArea(trackingAreaReference) }
+        let area = NSTrackingArea(rect: .zero,
+                                  options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+                                  owner: self, userInfo: nil)
+        addTrackingArea(area)
+        trackingAreaReference = area
+        super.updateTrackingAreas()
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        isHovering = true
+        updateControlVisibility()
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        isHovering = false
+        updateControlVisibility()
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        NSApp.activate(ignoringOtherApps: true)
+        window?.makeKey()
+        window?.performDrag(with: event)
+    }
 
     override func scrollWheel(with event: NSEvent) {
         guard abs(event.scrollingDeltaY) > 0.001 else { return }
@@ -1390,6 +1572,49 @@ private final class PinnedImageView: NSImageView {
 
     override func magnify(with event: NSEvent) {
         onZoom?(1 + min(0.35, max(-0.35, event.magnification)), event.locationInWindow)
+    }
+
+    private func controlButton(symbol: String, label: String, action: Selector) -> NSButton {
+        let button = NSButton()
+        button.isBordered = false
+        button.bezelStyle = .regularSquare
+        button.focusRingType = .none
+        button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: label)
+        button.imageScaling = .scaleProportionallyDown
+        button.contentTintColor = .white
+        button.target = self
+        button.action = action
+        button.wantsLayer = true
+        button.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.58).cgColor
+        button.layer?.cornerRadius = 14
+        button.layer?.borderColor = NSColor.white.withAlphaComponent(0.16).cgColor
+        button.layer?.borderWidth = 1
+        button.translatesAutoresizingMaskIntoConstraints = false
+        button.setAccessibilityLabel(label)
+        return button
+    }
+
+    private func updateControlVisibility() {
+        closeButton.alphaValue = isHovering ? 1 : 0
+        opacityButton.alphaValue = isHovering ? 1 : 0
+        closeButton.isEnabled = isHovering
+        opacityButton.isEnabled = isHovering
+        if !isHovering { opacityPanel.isHidden = true }
+    }
+
+    @objc private func closePinnedImage() {
+        window?.close()
+    }
+
+    @objc private func toggleOpacityControls() {
+        opacityPanel.isHidden.toggle()
+    }
+
+    @objc private func changeOpacity(_ sender: NSSlider) {
+        imageAlpha = CGFloat(sender.doubleValue)
+        opacityLabel.stringValue = "\(Int((imageAlpha * 100).rounded()))%"
+        needsDisplay = true
+        window?.invalidateShadow()
     }
 }
 

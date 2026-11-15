@@ -110,7 +110,6 @@ final class AppModel: ObservableObject {
     @Published var editorMode: EditorMode = .annotation
     @Published var draftImage: NSImage?
     var finishPendingAnnotation: (() -> Void)?
-    @Published var draftPinsImage = false
     private(set) var captureRect: CGRect?
     @Published var autoOCR: Bool {
         didSet { preferences.set(autoOCR, forKey: "autoOCR.v2") }
@@ -387,7 +386,6 @@ final class AppModel: ObservableObject {
         selectedID = record.id
         draftImage = nil
         captureRect = nil
-        resetDraftActions()
         editorMode = .annotation
         image = loaded
         zoomFactor = 1
@@ -409,7 +407,6 @@ final class AppModel: ObservableObject {
         selectedID = nil
         draftImage = nil
         captureRect = nil
-        resetDraftActions()
         errorMessage = nil
         editorMode = .text
         image = nil
@@ -466,7 +463,6 @@ final class AppModel: ObservableObject {
         draftImage = newImage
         captureRect = inlineRect
         draftTitle = title
-        resetDraftActions()
         image = newImage
         editorMode = .annotation
         zoomFactor = 1
@@ -543,23 +539,16 @@ final class AppModel: ObservableObject {
     func confirmDraft() {
         finishPendingAnnotation?()
         guard draftImage != nil, let output = renderedImage() else { return }
-        let pin = draftPinsImage
         do { try publishImage(output) }
         catch { errorMessage = "复制失败：\(error.localizedDescription)"; return }
         acceptDraft()
         let historyFailed = draftImage != nil
         if historyFailed { draftImage = nil; selectedID = nil; errorMessage = nil }
         captureRect = nil
-        resetDraftActions()
         hideEditor?()
         closeCaptureOverlay?()
-        if pin { pinImage?(output) }
         notice = historyFailed ? "已复制到剪贴板，截图历史未能保存。" : "已复制到剪贴板，可按 ⌘V 粘贴。"
         didCopyCapture?()
-    }
-
-    private func resetDraftActions() {
-        draftPinsImage = false
     }
 
     func discardDraft() {
@@ -572,7 +561,6 @@ final class AppModel: ObservableObject {
         draftImage = nil
         captureRect = nil
         draftTitle = ""
-        resetDraftActions()
         image = nil
         selectedID = nil
         sourceText = ""
@@ -1062,10 +1050,14 @@ final class AppModel: ObservableObject {
     }
 
     func requestPin() {
-        if draftImage != nil {
-            draftPinsImage.toggle()
-            notice = draftPinsImage ? "已选择钉住 · 点击 ✅ 后执行" : "已取消钉住"
-        } else if let image = renderedImage() { pinImage?(image) }
+        finishPendingAnnotation?()
+        guard let output = renderedImage(), let pinImage else { return }
+        let wasDraft = draftImage != nil
+        if wasDraft { discardDraft() }
+        // Create the pinned panel after dismissing the editor so the panel
+        // receives key focus and can handle Esc immediately.
+        pinImage(output)
+        if wasDraft { notice = "已钉住到桌面" }
     }
 
     func delete(_ record: CaptureRecord) {

@@ -137,9 +137,7 @@ struct AnnotationToolbar: View {
             }
             groupBox {
             action("打开剪贴板", symbol: "doc.on.clipboard") { model.showClipboard?() }
-            action(model.draftPinsImage ? "取消钉住" : "钉住图片",
-                   symbol: model.draftPinsImage ? "pin.fill" : "pin",
-                   selected: model.draftPinsImage) {
+            action("钉住到桌面", symbol: "pin") {
                 model.requestPin()
             }
             .disabled(model.isBusy)

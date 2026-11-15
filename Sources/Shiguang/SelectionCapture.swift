@@ -77,6 +77,8 @@ final class SelectionCaptureController: NSObject {
             window.makeFirstResponder(view)
             windows.append(window)
         }
+        NSApp.activate(ignoringOtherApps: true)
+        windows.first?.makeKey()
         let keyID = EventHotKeyID(signature: OSType(0x53484747), id: 7)
         RegisterEventHotKey(53, 0, keyID, GetApplicationEventTarget(), 0, &escapeHotKey)
         NSCursor.crosshair.push()

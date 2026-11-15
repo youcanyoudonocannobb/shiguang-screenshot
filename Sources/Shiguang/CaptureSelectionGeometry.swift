@@ -101,7 +101,7 @@ enum PinnedWindowGeometry {
         let ratio = max(0.01, imageAspectRatio)
         let usableHeight = max(80, visibleFrameSize.height * 0.92 - max(0, chromeHeight))
         let maximumWidth = min(visibleFrameSize.width * 0.92, usableHeight / ratio)
-        let minimumWidth = min(120, maximumWidth)
+        let minimumWidth = min(140, maximumWidth)
         let factor = min(2, max(0.5, scale))
         let width = min(maximumWidth, max(minimumWidth, current.width * factor))
         return CGSize(width: width, height: width * ratio)

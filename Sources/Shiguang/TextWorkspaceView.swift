@@ -77,6 +77,7 @@ struct TextWorkspaceView: View {
             languageControl(accessibilityTitle: "目标语言",
                             selection: Binding(get: { model.targetLanguage },
                 set: { model.languageEdited(target: $0) }), choices: LanguageChoice.targets)
+            Spacer(minLength: 0)
         }
         .padding(.horizontal, 16).padding(.vertical, 10)
         .disabled(model.isBusy)
@@ -90,7 +91,7 @@ struct TextWorkspaceView: View {
         .labelsHidden()
         .pickerStyle(.menu)
         .controlSize(.regular)
-        .frame(maxWidth: .infinity)
+        .frame(width: 148, alignment: .leading)
         .accessibilityLabel(accessibilityTitle)
     }
 

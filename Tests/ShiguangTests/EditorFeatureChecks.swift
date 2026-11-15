@@ -704,8 +704,14 @@ struct EditorFeatureChecks {
         var copied = 0
         var pinned = 0
         var copiedImage: NSImage?
+        var pinnedImage: NSImage?
+        var pinSawActiveDraft = false
         model.publishImage = { copied += 1; copiedImage = $0 }
-        model.pinImage = { _ in pinned += 1 }
+        model.pinImage = {
+            pinned += 1
+            pinnedImage = $0
+            pinSawActiveDraft = model.draftImage != nil
+        }
         model.acceptImage(sample(), title: "Existing")
         model.sourceText = "Original history"
         model.confirmDraft()
@@ -719,11 +725,17 @@ struct EditorFeatureChecks {
                     "Draft recognition and marks must not mutate the previously selected history record")
         model.exportImage()
         model.requestPin()
-        try require(copied == 1 && model.draftImage != nil && model.draftPinsImage,
-                    "Editing and optional actions must not copy or export before confirmation")
+        try require(copied == 1 && pinned == 1 && model.draftImage == nil && !pinSawActiveDraft &&
+                    pinnedImage?.pngData == ImageRenderer.render(sample(), marks: [mark]).pngData,
+                    "Pin must dismiss the draft first, then immediately publish the annotated image without copying it")
+        let pinnedHistory = try model.store!.load()
+        try require(pinnedHistory.count == original.count &&
+                    pinnedHistory.first?.text == original.first?.text,
+                    "Pinning directly must not add or overwrite a PNG/history record")
+        model.acceptImage(sample(), title: "Cancelled")
         model.discardDraft()
-        try require(copied == 1 && !model.draftPinsImage,
-                    "Cancel must clear all queued actions")
+        try require(copied == 1 && pinned == 1,
+                    "Cancel must not copy or pin a discarded draft")
         let cancelled = try model.store!.load()
         try require(cancelled.count == original.count && cancelled.first?.text == original.first?.text,
                     "Cancel must not add or overwrite a PNG/history record")
@@ -731,7 +743,6 @@ struct EditorFeatureChecks {
         model.sourceText = "Confirmed text"
         model.translatedText = "Confirmed translation"
         model.addMark(mark)
-        model.requestPin()
         var closed = false
         model.closeCaptureOverlay = { closed = true }
         model.confirmDraft()
