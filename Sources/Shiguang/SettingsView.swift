@@ -41,7 +41,7 @@ enum ShiguangSettingsPage: String, CaseIterable, Identifiable {
         case .screenshot: return "截图流程、识别和历史记录"
         case .translation: return "翻译引擎、默认语言和 AI 接口"
         case .clipboard: return "系统剪贴板历史、快捷键和本机保存"
-        case .quickInput: return "唤出快捷输入的全局快捷键"
+        case .quickInput: return "快捷键、变量命名和随机数据用法"
         case .shortcuts: return "区域截图、截图翻译和剪贴板快捷键"
         case .history: return "查看最近截图、识别文字和译文"
         case .privacy: return "屏幕访问、本机处理和本地数据"
@@ -526,9 +526,34 @@ private struct SettingsDetailView: View {
     }
 
     private var quickInputContent: some View {
-        SettingsSection("全局快捷键", footer: "点击输入框后直接按下组合键，也可以手动输入组合键。按 Esc 取消录入。") {
-            HotkeyRow(title: "快捷输入", settings: $model.variableNamingHotkey,
-                      onRecordingChanged: model.setHotkeyCaptureActive)
+        Group {
+            SettingsSection("全局快捷键", footer: "点击输入框后直接按下组合键，也可以手动输入组合键。按 Esc 取消录入。") {
+                HotkeyRow(title: "快捷输入", settings: $model.variableNamingHotkey,
+                          onRecordingChanged: model.setHotkeyCaptureActive)
+            }
+
+            SettingsSection("使用方法", footer: "↑ / ↓ 选择结果，Return 复制并关闭，Esc 关闭面板。") {
+                QuickInputGuideRow(
+                    symbol: "pawprint.fill",
+                    title: "直接生成变量名",
+                    detail: "输入中文或英文名称，选择小驼峰、大驼峰、下划线、短横线或常量格式。",
+                    example: "用户登录 → userLogin / UserLogin / user_login"
+                )
+                SettingsSeparator()
+                QuickInputGuideRow(
+                    symbol: "chevron.left.forwardslash.chevron.right",
+                    title: "用快捷语指定格式",
+                    detail: "在内容前加入 xt、dt、snake、kebab 或 const，快速选择命名方式。",
+                    example: "xt 用户登录 → userLogin"
+                )
+                SettingsSeparator()
+                QuickInputGuideRow(
+                    symbol: "wand.and.stars",
+                    title: "生成随机测试数据",
+                    detail: "输入姓名、邮箱、地址、手机号、IP、身份证、UUID 或密码即可生成。",
+                    example: "姓名 / 邮箱 / 地址 / IP / UUID / 密码"
+                )
+            }
         }
     }
 
@@ -901,6 +926,35 @@ private struct SettingsActionRow: View {
         .buttonStyle(.plain)
         .onHover { hovered = $0 }
         .accessibilityLabel(title)
+    }
+}
+
+private struct QuickInputGuideRow: View {
+    let symbol: String
+    let title: String
+    let detail: String
+    let example: String
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            SettingsSymbolTile(symbol: symbol, accented: true, size: 30)
+            VStack(alignment: .leading, spacing: 5) {
+                Text(title)
+                    .font(.system(size: 12.5, weight: .medium))
+                Text(detail)
+                    .font(.system(size: 11))
+                    .foregroundStyle(Palette.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text(example)
+                    .font(.system(size: 10.5, weight: .medium, design: .monospaced))
+                    .foregroundStyle(Palette.accent)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .frame(minHeight: 68)
     }
 }
 
