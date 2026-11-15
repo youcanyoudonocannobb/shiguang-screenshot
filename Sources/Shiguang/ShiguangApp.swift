@@ -803,7 +803,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             (text ? "PawShot · 翻译" : "PawShot · 快速编辑")
         editorWindow.minSize = text ? NSSize(width: model.editorMode == .recognition ? 500 : 700,
                                              height: model.editorMode == .recognition ? 340 : 440) :
-            NSSize(width: 700, height: 400)
+            NSSize(width: AnnotationToolbar.minimumWidth, height: 400)
         editorWindow.setContentSize(text ? NSSize(width: model.editorMode == .recognition ? 600 : 860,
                                                   height: model.editorMode == .recognition ? 430 : 520) :
             NSSize(width: 980, height: 760))
@@ -916,14 +916,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         screenRegionEditor = nil
         let screen = NSScreen.screens.first { $0.frame.intersects(rect) } ?? NSScreen.main
         let available = screen?.visibleFrame ?? CGRect(x: 0, y: 0, width: 1000, height: 800)
-        // The single-row toolbar needs ~670pt; never open narrower than that or ✔/✘ get clipped.
-        let displayWidth = min(available.width - 24, max(700, min(rect.width + 24, 1000)))
+        // Keep the single-row annotation controls visible without introducing a second row.
+        let displayWidth = min(available.width - 24,
+                               max(AnnotationToolbar.minimumWidth, min(rect.width + 24, 1000)))
         let displayHeight = min(max(210, rect.height), max(210, available.height - 280))
         let baseHeight = displayHeight + 72
         let panel = CaptureEditorWindow(contentRect: NSRect(origin: .zero, size: NSSize(width: displayWidth, height: baseHeight)),
                              styleMask: [.borderless, .resizable], backing: .buffered, defer: false)
         panel.title = "PawShot · 悬浮编辑"
-        panel.minSize = NSSize(width: min(700, available.width - 24), height: 260)
+        panel.minSize = NSSize(width: min(AnnotationToolbar.minimumWidth, available.width - 24), height: 260)
         panel.backgroundColor = .clear
         panel.isOpaque = false
         panel.level = .floating

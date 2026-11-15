@@ -236,7 +236,7 @@ struct CaptureEditorView: View {
                                     onColorPick: { model.markColor = $0; model.tool = .pointer },
                                     onMark: model.addMark, onEscape: model.closeEditor)
                             .frame(minHeight: 130, maxHeight: .infinity).layoutPriority(1)
-                        AnnotationToolbar(model: model, onShowText: { model.translateImage() })
+                        AnnotationToolbar(model: model)
                             .padding(.horizontal, 4)
                     }
                 }

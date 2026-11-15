@@ -70,35 +70,28 @@ struct TextWorkspaceView: View {
     }
 
     private var languageBar: some View {
-        HStack(spacing: 16) {
-            languageControl(title: "从", selection: Binding(get: { model.sourceLanguage },
+        HStack(spacing: 12) {
+            languageControl(accessibilityTitle: "原文语言",
+                            selection: Binding(get: { model.sourceLanguage },
                 set: { model.languageEdited(source: $0) }), choices: LanguageChoice.sources)
-            Button { model.swapTranslationLanguages() } label: {
-                Image(systemName: "arrow.left.arrow.right")
-                    .font(.system(size: 12, weight: .medium)).foregroundStyle(Palette.accent)
-                    .frame(width: 22, height: 22)
-            }
-            .buttonStyle(TextPanelButtonStyle())
-            .help("交换原文与目标语言").accessibilityLabel("交换原文与目标语言")
-            languageControl(title: "译为", selection: Binding(get: { model.targetLanguage },
+            languageControl(accessibilityTitle: "目标语言",
+                            selection: Binding(get: { model.targetLanguage },
                 set: { model.languageEdited(target: $0) }), choices: LanguageChoice.targets)
         }
         .padding(.horizontal, 16).padding(.vertical, 10)
         .disabled(model.isBusy)
     }
 
-    private func languageControl(title: String, selection: Binding<String>,
+    private func languageControl(accessibilityTitle: String, selection: Binding<String>,
                                  choices: [LanguageChoice]) -> some View {
-        HStack(spacing: 8) {
-            Text(title).font(.system(size: 11)).foregroundStyle(Palette.muted)
-            Picker(title, selection: selection) {
-                ForEach(choices) { Text($0.name).tag($0.id) }
-            }
-            .labelsHidden().pickerStyle(.menu).controlSize(.small).frame(maxWidth: 160)
-            .accessibilityLabel(title == "从" ? "原文语言" : "目标语言")
-            Spacer(minLength: 0)
+        Picker(accessibilityTitle, selection: selection) {
+            ForEach(choices) { Text($0.name).tag($0.id) }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .labelsHidden()
+        .pickerStyle(.menu)
+        .controlSize(.regular)
+        .frame(maxWidth: .infinity)
+        .accessibilityLabel(accessibilityTitle)
     }
 
     private var sourcePanel: some View {

@@ -3,15 +3,14 @@ import SwiftUI
 struct AnnotationToolbar: View {
     /// Transparent room kept above the bar for the hover label.
     static let hoverSpace: CGFloat = 30
+    static let minimumWidth: CGFloat = 900
 
     @ObservedObject var model: AppModel
-    var onShowText: (() -> Void)? = nil
     var showsSelectionTools = true
     var showsCompletion = true
     @StoredState private var showsRecordingOptions = false
     @StoredState private var showsScrollOptions = false
     @StoredState private var showsColors = false
-    @StoredState private var showsMarkTools = false
     @StoredState private var hoveredTitle: String?
     @StoredState private var hoverFrames: [String: CGRect] = [:]
 
@@ -24,7 +23,7 @@ struct AnnotationToolbar: View {
                     model.resetViewport()
                 }
             }
-            ForEach([MarkTool.rectangle, .arrow, .pen, .text, .mosaic], id: \.self) { tool in
+            ForEach(MarkTool.allCases.filter { $0 != .pointer }, id: \.self) { tool in
                 if tool == .text {
                     action(tool.title, text: "T", selected: model.tool == tool) {
                         model.tool = model.tool == tool ? .pointer : tool
@@ -35,11 +34,10 @@ struct AnnotationToolbar: View {
                     }.disabled(model.isBusy)
                 }
             }
-            action("更多标注", symbol: "square.grid.2x2") { showsMarkTools.toggle() }
+            action("填充矩形和椭圆", symbol: "circle.lefthalf.filled", selected: model.fillShapes) {
+                model.fillShapes.toggle()
+            }
                 .disabled(model.isBusy)
-                .popover(isPresented: $showsMarkTools, arrowEdge: .top) {
-                    markToolsPanel
-                }
             Button { showsColors.toggle() } label: {
                 ZStack(alignment: .bottomTrailing) {
                     Image(systemName: "paintpalette.fill")
@@ -133,27 +131,14 @@ struct AnnotationToolbar: View {
             }
             groupBox {
             action("打开剪贴板", symbol: "doc.on.clipboard") { model.showClipboard?() }
-            Menu {
-                Button("适应窗口") { model.resetViewport() }
-                Button("放大图片") { model.zoomFactor = min(8, model.zoomFactor * 1.25) }
-                Button("缩小图片") { model.zoomFactor = max(0.25, model.zoomFactor / 1.25) }
-                Divider()
-                Button("显示原文与译文") { onShowText?() }
-                Button("复制之前的录制") { model.saveRecording?() }.disabled(!model.recordingReady)
-                if model.draftImage == nil { Button("导出 PNG 文件…") { model.exportImage() } }
-                if model.activeEditor == "overlay" {
-                    Button("打开完整编辑器") { model.showEditor?() }
-                } else {
-                    Button("悬浮编辑") { model.showFloatingEditor?() }
-                }
-                Button("置顶图片") { model.requestPin() }
-                Button("黑色遮盖") { model.tool = model.tool == .redact ? .pointer : .redact }
-                Button("清除全部标注") { model.clearMarks() }.disabled(model.marks.isEmpty)
-            } label: { icon("ellipsis") }
-                .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
-                .help("更多操作").accessibilityLabel("更多操作")
-                .onHover { hoveredTitle = $0 ? "更多操作" : nil }
-                .onGeometryChange(for: CGRect.self) { $0.frame(in: .named("annotationToolbar")) } action: { hoverFrames["更多操作"] = $0 }
+            action("缩小图片", symbol: "minus.magnifyingglass") {
+                model.zoomFactor = max(0.25, model.zoomFactor / 1.25)
+            }
+            .disabled(model.zoomFactor <= 0.25)
+            action("放大图片", symbol: "plus.magnifyingglass") {
+                model.zoomFactor = min(8, model.zoomFactor * 1.25)
+            }
+            .disabled(model.zoomFactor >= 8)
             }
             if showsCompletion, model.draftImage != nil {
                 completionDivider
@@ -229,50 +214,6 @@ struct AnnotationToolbar: View {
 
     private var completionDivider: some View {
         Rectangle().fill(.white.opacity(0.22)).frame(width: 1, height: 24).padding(.horizontal, 6)
-    }
-
-    private var markToolsPanel: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("更多标注").font(.system(size: 12, weight: .semibold)).foregroundStyle(.white)
-            LazyVGrid(columns: [GridItem(.fixed(126)), GridItem(.fixed(126))], spacing: 8) {
-                ForEach([MarkTool.ellipse, .line, .highlighter, .number, .redact, .picker], id: \.self) { tool in
-                    Button {
-                        model.tool = tool
-                        showsMarkTools = false
-                    } label: {
-                        HStack(spacing: 8) {
-                            Image(systemName: tool.symbol).frame(width: 18)
-                            Text(tool.title)
-                            Spacer(minLength: 0)
-                            if model.tool == tool {
-                                Image(systemName: "checkmark").font(.system(size: 10, weight: .bold))
-                            }
-                        }
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 9).frame(height: 32)
-                        .background(model.tool == tool ? Color.white.opacity(0.18) : Color.white.opacity(0.07),
-                                    in: RoundedRectangle(cornerRadius: 7))
-                    }.buttonStyle(.plain)
-                }
-            }
-            Divider().overlay(.white.opacity(0.16))
-            Toggle(isOn: $model.fillShapes) {
-                Label("填充新绘制的矩形/椭圆", systemImage: "circle.lefthalf.filled")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(.white)
-            }
-            .toggleStyle(.switch)
-            .controlSize(.small)
-            .tint(Palette.accent)
-            Text(model.tool == .picker ? "点击图片取色，取色后自动回到浏览工具。" : "标注颜色会用于形状、画笔、文字和编号。")
-                .font(.system(size: 10)).foregroundStyle(Palette.overlayMuted)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .padding(13).frame(width: 286)
-        .background(Palette.overlay)
-        .tint(.white).environment(\.colorScheme, .dark)
-        .preferredColorScheme(.dark)
     }
 
     private func icon(_ symbol: String, selected: Bool = false) -> some View {
