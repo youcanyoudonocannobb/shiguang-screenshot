@@ -1,6 +1,6 @@
 # PawShot
 
-一个可以本地编译、运行的原生 macOS 截图、录制、翻译与剪贴板工具。采用 SwiftUI + AppKit，当前英文名称与显示名称为 **PawShot**，当前版本 1.4.5。本项目按截图与翻译需求独立实现，不包含 CapCap 的代码、素材或商标。
+一个可以本地编译、运行的原生 macOS 截图、录制、翻译与剪贴板工具。采用 SwiftUI + AppKit，当前英文名称与显示名称为 **PawShot**，当前版本 1.4.6。本项目按截图与翻译需求独立实现，不包含 CapCap 的代码、素材或商标。
 
 项目主页与问题反馈：[github.com/youcanyoudonocannobb/shiguang-screenshot](https://github.com/youcanyoudonocannobb/shiguang-screenshot)。
 

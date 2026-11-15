@@ -345,20 +345,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
                 }
             }
         ))
-        centerQuickToolWindow(panel)
+        positionQuickToolWindowAtTop(panel)
         panel.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
         window?.orderOut(nil)
     }
 
-    private func centerQuickToolWindow(_ panel: NSPanel) {
+    private func positionQuickToolWindowAtTop(_ panel: NSPanel) {
         let screen = NSScreen.screens.first(where: { $0.frame.contains(NSEvent.mouseLocation) })
             ?? NSScreen.main
         let visible = screen?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1200, height: 800)
         let size = panel.frame.size
         panel.setFrameOrigin(NSPoint(
             x: visible.midX - size.width / 2,
-            y: visible.midY - size.height / 2
+            y: visible.maxY - size.height - 24
         ))
     }
 
