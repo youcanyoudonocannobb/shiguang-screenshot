@@ -219,7 +219,11 @@ enum QuickLauncherCommand: Hashable, Identifiable {
 
     var symbol: String {
         switch self {
-        case .variable: return "textformat.abc"
+        case .variable(.lowerCamel): return "characters.lowercase"
+        case .variable(.upperCamel): return "characters.uppercase"
+        case .variable(.snakeCase): return "underline"
+        case .variable(.kebabCase): return "minus"
+        case .variable(.constantCase): return "capslock.fill"
         case .random(let type): return type.symbol
         }
     }
