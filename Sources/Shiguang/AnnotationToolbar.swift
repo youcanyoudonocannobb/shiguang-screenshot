@@ -3,7 +3,7 @@ import SwiftUI
 struct AnnotationToolbar: View {
     /// Transparent room kept above the bar for the hover label.
     static let hoverSpace: CGFloat = 30
-    static let minimumWidth: CGFloat = 900
+    static let minimumWidth: CGFloat = 800
 
     @ObservedObject var model: AppModel
     var showsSelectionTools = true
@@ -11,8 +11,12 @@ struct AnnotationToolbar: View {
     @StoredState private var showsRecordingOptions = false
     @StoredState private var showsScrollOptions = false
     @StoredState private var showsColors = false
+    @StoredState private var showsMoreTools = false
     @StoredState private var hoveredTitle: String?
     @StoredState private var hoverFrames: [String: CGRect] = [:]
+    private static let primaryMarkTools: [MarkTool] = [
+        .rectangle, .ellipse, .line, .arrow, .pen, .number, .text, .mosaic, .picker
+    ]
 
     var body: some View {
         HStack(spacing: 5) {
@@ -23,7 +27,7 @@ struct AnnotationToolbar: View {
                     model.resetViewport()
                 }
             }
-            ForEach(MarkTool.allCases.filter { $0 != .pointer }, id: \.self) { tool in
+            ForEach(Self.primaryMarkTools, id: \.self) { tool in
                 if tool == .text {
                     action(tool.title, text: "T", selected: model.tool == tool) {
                         model.tool = model.tool == tool ? .pointer : tool
@@ -34,10 +38,6 @@ struct AnnotationToolbar: View {
                     }.disabled(model.isBusy)
                 }
             }
-            action("填充矩形和椭圆", symbol: "circle.lefthalf.filled", selected: model.fillShapes) {
-                model.fillShapes.toggle()
-            }
-                .disabled(model.isBusy)
             Button { showsColors.toggle() } label: {
                 ZStack(alignment: .bottomTrailing) {
                     Image(systemName: "paintpalette.fill")
@@ -86,6 +86,12 @@ struct AnnotationToolbar: View {
                 .background(Palette.overlay)
                 .preferredColorScheme(.dark)
             }
+            action("更多功能", symbol: "ellipsis", selected: showsMoreTools || moreToolsActive) {
+                showsMoreTools.toggle()
+            }
+            .popover(isPresented: $showsMoreTools, arrowEdge: .top) {
+                moreToolsPanel
+            }
             }
             groupBox {
             action("撤销", symbol: "arrow.uturn.backward") { model.undo() }.disabled(!model.canUndo)
@@ -131,14 +137,12 @@ struct AnnotationToolbar: View {
             }
             groupBox {
             action("打开剪贴板", symbol: "doc.on.clipboard") { model.showClipboard?() }
-            action("缩小图片", symbol: "minus.magnifyingglass") {
-                model.zoomFactor = max(0.25, model.zoomFactor / 1.25)
+            action(model.draftPinsImage ? "取消钉住" : "钉住图片",
+                   symbol: model.draftPinsImage ? "pin.fill" : "pin",
+                   selected: model.draftPinsImage) {
+                model.requestPin()
             }
-            .disabled(model.zoomFactor <= 0.25)
-            action("放大图片", symbol: "plus.magnifyingglass") {
-                model.zoomFactor = min(8, model.zoomFactor * 1.25)
-            }
-            .disabled(model.zoomFactor >= 8)
+            .disabled(model.isBusy)
             }
             if showsCompletion, model.draftImage != nil {
                 completionDivider
@@ -214,6 +218,107 @@ struct AnnotationToolbar: View {
 
     private var completionDivider: some View {
         Rectangle().fill(.white.opacity(0.22)).frame(width: 1, height: 24).padding(.horizontal, 6)
+    }
+
+    private var moreToolsActive: Bool {
+        model.fillShapes || model.tool == .highlighter || model.tool == .redact
+    }
+
+    private var moreToolsPanel: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("更多功能")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.white)
+
+            moreToolRow(.highlighter)
+            moreToolRow(.redact)
+
+            HStack(spacing: 10) {
+                Label("填充矩形和椭圆", systemImage: "circle.lefthalf.filled")
+                Spacer(minLength: 0)
+                Toggle("", isOn: $model.fillShapes)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                    .controlSize(.small)
+                    .tint(Palette.accent)
+            }
+            .font(.system(size: 12, weight: .medium))
+            .foregroundStyle(.white)
+            .padding(.horizontal, 10)
+            .frame(height: 38)
+            .background(.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 8))
+
+            Divider().overlay(.white.opacity(0.16))
+
+            HStack(spacing: 7) {
+                Label("缩放", systemImage: "magnifyingglass")
+                    .font(.system(size: 12, weight: .medium))
+                Spacer(minLength: 0)
+                Button { model.resetViewport() } label: {
+                    Text("\(Int((model.zoomFactor * 100).rounded()))%")
+                        .font(.system(size: 10.5, weight: .medium, design: .monospaced))
+                        .frame(minWidth: 42)
+                }
+                .buttonStyle(.plain)
+                .help("恢复适应窗口")
+                zoomControl("minus", help: "缩小图片") {
+                    model.zoomFactor = max(0.25, model.zoomFactor / 1.25)
+                }
+                .disabled(model.zoomFactor <= 0.25)
+                zoomControl("plus", help: "放大图片") {
+                    model.zoomFactor = min(8, model.zoomFactor * 1.25)
+                }
+                .disabled(model.zoomFactor >= 8)
+            }
+            .foregroundStyle(.white)
+
+            Text("鼠标滚轮不再缩放图片。")
+                .font(.system(size: 10))
+                .foregroundStyle(Palette.overlayMuted)
+        }
+        .padding(13)
+        .frame(width: 286)
+        .background(Palette.overlay)
+        .preferredColorScheme(.dark)
+    }
+
+    private func moreToolRow(_ tool: MarkTool) -> some View {
+        Button {
+            model.tool = tool
+            showsMoreTools = false
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: tool.symbol)
+                    .frame(width: 20)
+                Text(tool.title)
+                Spacer(minLength: 0)
+                if model.tool == tool {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 10, weight: .bold))
+                }
+            }
+            .font(.system(size: 12, weight: .medium))
+            .foregroundStyle(.white)
+            .padding(.horizontal, 10)
+            .frame(height: 38)
+            .background(model.tool == tool ? Color.white.opacity(0.16) : Color.white.opacity(0.07),
+                        in: RoundedRectangle(cornerRadius: 8))
+        }
+        .buttonStyle(.plain)
+        .disabled(model.isBusy)
+    }
+
+    private func zoomControl(_ symbol: String, help: String,
+                             perform: @escaping () -> Void) -> some View {
+        Button(action: perform) {
+            Image(systemName: symbol)
+                .font(.system(size: 10, weight: .bold))
+                .frame(width: 27, height: 27)
+                .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
+        }
+        .buttonStyle(.plain)
+        .help(help)
+        .accessibilityLabel(help)
     }
 
     private func icon(_ symbol: String, selected: Bool = false) -> some View {

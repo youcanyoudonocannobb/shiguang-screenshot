@@ -702,8 +702,10 @@ struct EditorFeatureChecks {
         defaults.set(true, forKey: "keepHistory")
         let model = AppModel(historyDirectory: folder, preferences: defaults)
         var copied = 0
+        var pinned = 0
         var copiedImage: NSImage?
         model.publishImage = { copied += 1; copiedImage = $0 }
+        model.pinImage = { _ in pinned += 1 }
         model.acceptImage(sample(), title: "Existing")
         model.sourceText = "Original history"
         model.confirmDraft()
@@ -729,6 +731,7 @@ struct EditorFeatureChecks {
         model.sourceText = "Confirmed text"
         model.translatedText = "Confirmed translation"
         model.addMark(mark)
+        model.requestPin()
         var closed = false
         model.closeCaptureOverlay = { closed = true }
         model.confirmDraft()
@@ -736,8 +739,11 @@ struct EditorFeatureChecks {
         try require(closed && model.draftImage == nil && saved.count == 2 &&
                     saved.first?.text == "Confirmed text" && saved.first?.translation == "Confirmed translation" &&
                     saved.first?.marks == [mark], "Confirmation must commit all draft content once, then close the editor")
-        try require(copied == 2 && copiedImage?.pngData == ImageRenderer.render(sample(), marks: [mark]).pngData,
+        try require(copied == 2 && pinned == 1 &&
+                    copiedImage?.pngData == ImageRenderer.render(sample(), marks: [mark]).pngData,
                     "Checkmark must copy the fully annotated image by default")
+        model.requestPin()
+        try require(pinned == 2, "Pin must be available immediately for an already confirmed image")
         model.confirmDraft()
         try require(model.records.count == 2 && copied == 2, "Repeated confirmation must not duplicate history or clipboard writes")
         model.keepHistory = false

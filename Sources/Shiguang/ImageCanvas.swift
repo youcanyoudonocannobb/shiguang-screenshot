@@ -319,11 +319,7 @@ final class NativeImageCanvas: NSView, NSTextFieldDelegate {
     }
 
     override func scrollWheel(with event: NSEvent) {
-        guard abs(event.scrollingDeltaY) > 0 else { return }
-        finishText(commit: true)
-        let sensitivity = event.hasPreciseScrollingDeltas ? 0.008 : 0.12
-        let delta = min(0.4, max(-0.4, event.scrollingDeltaY * sensitivity))
-        changeZoom(viewport.zoom * exp(delta), anchor: convert(event.locationInWindow, from: nil))
+        if textField != nil { finishText(commit: true) }
     }
 
     override func magnify(with event: NSEvent) {
