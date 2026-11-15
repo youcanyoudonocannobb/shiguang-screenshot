@@ -371,11 +371,12 @@ private struct SettingsDetailView: View {
                     }
                 }
                 SettingsSeparator()
-                SettingsToggle("显示菜单栏小狗", detail: "关闭后仍可通过快捷键和重新打开应用使用",
+                SettingsToggle("显示菜单栏图标", detail: "关闭后仍可通过快捷键和重新打开应用使用",
                                isOn: $model.showsMenuBarIcon)
                 SettingsSeparator()
-                SettingsRow("小狗样式", detail: "系统单色会随菜单栏明暗自动反色") {
-                    MenuBarDogStylePicker(selection: $model.menuBarDogStyle)
+                SettingsRow("菜单栏图标", detail: "选择小动物，或上传图片作为自定义图标") {
+                    MenuBarIconPicker(selection: $model.menuBarDogStyle,
+                                      customImageData: $model.customMenuBarIconData)
                 }
             }
             SettingsSection("使用方式") {
@@ -690,7 +691,7 @@ private struct SettingsDetailView: View {
             }
             SettingsSection("运行方式") {
                 SettingsRow("菜单栏常驻", detail: "关闭窗口后继续运行，Dock 中不显示图标") {
-                    Text(model.showsMenuBarIcon ? "小狗图标" : "已隐藏")
+                    Text(model.showsMenuBarIcon ? model.menuBarDogStyle.title : "已隐藏")
                         .foregroundStyle(Palette.muted)
                 }
             }
@@ -704,37 +705,174 @@ private struct SettingsDetailView: View {
     }
 }
 
-private struct MenuBarDogStylePicker: View {
+private struct MenuBarIconPicker: View {
     @Binding var selection: MenuBarDogStyle
+    @Binding var customImageData: Data?
+    @StoredState private var showsPicker = false
+    @StoredState private var showsImporter = false
+    @StoredState private var errorMessage: String?
 
     var body: some View {
-        HStack(spacing: 6) {
-            ForEach(MenuBarDogStyle.allCases) { style in
-                Button {
-                    selection = style
-                } label: {
-                    Image(nsImage: BrandArtwork.menuBarImage(colorHex: style.colorHex))
-                        .resizable()
-                        .renderingMode(style == .system ? .template : .original)
-                        .scaledToFit()
-                        .frame(width: 19, height: 17)
-                        .foregroundStyle(style == .system ? Palette.ink : Color.clear)
-                        .frame(width: 31, height: 29)
-                        .background(
-                            previewTint(style).opacity(selection == style ? 0.16 : 0.065),
-                            in: RoundedRectangle(cornerRadius: 7, style: .continuous)
-                        )
-                        .overlay {
-                            RoundedRectangle(cornerRadius: 7, style: .continuous)
-                                .stroke(selection == style ? Palette.accent : Palette.line,
-                                        lineWidth: selection == style ? 1.5 : 1)
-                        }
-                }
-                .buttonStyle(.plain)
-                .help(style.title)
-                .accessibilityLabel("菜单栏小狗样式：\(style.title)")
-                .accessibilityAddTraits(selection == style ? .isSelected : [])
+        Button { showsPicker.toggle() } label: {
+            HStack(spacing: 8) {
+                iconPreview(selection)
+                    .frame(width: 20, height: 18)
+                    .frame(width: 26, height: 26)
+                    .background(Palette.background, in: RoundedRectangle(cornerRadius: 6))
+                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(Palette.line))
+                Text(selection.title)
+                    .font(.system(size: 11.5, weight: .medium))
+                    .lineLimit(1)
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(Palette.muted)
             }
+            .padding(.horizontal, 9)
+            .frame(height: 32)
+            .background(Palette.background, in: RoundedRectangle(cornerRadius: 8))
+            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Palette.line))
+        }
+        .buttonStyle(.plain)
+        .help("选择菜单栏图标")
+        .accessibilityLabel("菜单栏图标：\(selection.title)")
+        .popover(isPresented: $showsPicker, arrowEdge: .bottom) {
+            pickerPanel
+        }
+        .fileImporter(isPresented: $showsImporter, allowedContentTypes: [.image],
+                      allowsMultipleSelection: false, onCompletion: importCustomIcon)
+    }
+
+    private var pickerPanel: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("菜单栏图标")
+                    .font(.system(size: 13, weight: .semibold))
+                Text("选择一只小动物，或上传自己的图片")
+                    .font(.system(size: 10.5))
+                    .foregroundStyle(Palette.muted)
+            }
+
+            Text("小狗")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(Palette.muted)
+            LazyVGrid(columns: Array(repeating: GridItem(.fixed(48), spacing: 7), count: 5), spacing: 8) {
+                ForEach([MenuBarDogStyle.system, .lake, .coral, .teal, .amber]) { style in
+                    styleButton(style)
+                }
+            }
+
+            Text("小动物")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(Palette.muted)
+            LazyVGrid(columns: Array(repeating: GridItem(.fixed(48), spacing: 7), count: 5), spacing: 8) {
+                ForEach([MenuBarDogStyle.cat, .rabbit, .fox, .panda]) { style in
+                    styleButton(style)
+                }
+            }
+
+            Divider()
+
+            HStack(spacing: 8) {
+                Button {
+                    errorMessage = nil
+                    showsImporter = true
+                } label: {
+                    Label(customImageData == nil ? "上传图标图片…" : "更换图标图片…",
+                          systemImage: "square.and.arrow.up")
+                }
+                Spacer(minLength: 0)
+                if customImageData != nil {
+                    Button(selection == .custom ? "正在使用" : "使用图片") {
+                        selection = .custom
+                        showsPicker = false
+                    }
+                    .disabled(selection == .custom)
+                    Button {
+                        customImageData = nil
+                        if selection == .custom { selection = .system }
+                    } label: {
+                        Image(systemName: "trash")
+                    }
+                    .help("移除自定义图标")
+                    .accessibilityLabel("移除自定义菜单栏图标")
+                }
+            }
+            .controlSize(.small)
+
+            if let errorMessage {
+                Text(errorMessage)
+                    .font(.system(size: 10.5))
+                    .foregroundStyle(Palette.danger)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(14)
+        .frame(width: 318)
+        .background(Palette.panel)
+    }
+
+    private func styleButton(_ style: MenuBarDogStyle) -> some View {
+        Button {
+            selection = style
+            showsPicker = false
+        } label: {
+            VStack(spacing: 5) {
+                iconPreview(style)
+                    .frame(width: 20, height: 18)
+                Text(style.title)
+                    .font(.system(size: 9.5, weight: .medium))
+                    .foregroundStyle(selection == style ? Palette.accent : Palette.ink)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
+            }
+            .frame(width: 48, height: 52)
+            .background(
+                previewTint(style).opacity(selection == style ? 0.16 : 0.05),
+                in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(selection == style ? Palette.accent : Palette.line,
+                            lineWidth: selection == style ? 1.5 : 1)
+            }
+        }
+        .buttonStyle(.plain)
+        .help(style.title)
+        .accessibilityLabel("菜单栏图标：\(style.title)")
+        .accessibilityAddTraits(selection == style ? .isSelected : [])
+    }
+
+    private func iconPreview(_ style: MenuBarDogStyle) -> some View {
+        let image = BrandArtwork.menuBarImage(styleID: style.rawValue,
+                                              customImageData: customImageData)
+        return Image(nsImage: image)
+            .resizable()
+            .renderingMode(image.isTemplate ? .template : .original)
+            .scaledToFit()
+            .foregroundStyle(style == .system ? Palette.ink : Color.clear)
+    }
+
+    private func importCustomIcon(_ result: Result<[URL], Error>) {
+        switch result {
+        case .success(let urls):
+            guard let url = urls.first else { return }
+            let accessed = url.startAccessingSecurityScopedResource()
+            defer { if accessed { url.stopAccessingSecurityScopedResource() } }
+            do {
+                let data = try Data(contentsOf: url)
+                guard let normalized = BrandArtwork.normalizedMenuBarIconData(from: data) else {
+                    errorMessage = "无法读取这张图片，请改用 PNG、JPG、HEIC 或 TIFF。"
+                    return
+                }
+                customImageData = normalized
+                selection = .custom
+                errorMessage = nil
+                showsPicker = false
+            } catch {
+                errorMessage = "读取图片失败：\(error.localizedDescription)"
+            }
+        case .failure(let error):
+            errorMessage = "选择图片失败：\(error.localizedDescription)"
         }
     }
 

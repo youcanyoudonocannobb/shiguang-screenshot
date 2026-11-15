@@ -657,7 +657,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     private func applyStatusItemPreferences() {
         guard let statusItem else { return }
         statusItem.isVisible = model.showsMenuBarIcon
-        statusItem.button?.image = BrandArtwork.menuBarImage(colorHex: model.menuBarDogStyle.colorHex)
+        statusItem.button?.image = BrandArtwork.menuBarImage(
+            styleID: model.menuBarDogStyle.rawValue,
+            customImageData: model.customMenuBarIconData
+        )
         statusItem.button?.toolTip = "PawShot · 截图、识别与剪贴板"
         statusItem.button?.setAccessibilityLabel("PawShot 菜单")
     }

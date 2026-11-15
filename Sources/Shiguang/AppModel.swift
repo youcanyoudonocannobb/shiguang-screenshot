@@ -54,6 +54,16 @@ final class AppModel: ObservableObject {
             statusItemPreferencesChanged?()
         }
     }
+    @Published var customMenuBarIconData: Data? {
+        didSet {
+            if let customMenuBarIconData {
+                preferences.set(customMenuBarIconData, forKey: "customMenuBarIconData")
+            } else {
+                preferences.removeObject(forKey: "customMenuBarIconData")
+            }
+            statusItemPreferencesChanged?()
+        }
+    }
     @Published private(set) var launchAtLoginEnabled = false
     @Published private(set) var launchAtLoginRequiresApproval = false
     @Published private(set) var launchAtLoginMessage: String?
@@ -243,9 +253,13 @@ final class AppModel: ObservableObject {
         }
         translationProvider = initialTranslationProvider
         showsMenuBarIcon = preferences.object(forKey: "showsMenuBarIcon") as? Bool ?? true
-        menuBarDogStyle = MenuBarDogStyle(
+        let storedMenuBarStyle = MenuBarDogStyle(
             rawValue: preferences.string(forKey: "menuBarDogStyle") ?? ""
         ) ?? .system
+        let storedCustomMenuBarIcon = preferences.data(forKey: "customMenuBarIconData")
+        menuBarDogStyle = storedMenuBarStyle == .custom && storedCustomMenuBarIcon == nil
+            ? .system : storedMenuBarStyle
+        customMenuBarIconData = storedCustomMenuBarIcon
         autoOCR = preferences.object(forKey: "autoOCR.v2") as? Bool
             ?? preferences.object(forKey: "autoOCR") as? Bool ?? false
         autoTranslate = preferences.bool(forKey: "autoTranslate")

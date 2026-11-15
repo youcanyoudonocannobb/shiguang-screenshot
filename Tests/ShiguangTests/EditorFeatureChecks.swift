@@ -201,6 +201,19 @@ struct EditorFeatureChecks {
                     "A translation engine explicitly selected after migration must persist")
         try require(!second.showsMenuBarIcon && second.menuBarDogStyle == .lake,
                     "Menu bar visibility and dog colour must persist across launches")
+
+        second.menuBarDogStyle = .cat
+        let third = AppModel(historyDirectory: folder, preferences: defaults)
+        try require(third.menuBarDogStyle == .cat,
+                    "Animal menu bar styles must persist across launches")
+
+        let customIconData = Data([0x89, 0x50, 0x4E, 0x47])
+        third.customMenuBarIconData = customIconData
+        third.menuBarDogStyle = .custom
+        let fourth = AppModel(historyDirectory: folder, preferences: defaults)
+        try require(fourth.menuBarDogStyle == .custom &&
+                    fourth.customMenuBarIconData == customIconData,
+                    "Custom menu bar image data must persist across launches")
     }
 
     static func manualHotkeyInput() async throws {

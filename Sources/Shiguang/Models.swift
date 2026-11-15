@@ -20,26 +20,40 @@ enum MenuBarDogStyle: String, Codable, CaseIterable, Identifiable {
     case coral
     case teal
     case amber
+    case cat
+    case rabbit
+    case fox
+    case panda
+    case custom
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
         case .system: return "系统单色"
-        case .lake: return "湖蓝"
-        case .coral: return "珊瑚"
-        case .teal: return "青绿"
-        case .amber: return "琥珀"
+        case .lake: return "湖蓝小狗"
+        case .coral: return "珊瑚小狗"
+        case .teal: return "青绿小狗"
+        case .amber: return "琥珀小狗"
+        case .cat: return "小猫"
+        case .rabbit: return "兔子"
+        case .fox: return "狐狸"
+        case .panda: return "熊猫"
+        case .custom: return "自定义图标"
         }
     }
 
     var colorHex: String? {
         switch self {
-        case .system: return nil
+        case .system, .custom: return nil
         case .lake: return "17698B"
         case .coral: return "B84C45"
         case .teal: return "2C7566"
         case .amber: return "9A641B"
+        case .cat: return "C97845"
+        case .rabbit: return "B98B96"
+        case .fox: return "D56A32"
+        case .panda: return "4A5963"
         }
     }
 }
