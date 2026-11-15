@@ -1064,7 +1064,7 @@ final class AppModel: ObservableObject {
     func requestPin() {
         if draftImage != nil {
             draftPinsImage.toggle()
-            notice = draftPinsImage ? "已选择置顶 · 点击 ✅ 后执行" : "已取消置顶"
+            notice = draftPinsImage ? "已选择钉住 · 点击 ✅ 后执行" : "已取消钉住"
         } else if let image = renderedImage() { pinImage?(image) }
     }
 

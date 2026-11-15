@@ -1324,25 +1324,72 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         let height = min(width * ratio, maxSize.height * 0.7)
         let panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: width, height: height),
                             styleMask: [.titled, .closable, .resizable, .utilityWindow], backing: .buffered, defer: false)
-        panel.title = "PawShot 贴图 · 关闭以取消置顶"
+        panel.title = "PawShot 贴图 · 100% · 滚轮缩放"
         panel.level = .floating
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         panel.hidesOnDeactivate = false
         panel.isReleasedWhenClosed = false
         panel.delegate = self
-        let view = NSImageView()
+        let view = PinnedImageView()
         view.image = image
         view.imageScaling = .scaleProportionallyUpOrDown
+        view.onZoom = { [weak panel] scale, anchor in
+            guard let panel else { return }
+            Self.resizePinnedWindow(panel, imageAspectRatio: ratio, scale: scale, anchor: anchor)
+            let zoom = panel.contentRect(forFrameRect: panel.frame).width / width * 100
+            panel.title = "PawShot 贴图 · \(Int(zoom.rounded()))% · 滚轮缩放"
+        }
         panel.contentView = view
+        panel.contentAspectRatio = NSSize(width: image.size.width, height: image.size.height)
         panel.center()
         panel.makeKeyAndOrderFront(nil)
         pinnedWindows.append(panel)
+    }
+
+    private static func resizePinnedWindow(_ panel: NSWindow, imageAspectRatio: CGFloat,
+                                           scale: CGFloat, anchor: CGPoint) {
+        let currentContent = panel.contentRect(forFrameRect: panel.frame)
+        guard currentContent.width > 0, currentContent.height > 0 else { return }
+        let screen = panel.screen ?? NSScreen.main
+        guard let visibleFrame = screen?.visibleFrame else { return }
+        let chromeHeight = max(0, panel.frame.height - currentContent.height)
+        let targetSize = PinnedWindowGeometry.resizedContentSize(
+            current: currentContent.size,
+            imageAspectRatio: imageAspectRatio,
+            scale: scale,
+            chromeHeight: chromeHeight,
+            visibleFrameSize: visibleFrame.size
+        )
+        let frame = PinnedWindowGeometry.anchoredFrame(
+            currentFrame: panel.frame,
+            currentContentSize: currentContent.size,
+            targetContentSize: targetSize,
+            anchorInContent: anchor,
+            chromeHeight: chromeHeight,
+            visibleFrame: visibleFrame
+        )
+        panel.setFrame(frame, display: true)
     }
 
     func windowWillClose(_ notification: Notification) {
         guard let closed = notification.object as? NSWindow else { return }
         pinnedWindows.removeAll { $0 === closed }
         if closed === editorWindow { model.closeEditor() }
+    }
+}
+
+private final class PinnedImageView: NSImageView {
+    var onZoom: ((CGFloat, CGPoint) -> Void)?
+
+    override func scrollWheel(with event: NSEvent) {
+        guard abs(event.scrollingDeltaY) > 0.001 else { return }
+        let sensitivity: CGFloat = event.hasPreciseScrollingDeltas ? 0.012 : 0.12
+        let delta = min(0.35, max(-0.35, event.scrollingDeltaY * sensitivity))
+        onZoom?(exp(delta), event.locationInWindow)
+    }
+
+    override func magnify(with event: NSEvent) {
+        onZoom?(1 + min(0.35, max(-0.35, event.magnification)), event.locationInWindow)
     }
 }
 

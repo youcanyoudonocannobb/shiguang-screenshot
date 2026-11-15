@@ -831,6 +831,26 @@ struct EditorFeatureChecks {
             selection: tall, size: CGSize(width: 220, height: 46), visible: bounds)
         try require(side.minX == tall.maxX + 10 && bounds.contains(side),
                     "A full-height selection must attach to the nearest horizontal edge")
+
+        let pinned = PinnedWindowGeometry.resizedContentSize(
+            current: CGSize(width: 400, height: 200), imageAspectRatio: 0.5,
+            scale: 1.25, chromeHeight: 28, visibleFrameSize: CGSize(width: 1000, height: 700))
+        try require(pinned == CGSize(width: 500, height: 250),
+                    "Pinned image zoom must scale both dimensions proportionally")
+        let pinnedMaximum = PinnedWindowGeometry.resizedContentSize(
+            current: pinned, imageAspectRatio: 0.5, scale: 10,
+            chromeHeight: 28, visibleFrameSize: CGSize(width: 1000, height: 700))
+        try require(pinnedMaximum.width * 0.5 + 28 <= 700 * 0.92 &&
+                    pinnedMaximum.width <= 1000 * 0.92,
+                    "Pinned image zoom must remain inside the visible screen")
+        let pinnedFrame = PinnedWindowGeometry.anchoredFrame(
+            currentFrame: CGRect(x: 300, y: 250, width: 400, height: 228),
+            currentContentSize: CGSize(width: 400, height: 200),
+            targetContentSize: CGSize(width: 500, height: 250),
+            anchorInContent: CGPoint(x: 100, y: 50), chromeHeight: 28, visibleFrame: bounds)
+        try require(abs(pinnedFrame.minX - 275) < 0.01 && abs(pinnedFrame.minY - 237.5) < 0.01 &&
+                    bounds.contains(pinnedFrame),
+                    "Pinned image zoom must keep the point under the pointer stable")
     }
 
     static func retinaCropAndMarkAnchors() async throws {

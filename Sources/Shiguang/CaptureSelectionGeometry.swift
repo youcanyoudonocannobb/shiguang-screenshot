@@ -92,6 +92,40 @@ enum CaptureSelectionGeometry {
     }
 }
 
+enum PinnedWindowGeometry {
+    static func resizedContentSize(current: CGSize, imageAspectRatio: CGFloat, scale: CGFloat,
+                                   chromeHeight: CGFloat, visibleFrameSize: CGSize) -> CGSize {
+        guard current.width > 0, current.height > 0, visibleFrameSize.width > 0, visibleFrameSize.height > 0 else {
+            return current
+        }
+        let ratio = max(0.01, imageAspectRatio)
+        let usableHeight = max(80, visibleFrameSize.height * 0.92 - max(0, chromeHeight))
+        let maximumWidth = min(visibleFrameSize.width * 0.92, usableHeight / ratio)
+        let minimumWidth = min(120, maximumWidth)
+        let factor = min(2, max(0.5, scale))
+        let width = min(maximumWidth, max(minimumWidth, current.width * factor))
+        return CGSize(width: width, height: width * ratio)
+    }
+
+    static func anchoredFrame(currentFrame: CGRect, currentContentSize: CGSize,
+                              targetContentSize: CGSize, anchorInContent: CGPoint,
+                              chromeHeight: CGFloat, visibleFrame: CGRect) -> CGRect {
+        guard currentContentSize.width > 0, currentContentSize.height > 0 else {
+            return currentFrame
+        }
+        let anchorX = min(1, max(0, anchorInContent.x / currentContentSize.width))
+        let anchorY = min(1, max(0, anchorInContent.y / currentContentSize.height))
+        let screenAnchor = CGPoint(x: currentFrame.minX + anchorX * currentContentSize.width,
+                                   y: currentFrame.minY + anchorY * currentContentSize.height)
+        let frameSize = CGSize(width: targetContentSize.width,
+                               height: targetContentSize.height + max(0, chromeHeight))
+        let proposed = CGRect(x: screenAnchor.x - anchorX * frameSize.width,
+                              y: screenAnchor.y - anchorY * targetContentSize.height,
+                              width: frameSize.width, height: frameSize.height)
+        return CaptureSelectionGeometry.clamped(proposed, to: visibleFrame.insetBy(dx: 4, dy: 4))
+    }
+}
+
 enum SelectionChrome {
     static let accent = NSColor(srgbRed: 0.25, green: 0.77, blue: 0.94, alpha: 1)
     static let mask = NSColor(srgbRed: 0.025, green: 0.075, blue: 0.11, alpha: 0.52)
