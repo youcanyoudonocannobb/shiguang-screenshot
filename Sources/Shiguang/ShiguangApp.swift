@@ -110,7 +110,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         model.saveRecording = { [weak self] in self?.copyLastRecording() }
         model.beginScrollCapture = { [weak self] mode, region in self?.beginScrollCapture(mode, region: region) }
         model.showClipboard = { [weak self] in self?.showClipboardWindow() }
-        model.showQuickTool = { [weak self] in self?.showQuickToolWindow() }
         model.translateSelection = { [weak self] in self?.translateSelection() }
         model.statusItemPreferencesChanged = { [weak self] in self?.applyStatusItemPreferences() }
         model.publishImage = { [unowned self] image in try self.clipboard.copyImage(image) }

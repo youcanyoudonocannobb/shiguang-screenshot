@@ -193,24 +193,6 @@ struct QuickToolView: View {
                 .accessibilityLabel("清除输入")
             }
 
-            Text(model.variableNamingHotkey.symbol)
-                .font(.system(size: 9, weight: .semibold, design: .monospaced))
-                .foregroundStyle(Palette.muted)
-                .padding(.horizontal, 7)
-                .frame(height: 23)
-                .background(Palette.ink.opacity(0.045), in: RoundedRectangle(cornerRadius: 5))
-
-            Button(action: onClose) {
-                Image(systemName: "xmark")
-                    .font(.system(size: 10, weight: .bold))
-                    .foregroundStyle(Palette.muted)
-                    .frame(width: 27, height: 27)
-                    .background(Palette.panel, in: Circle())
-                    .overlay(Circle().stroke(Palette.line))
-            }
-            .buttonStyle(.plain)
-            .help("关闭 (Esc)")
-            .accessibilityLabel("关闭快捷输入")
         }
         .padding(.horizontal, 10)
         .frame(height: 54)

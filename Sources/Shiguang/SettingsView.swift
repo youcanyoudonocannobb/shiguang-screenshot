@@ -10,7 +10,6 @@ enum ShiguangSettingsPage: String, CaseIterable, Identifiable {
     case shortcuts
     case history
     case privacy
-    case tools
     case about
 
     var id: String { rawValue }
@@ -19,7 +18,7 @@ enum ShiguangSettingsPage: String, CaseIterable, Identifiable {
         SettingsSidebarGroup(title: nil, pages: [.general]),
         SettingsSidebarGroup(title: "功能", pages: [.screenshot, .translation, .clipboard, .quickInput]),
         SettingsSidebarGroup(title: "偏好", pages: [.shortcuts, .history, .privacy]),
-        SettingsSidebarGroup(title: "应用", pages: [.tools, .about])
+        SettingsSidebarGroup(title: "应用", pages: [.about])
     ]
 
     var title: String {
@@ -32,22 +31,20 @@ enum ShiguangSettingsPage: String, CaseIterable, Identifiable {
         case .shortcuts: return "快捷键"
         case .history: return "历史记录"
         case .privacy: return "隐私与存储"
-        case .tools: return "其他入口"
         case .about: return "关于"
         }
     }
 
     var summary: String {
         switch self {
-        case .general: return "启动、菜单栏与常用操作"
+        case .general: return "启动、菜单栏与显示样式"
         case .screenshot: return "截图流程、识别和历史记录"
         case .translation: return "翻译引擎、默认语言和 AI 接口"
         case .clipboard: return "系统剪贴板历史、快捷键和本机保存"
-        case .quickInput: return "启动台、变量命名快捷语与随机数据"
+        case .quickInput: return "唤出快捷输入的全局快捷键"
         case .shortcuts: return "区域截图、截图翻译和剪贴板快捷键"
         case .history: return "查看最近截图、识别文字和译文"
         case .privacy: return "屏幕访问、本机处理和本地数据"
-        case .tools: return "导入图片、文字翻译和体验示例"
         case .about: return "版本、开源地址和隐私说明"
         }
     }
@@ -62,7 +59,6 @@ enum ShiguangSettingsPage: String, CaseIterable, Identifiable {
         case .shortcuts: return "keyboard"
         case .history: return "clock.arrow.circlepath"
         case .privacy: return "lock.shield"
-        case .tools: return "wrench.and.screwdriver"
         case .about: return "info.circle"
         }
     }
@@ -82,9 +78,7 @@ enum ShiguangSettingsPage: String, CaseIterable, Identifiable {
             return ["历史", "系统剪贴板", "复制", "监听", "记录", "图片", "GIF", "视频", "文件",
                     "100", "变量名", "驼峰", "随机", "姓名", "邮箱", "地址", "IP", "身份证"]
         case .quickInput:
-            return ["快捷输入", "启动台", "启动器", "快捷语", "变量名", "驼峰", "xt", "lt", "dt",
-                    "snake", "kebab", "const", "中文", "英文", "翻译", "随机",
-                    "姓名", "邮箱", "地址", "IP", "身份证", "UUID", "密码"]
+            return ["快捷输入", "启动台", "启动器", "快捷键", "热键"]
         case .shortcuts:
             return ["快捷键", "热键", "按键", "区域截图", "截图并翻译", "剪贴板历史",
                     "翻译剪贴板", "划词翻译", "变量名"]
@@ -93,8 +87,6 @@ enum ShiguangSettingsPage: String, CaseIterable, Identifiable {
         case .privacy:
             return ["隐私", "权限", "屏幕录制", "屏幕访问", "辅助功能", "划词翻译",
                     "Vision", "本机", "数据", "清空"]
-        case .tools:
-            return ["导入图片", "文字翻译", "翻译剪贴板", "体验示例", "OCR", "工具"]
         case .about:
             return ["版本", "关于", "GitHub", "开源", "菜单栏", "Dock", "隐私", "更新"]
         }
@@ -354,7 +346,6 @@ private struct SettingsDetailView: View {
         case .shortcuts: shortcutsContent
         case .history: historyContent
         case .privacy: privacyContent
-        case .tools: toolsContent
         case .about: aboutContent
         }
     }
@@ -386,19 +377,6 @@ private struct SettingsDetailView: View {
                 SettingsRow("小狗样式", detail: "系统单色会随菜单栏明暗自动反色") {
                     MenuBarDogStylePicker(selection: $model.menuBarDogStyle)
                 }
-            }
-            SettingsSection("常用操作") {
-                SettingsActionRow(title: "区域截图", detail: "选中区域后，直接标注与编辑", symbol: "viewfinder",
-                                  shortcut: model.captureHotkey.symbol) { model.capture() }
-                SettingsSeparator()
-                SettingsActionRow(title: "截图并翻译", detail: "框选文字，打开独立翻译窗口", symbol: "character.bubble",
-                                  shortcut: model.translateHotkey.symbol) { model.capture(translate: true) }
-                SettingsSeparator()
-                SettingsActionRow(title: "划词翻译", detail: "翻译其他应用中选中的文字", symbol: "text.cursor",
-                                  shortcut: model.selectionTranslateHotkey.symbol) { model.translateSelection?() }
-                SettingsSeparator()
-                SettingsActionRow(title: "剪贴板历史", detail: "找回并复制最近的内容", symbol: "list.clipboard",
-                                  shortcut: model.clipboardHotkey.symbol) { model.showClipboard?() }
             }
             SettingsSection("使用方式") {
                 SettingsRow("菜单栏运行", detail: "关闭窗口后仍可使用快捷键和菜单栏入口") {
@@ -548,43 +526,9 @@ private struct SettingsDetailView: View {
     }
 
     private var quickInputContent: some View {
-        Group {
-            SettingsSection("启动台", footer: "快捷键唤出单行搜索框，输入快捷语后立即生成结果；Return 执行或复制，Esc 关闭。") {
-                SettingsActionRow(title: "打开快捷输入", detail: "输入中文、英文或随机数据快捷语",
-                                  symbol: "bolt.horizontal.circle",
-                                  shortcut: model.variableNamingHotkey.symbol) { model.showQuickTool?() }
-                SettingsSeparator()
-                HotkeyRow(title: "快捷输入快捷键", settings: $model.variableNamingHotkey,
-                          onRecordingChanged: model.setHotkeyCaptureActive)
-            }
-
-            SettingsSection("变量命名", footer: "中文参数会先翻译为英文，再套用小驼峰、大驼峰、下划线、短横线或常量格式。") {
-                SettingsRow("默认格式", detail: "没有输入明确快捷语时使用") {
-                    Picker("默认变量格式", selection: $model.variableNamingStyle) {
-                        ForEach(VariableNamingStyle.allCases) { style in
-                            Text("\(style.title) · \(style.shortcut)").tag(style)
-                        }
-                    }
-                    .labelsHidden()
-                    .frame(width: 150)
-                }
-            }
-
-            SettingsSection("变量快捷语", footer: "xt 与 lt 都表示小驼峰，例如 `xt 用户登录` 或 `lt 用户登录` 会生成 `userLogin`。") {
-                ForEach(Array(VariableNamingStyle.allCases.enumerated()), id: \.element.id) { index, style in
-                    let command = QuickLauncherCommand.variable(style)
-                    QuickCommandSettingsRow(command: command)
-                    if index < VariableNamingStyle.allCases.count - 1 { SettingsSeparator() }
-                }
-            }
-
-            SettingsSection("随机数据快捷语", footer: "在启动台中直接输入快捷语即可生成测试值，例如 `uuid` 或 `地址`。") {
-                ForEach(Array(RandomDataType.allCases.enumerated()), id: \.element.id) { index, type in
-                    let command = QuickLauncherCommand.random(type)
-                    QuickCommandSettingsRow(command: command)
-                    if index < RandomDataType.allCases.count - 1 { SettingsSeparator() }
-                }
-            }
+        SettingsSection("全局快捷键", footer: "点击输入框后直接按下组合键，也可以手动输入组合键。按 Esc 取消录入。") {
+            HotkeyRow(title: "快捷输入", settings: $model.variableNamingHotkey,
+                      onRecordingChanged: model.setHotkeyCaptureActive)
         }
     }
 
@@ -692,20 +636,6 @@ private struct SettingsDetailView: View {
                     Button("清空…", role: .destructive) { model.clearHistory() }.disabled(model.records.isEmpty)
                 }
             }
-        }
-    }
-
-    private var toolsContent: some View {
-        SettingsSection("快捷入口") {
-            SettingsActionRow(title: "导入图片", detail: "提取已有图片中的文字", symbol: "photo.badge.plus") { model.importImage() }
-            SettingsSeparator()
-            SettingsActionRow(title: "文字翻译", detail: "直接输入或粘贴原文", symbol: "text.bubble") { model.startTextTranslation() }
-            SettingsSeparator()
-            SettingsActionRow(title: "翻译剪贴板", symbol: "doc.on.clipboard") { model.translateClipboard() }
-            SettingsSeparator()
-            SettingsActionRow(title: "划词翻译", symbol: "text.cursor") { model.translateSelection?() }
-            SettingsSeparator()
-            SettingsActionRow(title: "体验示例", detail: "用内置示例检查识别效果", symbol: "sparkles") { model.useDemo() }
         }
     }
 
@@ -971,26 +901,6 @@ private struct SettingsActionRow: View {
         .buttonStyle(.plain)
         .onHover { hovered = $0 }
         .accessibilityLabel(title)
-    }
-}
-
-private struct QuickCommandSettingsRow: View {
-    let command: QuickLauncherCommand
-
-    var body: some View {
-        HStack(spacing: 12) {
-            SettingsSymbolTile(symbol: command.symbol, accented: true, size: 30)
-            SettingsRowLabel(title: command.title, detail: command.example)
-            Spacer(minLength: 0)
-            HStack(spacing: 5) {
-                ForEach(Array(command.aliases.prefix(3)), id: \.self) { alias in
-                    SettingsKeycap(text: alias)
-                }
-            }
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 11)
-        .frame(minHeight: 52)
     }
 }
 

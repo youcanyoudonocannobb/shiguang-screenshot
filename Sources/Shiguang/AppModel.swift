@@ -165,7 +165,6 @@ final class AppModel: ObservableObject {
     var saveRecording: (() -> Void)?
     var beginScrollCapture: ((ScrollCaptureMode, CGRect?) -> Void)?
     var showClipboard: (() -> Void)?
-    var showQuickTool: (() -> Void)?
     var translateSelection: (() -> Void)?
     var didCopyCapture: (() -> Void)?
     var publishImage: (NSImage) throws -> Void = { image in
