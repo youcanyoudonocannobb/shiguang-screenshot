@@ -5,11 +5,11 @@ struct QuickToolView: View {
     @ObservedObject var model: AppModel
     let onCopy: (String) -> String?
     let onClose: () -> Void
+    let onHeightChange: (CGFloat) -> Void
 
     @StoredState private var query = ""
     @StoredState private var selectedIndex = 0
     @StoredState private var generatedValues: [RandomDataType: String] = [:]
-    @StoredState private var copiedValue = ""
     @StoredState private var errorMessage: String?
     @StoredState private var translatedChinese = ""
     @StoredState private var translatedEnglish = ""
@@ -21,13 +21,19 @@ struct QuickToolView: View {
     @StoredState private var translationTimeoutTask: Task<Void, Never>?
     @FocusState private var inputFocused: Bool
 
+    static let panelWidth: CGFloat = 620
+    static let collapsedHeight: CGFloat = 66
+    private let rowHeight: CGFloat = 46
+    private let rowSpacing: CGFloat = 3
+    private let maximumResults = 6
+
     private var invocation: QuickLauncherInvocation? {
         QuickLauncherParser.invocation(from: query)
     }
 
     private var matchingCommands: [QuickLauncherCommand] {
         let value = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard !value.isEmpty else { return QuickLauncherCommand.all }
+        guard !value.isEmpty else { return [] }
         let token = value.split(whereSeparator: \.isWhitespace).first.map(String.init) ?? value
         return QuickLauncherCommand.all.filter { command in
             command.title.lowercased().contains(value) ||
@@ -36,19 +42,26 @@ struct QuickToolView: View {
         }
     }
 
-    private var effectiveInvocation: QuickLauncherInvocation? {
-        if let invocation { return invocation }
+    private var fallbackArgument: String? {
         let value = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !value.isEmpty, matchingCommands.isEmpty else { return nil }
-        return QuickLauncherInvocation(
-            command: .variable(model.variableNamingStyle),
-            argument: value
-        )
+        guard invocation == nil,
+              !value.isEmpty,
+              matchingCommands.isEmpty else { return nil }
+        return value
     }
 
     private var commands: [QuickLauncherCommand] {
-        if let effectiveInvocation { return [effectiveInvocation.command] }
-        return matchingCommands
+        let candidates: [QuickLauncherCommand]
+        if let invocation {
+            candidates = [invocation.command]
+        } else if !matchingCommands.isEmpty {
+            candidates = matchingCommands
+        } else if fallbackArgument != nil {
+            candidates = VariableNamingStyle.allCases.map(QuickLauncherCommand.variable)
+        } else {
+            candidates = []
+        }
+        return Array(candidates.prefix(maximumResults))
     }
 
     private var selectedCommand: QuickLauncherCommand? {
@@ -56,8 +69,14 @@ struct QuickToolView: View {
         return commands[min(max(selectedIndex, 0), commands.count - 1)]
     }
 
-    private var argument: String {
-        effectiveInvocation?.argument ?? ""
+    private func argument(for command: QuickLauncherCommand) -> String {
+        if let invocation, invocation.command == command {
+            return invocation.argument
+        }
+        if fallbackArgument != nil, case .variable = command {
+            return fallbackArgument ?? ""
+        }
+        return ""
     }
 
     private var selectedOutput: String {
@@ -66,43 +85,40 @@ struct QuickToolView: View {
         case .random(let type):
             return generatedValues[type] ?? ""
         case .variable(let style):
-            guard !argument.isEmpty else { return "" }
-            if ChineseEnglishGlossary.containsChinese(argument) {
-                guard translatedChinese == argument, !translatedEnglish.isEmpty else { return "" }
+            let value = argument(for: selectedCommand)
+            guard !value.isEmpty else { return "" }
+            if ChineseEnglishGlossary.containsChinese(value) {
+                guard translatedChinese == value, !translatedEnglish.isEmpty else { return "" }
                 return VariableNameTransformer.convertEnglish(translatedEnglish, style: style)
             }
-            return VariableNameTransformer.convertEnglish(argument, style: style)
+            return VariableNameTransformer.convertEnglish(value, style: style)
         }
     }
 
-    private var resultDetail: String {
-        guard let selectedCommand else { return "输入快捷语后按 Return 复制" }
-        if case .variable = selectedCommand, argument.isEmpty {
-            return selectedCommand.example
+    private var resultsPanelHeight: CGFloat {
+        guard !commands.isEmpty else { return 0 }
+        let rows = CGFloat(commands.count) * rowHeight
+        let spacing = CGFloat(max(commands.count - 1, 0)) * rowSpacing
+        return 12 + rows + spacing + 25
+    }
+
+    private var preferredHeight: CGFloat {
+        guard !commands.isEmpty else {
+            return Self.collapsedHeight
         }
-        if ChineseEnglishGlossary.containsChinese(argument), !translatedEnglish.isEmpty {
-            return "\(argument) → \(translatedEnglish)"
-        }
-        return selectedCommand.detail
+        return Self.collapsedHeight + 6 + resultsPanelHeight
     }
 
     var body: some View {
-        VStack(spacing: 10) {
+        VStack(spacing: 6) {
             searchBar
-            resultHeader
-            commandList
-            resultBar
-            footer
+            if !commands.isEmpty {
+                resultsPanel
+            }
         }
-        .padding(12)
-        .frame(width: 640, height: 454)
-        .background {
-            LinearGradient(
-                colors: [Palette.background, Color(hex: "EDF4F8")],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-        }
+        .padding(6)
+        .frame(width: Self.panelWidth, height: preferredHeight, alignment: .top)
+        .background(Color.clear)
         .foregroundStyle(Palette.ink)
         .tint(Palette.accent)
         .preferredColorScheme(.light)
@@ -123,7 +139,6 @@ struct QuickToolView: View {
         }
         .onChange(of: query) { _, _ in
             selectedIndex = 0
-            copiedValue = ""
             errorMessage = nil
             let parsed = QuickLauncherParser.invocation(from: query)
             let matches = matchingCommands
@@ -133,6 +148,9 @@ struct QuickToolView: View {
                 : nil)
             updateTranslation(for: effective)
             seedRandomValueIfNeeded(for: effective?.command)
+        }
+        .onChange(of: preferredHeight, initial: true) { _, height in
+            onHeightChange(height)
         }
         .onDisappear {
             translationTimeoutTask?.cancel()
@@ -144,27 +162,22 @@ struct QuickToolView: View {
             Image(systemName: "pawprint.fill")
                 .font(.system(size: 15, weight: .semibold))
                 .foregroundStyle(.white)
-                .frame(width: 34, height: 34)
+                .frame(width: 32, height: 32)
                 .background(Palette.accent, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
 
-            VStack(alignment: .leading, spacing: 1) {
-                Text("PawShot 快捷输入")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(Palette.muted)
-                TextField("输入快捷语，例如 xt 用户登录、uuid、ip", text: $query)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 15, weight: .medium))
-                    .focused($inputFocused)
-                    .onSubmit { activateSelection() }
-                    .onKeyPress(.upArrow) {
-                        moveSelection(-1)
-                        return .handled
-                    }
-                    .onKeyPress(.downArrow) {
-                        moveSelection(1)
-                        return .handled
-                    }
-            }
+            TextField("输入名称、姓名、地址或快捷语", text: $query)
+                .textFieldStyle(.plain)
+                .font(.system(size: 15, weight: .medium))
+                .focused($inputFocused)
+                .onSubmit { activateSelection() }
+                .onKeyPress(.upArrow) {
+                    moveSelection(-1)
+                    return .handled
+                }
+                .onKeyPress(.downArrow) {
+                    moveSelection(1)
+                    return .handled
+                }
 
             if !query.isEmpty {
                 Button {
@@ -198,51 +211,65 @@ struct QuickToolView: View {
             .help("关闭 (Esc)")
             .accessibilityLabel("关闭快捷输入")
         }
-        .padding(.horizontal, 11)
-        .frame(height: 50)
+        .padding(.horizontal, 10)
+        .frame(height: 54)
         .background(Palette.panel, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(Palette.line))
         .shadow(color: Palette.shadow, radius: 12, y: 4)
     }
 
-    private var resultHeader: some View {
-        HStack {
-            Text(invocation == nil && !query.isEmpty && effectiveInvocation != nil ? "默认变量格式" : "快捷语")
-                .font(.system(size: 10.5, weight: .semibold))
-                .foregroundStyle(Palette.muted)
-            Spacer()
-            Text("↑ ↓ 选择 · ↩ 执行")
-                .font(.system(size: 9))
-                .foregroundStyle(Palette.muted)
-        }
-        .padding(.horizontal, 3)
-    }
-
-    private var commandList: some View {
-        ScrollView {
-            LazyVStack(spacing: 5) {
-                if commands.isEmpty {
-                    VStack(spacing: 7) {
-                        Image(systemName: "text.magnifyingglass")
-                            .font(.system(size: 20, weight: .light))
-                        Text("没有匹配的快捷语")
-                            .font(.system(size: 12, weight: .medium))
-                        Text("试试 xt、lt、dt、snake、uuid、address 或 ip")
-                            .font(.system(size: 10))
-                    }
-                    .foregroundStyle(Palette.muted)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 38)
-                } else {
+    private var resultsPanel: some View {
+        VStack(spacing: 0) {
+            ScrollView {
+                LazyVStack(spacing: rowSpacing) {
                     ForEach(Array(commands.enumerated()), id: \.element.id) { index, command in
                         commandRow(command, index: index)
                     }
                 }
             }
-            .padding(1)
+            .scrollIndicators(.hidden)
+            .frame(height: CGFloat(commands.count) * rowHeight +
+                   CGFloat(max(commands.count - 1, 0)) * rowSpacing)
+
+            resultsFooter
         }
-        .scrollIndicators(.hidden)
-        .frame(maxHeight: .infinity)
+        .padding(6)
+        .background(Palette.panel, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 11, style: .continuous).stroke(Palette.line))
+        .shadow(color: Palette.shadow, radius: 12, y: 4)
+    }
+
+    private var resultsFooter: some View {
+        HStack(spacing: 8) {
+            keyHint("↑ ↓", label: "选择")
+            keyHint("↩", label: "复制并关闭")
+            if let errorMessage {
+                Text(errorMessage)
+                    .foregroundStyle(Palette.danger)
+                    .lineLimit(1)
+            } else if let translationError {
+                Text(translationError)
+                    .foregroundStyle(Palette.danger)
+                    .lineLimit(1)
+            } else if isTranslatingChinese {
+                HStack(spacing: 5) {
+                    ProgressView().controlSize(.mini)
+                    Text("翻译中")
+                }
+                .foregroundStyle(Palette.muted)
+            }
+            Spacer(minLength: 4)
+            Text("Esc 关闭")
+                .foregroundStyle(Palette.muted)
+        }
+        .font(.system(size: 9))
+        .padding(.horizontal, 4)
+        .frame(height: 25)
+        .overlay(alignment: .top) {
+            Rectangle()
+                .fill(Palette.line)
+                .frame(height: 1)
+        }
     }
 
     private func commandRow(_ command: QuickLauncherCommand, index: Int) -> some View {
@@ -280,25 +307,29 @@ struct QuickToolView: View {
 
                 Spacer(minLength: 8)
 
-                if case .variable = command, effectiveInvocation?.argument.isEmpty == true {
-                    Text(command.example)
-                        .font(.system(size: 9, design: .monospaced))
-                        .foregroundStyle(Palette.muted)
-                        .lineLimit(1)
-                } else if let preview {
+                if let preview {
                     Text(preview)
-                        .font(.system(size: 10, weight: .medium, design: .monospaced))
+                        .font(.system(size: 11, weight: .medium, design: .monospaced))
                         .foregroundStyle(selected ? Palette.ink : Palette.muted)
                         .lineLimit(1)
                         .truncationMode(.middle)
-                        .frame(maxWidth: 250, alignment: .trailing)
-                } else if isTranslatingChinese {
+                        .frame(maxWidth: 260, alignment: .trailing)
+                } else if isTranslatingChinese, selected {
                     HStack(spacing: 5) {
                         ProgressView().controlSize(.mini)
                         Text("翻译中")
                             .font(.system(size: 9.5))
                     }
                     .foregroundStyle(Palette.muted)
+                } else if case .variable = command, argument(for: command).isEmpty {
+                    Text(command.example)
+                        .font(.system(size: 9, design: .monospaced))
+                        .foregroundStyle(Palette.muted)
+                        .lineLimit(1)
+                } else {
+                    Text("…")
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(Palette.muted)
                 }
 
                 Image(systemName: "return")
@@ -309,7 +340,7 @@ struct QuickToolView: View {
                                 in: RoundedRectangle(cornerRadius: 4))
             }
             .padding(.horizontal, 10)
-            .frame(height: 48)
+            .frame(height: rowHeight)
             .background(selected ? Palette.accentSoft.opacity(0.8) : Palette.panel.opacity(0.72),
                         in: RoundedRectangle(cornerRadius: 9, style: .continuous))
             .overlay {
@@ -319,76 +350,10 @@ struct QuickToolView: View {
             .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
         }
         .buttonStyle(.plain)
+        .onHover { hovering in
+            if hovering { selectedIndex = index }
+        }
         .accessibilityLabel("\(command.title)，快捷语 \(command.trigger)")
-    }
-
-    private var resultBar: some View {
-        HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: 6) {
-                    Text("生成结果")
-                        .font(.system(size: 9.5, weight: .semibold))
-                        .foregroundStyle(Palette.muted)
-                    if isTranslatingChinese {
-                        ProgressView().controlSize(.mini)
-                    }
-                }
-                Text(selectedOutput.isEmpty ? resultDetail : selectedOutput)
-                    .font(.system(size: 14, weight: selectedOutput.isEmpty ? .regular : .medium,
-                                  design: selectedOutput.isEmpty ? .default : .monospaced))
-                    .foregroundStyle(selectedOutput.isEmpty ? Palette.muted : Palette.ink)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.75)
-                    .textSelection(.enabled)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-
-            if let errorMessage {
-                Text(errorMessage)
-                    .font(.system(size: 9))
-                    .foregroundStyle(Palette.danger)
-                    .lineLimit(1)
-            } else if let translationError {
-                Text(translationError)
-                    .font(.system(size: 9))
-                    .foregroundStyle(Palette.danger)
-                    .lineLimit(1)
-            }
-
-            Button(action: copySelection) {
-                HStack(spacing: 6) {
-                    Image(systemName: copiedValue == selectedOutput && !selectedOutput.isEmpty
-                          ? "checkmark" : "doc.on.doc")
-                        .font(.system(size: 10.5, weight: .bold))
-                    Text(copiedValue == selectedOutput && !selectedOutput.isEmpty ? "已复制" : "复制")
-                        .font(.system(size: 11, weight: .semibold))
-                }
-                .foregroundStyle(selectedOutput.isEmpty ? Palette.muted : .white)
-                .frame(width: 90, height: 32)
-                .background(selectedOutput.isEmpty ? Palette.ink.opacity(0.07) : Palette.accent,
-                            in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-            }
-            .buttonStyle(.plain)
-            .disabled(selectedOutput.isEmpty)
-            .keyboardShortcut(.return, modifiers: [.command])
-            .accessibilityLabel("复制生成结果")
-        }
-        .padding(.horizontal, 12)
-        .frame(height: 58)
-        .background(Palette.panel, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(Palette.line))
-    }
-
-    private var footer: some View {
-        HStack(spacing: 8) {
-            keyHint("↩", label: "执行 / 复制")
-            keyHint("Esc", label: "关闭")
-            Spacer()
-            Text("中文会先翻译为英文再生成变量名")
-                .font(.system(size: 9))
-                .foregroundStyle(Palette.muted)
-        }
-        .padding(.horizontal, 2)
     }
 
     private func preview(for command: QuickLauncherCommand) -> String? {
@@ -396,35 +361,35 @@ struct QuickToolView: View {
         case .random(let type):
             return generatedValues[type]
         case .variable(let style):
-            guard effectiveInvocation?.command == command, !argument.isEmpty else { return nil }
-            if ChineseEnglishGlossary.containsChinese(argument) {
-                guard translatedChinese == argument, !translatedEnglish.isEmpty else { return nil }
+            let value = argument(for: command)
+            guard !value.isEmpty else { return nil }
+            if ChineseEnglishGlossary.containsChinese(value) {
+                guard translatedChinese == value, !translatedEnglish.isEmpty else { return nil }
                 return VariableNameTransformer.convertEnglish(translatedEnglish, style: style)
             }
-            return VariableNameTransformer.convertEnglish(argument, style: style)
+            return VariableNameTransformer.convertEnglish(value, style: style)
         }
     }
 
     private func activateSelection() {
         guard let selectedCommand else { return }
-        if case .variable = selectedCommand, argument.isEmpty {
+        if case .variable = selectedCommand, argument(for: selectedCommand).isEmpty {
             query = "\(selectedCommand.trigger) "
             inputFocused = true
             return
         }
-        copySelection()
+        copySelection(closeAfterCopy: true)
     }
 
-    private func copySelection() {
+    private func copySelection(closeAfterCopy: Bool) {
         guard !selectedOutput.isEmpty else { return }
         if let error = onCopy(selectedOutput) {
             errorMessage = error
-            copiedValue = ""
             return
         }
         errorMessage = nil
-        withAnimation(.easeOut(duration: 0.14)) {
-            copiedValue = selectedOutput
+        if closeAfterCopy {
+            onClose()
         }
     }
 

@@ -295,7 +295,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             panel = existing
         } else {
             let created = NSPanel(
-                contentRect: NSRect(x: 0, y: 0, width: 640, height: 454),
+                contentRect: NSRect(x: 0, y: 0,
+                                    width: QuickToolView.panelWidth,
+                                    height: QuickToolView.collapsedHeight),
                 styleMask: [.titled, .fullSizeContentView, .utilityWindow],
                 backing: .buffered,
                 defer: false
@@ -308,12 +310,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             created.level = .floating
             created.hidesOnDeactivate = true
             created.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-            created.backgroundColor = NSColor(hex: "F4F7FA")
-            created.hasShadow = true
+            created.isOpaque = false
+            created.backgroundColor = .clear
+            created.hasShadow = false
             quickToolWindow = created
             panel = created
         }
 
+        panel.setFrame(
+            NSRect(origin: panel.frame.origin,
+                   size: NSSize(width: QuickToolView.panelWidth,
+                                height: QuickToolView.collapsedHeight)),
+            display: false
+        )
         panel.contentView = NSHostingView(rootView: QuickToolView(
             model: model,
             onCopy: { [weak self] text in
@@ -328,7 +337,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
                     return error.localizedDescription
                 }
             },
-            onClose: { [weak self] in self?.closeQuickToolWindow() }
+            onClose: { [weak self] in self?.closeQuickToolWindow() },
+            onHeightChange: { [weak self] height in
+                Task { @MainActor in
+                    self?.resizeQuickToolWindow(to: height)
+                }
+            }
         ))
         centerQuickToolWindow(panel)
         panel.makeKeyAndOrderFront(nil)
@@ -344,6 +358,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             x: visible.midX - size.width / 2,
             y: visible.midY - size.height / 2
         ))
+    }
+
+    private func resizeQuickToolWindow(to contentHeight: CGFloat) {
+        guard let panel = quickToolWindow else { return }
+        let targetSize = NSSize(
+            width: QuickToolView.panelWidth,
+            height: max(contentHeight, QuickToolView.collapsedHeight)
+        )
+        guard abs(panel.frame.width - targetSize.width) > 0.5 ||
+              abs(panel.frame.height - targetSize.height) > 0.5 else { return }
+        let top = panel.frame.maxY
+        let midX = panel.frame.midX
+        let targetFrame = NSRect(
+            x: midX - targetSize.width / 2,
+            y: top - targetSize.height,
+            width: targetSize.width,
+            height: targetSize.height
+        )
+        panel.setFrame(targetFrame, display: true, animate: panel.isVisible)
     }
 
     private func closeQuickToolWindow() {
