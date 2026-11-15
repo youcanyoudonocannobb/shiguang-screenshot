@@ -122,6 +122,7 @@ struct QuickToolView: View {
         .foregroundStyle(Palette.ink)
         .tint(Palette.accent)
         .preferredColorScheme(.light)
+        .onExitCommand(perform: onClose)
         .background {
             QuickTranslationBridge(
                 request: requestedChinese,

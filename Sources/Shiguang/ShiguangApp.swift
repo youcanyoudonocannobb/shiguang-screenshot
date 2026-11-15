@@ -288,6 +288,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         let ownPID = ProcessInfo.processInfo.processIdentifier
         let front = NSWorkspace.shared.frontmostApplication
         quickToolReturnApplication = front?.processIdentifier == ownPID ? lastExternalApplication : front
+        window?.orderOut(nil)
         NSApp.activate(ignoringOtherApps: true)
 
         let panel: NSPanel
@@ -347,6 +348,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         centerQuickToolWindow(panel)
         panel.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+        window?.orderOut(nil)
     }
 
     private func centerQuickToolWindow(_ panel: NSPanel) {
@@ -381,6 +383,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
 
     private func closeQuickToolWindow() {
         quickToolWindow?.orderOut(nil)
+        window?.orderOut(nil)
         if let app = quickToolReturnApplication,
            app.processIdentifier != ProcessInfo.processInfo.processIdentifier {
             app.activate(options: [])
@@ -429,8 +432,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             return
         }
         if captureController?.isActive == true { captureController?.cancelByUser() }
-        clipboardReturnApplication = NSWorkspace.shared.frontmostApplication
-        clipboardReturnWindow = NSApp.keyWindow
+        let ownPID = ProcessInfo.processInfo.processIdentifier
+        let front = NSWorkspace.shared.frontmostApplication
+        clipboardReturnApplication = front?.processIdentifier == ownPID ? lastExternalApplication : front
+        let keyWindow = NSApp.keyWindow
+        clipboardReturnWindow = keyWindow === window ? nil : keyWindow
+        window?.orderOut(nil)
         NSApp.activate(ignoringOtherApps: true)
         if section == .tools { clipboard.prepareForTools() }
         else { clipboard.prepareForDisplay() }
@@ -453,6 +460,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         }
         clipboardWindow?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+        window?.orderOut(nil)
     }
 
     private func copySelectedClipboardEntry() {
@@ -475,6 +483,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
 
     private func closeClipboardWindow() {
         clipboardWindow?.orderOut(nil)
+        window?.orderOut(nil)
         if let app = clipboardReturnApplication, app.processIdentifier != ProcessInfo.processInfo.processIdentifier {
             app.activate(options: [])
         } else { clipboardReturnWindow?.makeKeyAndOrderFront(nil) }
@@ -833,10 +842,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         captureController?.cancel()
         let wasEditorVisible = editorWindow?.isVisible == true
         let wasOverlayVisible = overlayWindow?.isVisible == true
-        let wasSettingsVisible = window?.isVisible == true
         let restoreWindows = { [weak self] in
             guard let self else { return }
-            if wasSettingsVisible { self.window?.makeKeyAndOrderFront(nil) }
             if wasEditorVisible { self.editorWindow?.makeKeyAndOrderFront(nil) }
             if wasOverlayVisible { self.overlayWindow?.makeKeyAndOrderFront(nil) }
         }
@@ -934,9 +941,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     private func beginRecording(_ format: RecordingFormat, region: CGRect? = nil) {
         guard recordingSession == nil, recordingClipboardTask == nil else { return }
         captureController?.cancel()
+        let wasEditorVisible = editorWindow?.isVisible == true
+        let wasOverlayVisible = overlayWindow?.isVisible == true
         let restore = { [weak self] in
             guard let self else { return }
-            if self.model.image != nil { self.showEditorWindowInternal() } else { self.showWorkspace() }
+            if wasEditorVisible { self.editorWindow?.makeKeyAndOrderFront(nil) }
+            if wasOverlayVisible { self.overlayWindow?.makeKeyAndOrderFront(nil) }
         }
         model.activity = "拖动选择\(format.title)录制区域 · Esc 取消"
         window?.orderOut(nil)
@@ -989,9 +999,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         captureController?.cancel()
         if model.draftImage != nil { model.discardDraft() }
         model.activity = "选择长截图区域"
+        let wasEditorVisible = editorWindow?.isVisible == true
+        let wasOverlayVisible = overlayWindow?.isVisible == true
         let restore = { [weak self] in
             guard let self else { return }
-            if self.model.image != nil { self.showFloatingEditor() } else { self.showWorkspace() }
+            if wasEditorVisible { self.editorWindow?.makeKeyAndOrderFront(nil) }
+            if wasOverlayVisible { self.overlayWindow?.makeKeyAndOrderFront(nil) }
         }
         window?.orderOut(nil)
         editorWindow?.orderOut(nil)
