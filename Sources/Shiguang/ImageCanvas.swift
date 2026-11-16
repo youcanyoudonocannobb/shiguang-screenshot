@@ -347,7 +347,7 @@ final class NativeImageCanvas: NSView, NSTextFieldDelegate {
         let rect = imageRect
         textAnchor = normalized(point)
         textColor = color
-        textFraction = max(18 / max(1, rect.height), 0.035)
+        textFraction = max(18 / max(CGFloat(1), rect.height), 0.035)
         let field = NSTextField(frame: CGRect(x: point.x, y: point.y,
                                               width: max(50, min(360, bounds.maxX - point.x)),
                                               height: max(30, rect.height * textFraction + 10)))

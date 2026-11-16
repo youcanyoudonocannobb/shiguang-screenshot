@@ -264,11 +264,7 @@ struct CaptureEditorView: View {
               job.provider == .apple else { configuration = nil; return }
         let source = job.source == "auto" ? nil : Locale.Language(identifier: job.source)
         let target = Locale.Language(identifier: job.target)
-        if #available(macOS 26.4, *) {
-            configuration = TranslationSession.Configuration(source: source, target: target, preferredStrategy: .lowLatency)
-        } else {
-            configuration = TranslationSession.Configuration(source: source, target: target)
-        }
+        configuration = TranslationSession.Configuration(source: source, target: target)
     }
 }
 
