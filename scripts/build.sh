@@ -5,12 +5,20 @@ PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 BUILD_DIR="${BUILD_DIR:-$PROJECT_DIR/.build}"
 OUTPUT_DIR="${OUTPUT_DIR:-$PROJECT_DIR/dist}"
 FINAL_APP="$OUTPUT_DIR/PawShot.app"
-# Fail before replacing a build if the persistent certificate is unavailable.
-python3 "$PROJECT_DIR/scripts/local-signing.py" check
+SIGN_IDENTITY="${SHIGUANG_SIGN_IDENTITY:-}"
+# Local builds keep one persistent certificate; release builds sign with Developer ID.
+if [[ -z "$SIGN_IDENTITY" ]]; then
+    python3 "$PROJECT_DIR/scripts/local-signing.py" check
+fi
 mkdir -p "$BUILD_DIR" "$OUTPUT_DIR"
 export CLANG_MODULE_CACHE_PATH="$BUILD_DIR/ModuleCache"
 
 BUILD_OPTIONS=(--package-path "$PROJECT_DIR" --scratch-path "$BUILD_DIR" --disable-sandbox -c release)
+# Optional extra arguments, for example "--arch arm64 --arch x86_64" for a universal build.
+if [[ -n "${SWIFT_BUILD_ARGS:-}" ]]; then
+    read -r -a EXTRA_BUILD_ARGS <<< "$SWIFT_BUILD_ARGS"
+    BUILD_OPTIONS+=("${EXTRA_BUILD_ARGS[@]}")
+fi
 # Swift 6.4 defaults to Swift Build, which requires extra Xcode components on some Macs.
 if swift build --help | grep -q 'swiftbuild'; then
     BUILD_OPTIONS+=(--build-system native)
@@ -30,7 +38,15 @@ CLANG_MODULE_CACHE_PATH="$CLANG_MODULE_CACHE_PATH" swiftc \
     "$PROJECT_DIR/Sources/Shiguang/BrandArtwork.swift" "$ICON_BUILD_DIR/main.swift" \
     -o "$ICON_RENDERER"
 "$ICON_RENDERER" "$BUILD_DIR/AppIcon.iconset" "$APP/Contents/Resources/AppIcon.icns"
-python3 "$PROJECT_DIR/scripts/local-signing.py" sign "$APP"
+if [[ "$SIGN_IDENTITY" == "-" ]]; then
+    # CI fallback without certificates: ad-hoc signing keeps the bundle launchable locally.
+    codesign --force --sign - --identifier dev.shiguang.screenshot "$APP"
+elif [[ -n "$SIGN_IDENTITY" ]]; then
+    codesign --force --options runtime --timestamp \
+        --sign "$SIGN_IDENTITY" --identifier dev.shiguang.screenshot "$APP"
+else
+    python3 "$PROJECT_DIR/scripts/local-signing.py" sign "$APP"
+fi
 codesign --verify --strict "$APP"
 # Publish only after signing and verification; preserve the previous app on failure.
 python3 - "$APP" "$FINAL_APP" <<'PY'

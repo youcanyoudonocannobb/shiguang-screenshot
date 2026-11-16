@@ -1,0 +1,154 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag, for example v1.5.3"
+        required: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    # Apple Silicon runner: matches the locally tested build and keeps the DMG small.
+    runs-on: macos-15
+    env:
+      SWIFT_BUILD_ARGS: "--arch arm64"
+      OUTPUT_DIR: ${{ github.workspace }}/dist
+      KEYCHAIN_PATH: ${{ runner.temp }}/build.keychain-db
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve release tag
+        id: meta
+        run: |
+          set -euo pipefail
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            TAG="${{ inputs.tag }}"
+          else
+            TAG="${GITHUB_REF_NAME}"
+          fi
+          VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' Info.plist)"
+          if [[ "$TAG" != "v$VERSION" ]]; then
+            echo "Tag $TAG does not match Info.plist version $VERSION" >&2
+            exit 1
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Install Developer ID certificate
+        id: signing
+        env:
+          CERTIFICATE_P12: ${{ secrets.APPLE_CERTIFICATE_P12 }}
+          CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${CERTIFICATE_P12:-}" || -z "${SIGNING_IDENTITY:-}" ]]; then
+            echo "No Developer ID secrets: falling back to ad-hoc signing."
+            echo "identity=-" >> "$GITHUB_OUTPUT"
+            echo "notarize=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "$CERTIFICATE_P12" | base64 --decode > "$RUNNER_TEMP/certificate.p12"
+          KEYCHAIN_PASSWORD="$(uuidgen)"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 900 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$RUNNER_TEMP/certificate.p12" -k "$KEYCHAIN_PATH" \
+            -P "$CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH" >/dev/null
+          EXISTING_KEYCHAINS=()
+          while IFS= read -r line; do
+            line="${line#"${line%%[![:space:]]*}"}"
+            line="${line%"${line##*[![:space:]]}"}"
+            if [[ -n "$line" ]]; then
+              EXISTING_KEYCHAINS+=("${line//\"/}")
+            fi
+          done < <(security list-keychains -d user)
+          security list-keychains -d user -s "$KEYCHAIN_PATH" "${EXISTING_KEYCHAINS[@]}"
+          rm -f "$RUNNER_TEMP/certificate.p12"
+          echo "identity=$SIGNING_IDENTITY" >> "$GITHUB_OUTPUT"
+          if [[ -n "${APPLE_ID:-}" && -n "${APPLE_TEAM_ID:-}" && -n "${APPLE_APP_SPECIFIC_PASSWORD:-}" ]]; then
+            echo "notarize=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "notarize=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build, sign and package
+        env:
+          SHIGUANG_SIGN_IDENTITY: ${{ steps.signing.outputs.identity }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+        run: |
+          set -euo pipefail
+          NOTARIZE_FLAG=""
+          if [[ "${{ steps.signing.outputs.notarize }}" == "true" ]]; then
+            NOTARIZE_FLAG="--notarize"
+          fi
+          bash scripts/package-release.sh $NOTARIZE_FLAG
+
+      - name: Verify artifact
+        env:
+          SHIGUANG_SIGN_IDENTITY: ${{ steps.signing.outputs.identity }}
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.meta.outputs.version }}"
+          DMG="$OUTPUT_DIR/PawShot-${VERSION}-arm64.dmg"
+          test -f "$DMG"
+          MOUNT_POINT="$(mktemp -d)"
+          hdiutil attach "$DMG" -mountpoint "$MOUNT_POINT" -nobrowse -readonly >/dev/null
+          test -d "$MOUNT_POINT/PawShot.app"
+          test -L "$MOUNT_POINT/Applications"
+          codesign --verify --strict "$MOUNT_POINT/PawShot.app"
+          hdiutil detach "$MOUNT_POINT" >/dev/null
+          rm -rf "$MOUNT_POINT"
+          cd "$OUTPUT_DIR"
+          shasum -a 256 -c "PawShot-${VERSION}-arm64.sha256"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: PawShot-${{ steps.meta.outputs.version }}
+          path: |
+            dist/PawShot-*.dmg
+            dist/PawShot-*.zip
+            dist/PawShot-*.sha256
+          if-no-files-found: error
+
+      - name: Publish GitHub release
+        if: steps.meta.outputs.tag != ''
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.meta.outputs.tag }}
+          name: PawShot ${{ steps.meta.outputs.version }}
+          generate_release_notes: true
+          files: |
+            dist/PawShot-*.dmg
+            dist/PawShot-*.zip
+            dist/PawShot-*.sha256
+          body: |
+            ## 安装
+
+            1. 下载 `PawShot-${{ steps.meta.outputs.version }}-arm64.dmg`
+            2. 打开 DMG，把 PawShot 拖到「应用程序」
+            3. 首次启动授予「屏幕录制」权限，划词翻译与自动长截图另需「辅助功能」
+
+            校验下载：`shasum -a 256 -c PawShot-${{ steps.meta.outputs.version }}-arm64.sha256`
+
+            要求 macOS 15 或以上，Apple Silicon。

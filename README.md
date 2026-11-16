@@ -80,9 +80,59 @@ Esc 在框选时取消截图或录制区域选择；待确认编辑中会取消�
 3. 如果系统拒绝访问，应用会显示授权引导。在「隐私与安全性 → 屏幕与系统音频录制」（部分系统称「录屏与系统录音」）中为当前版本授权。若原开关已打开但仍被拒绝，请重新授权；必要时移除旧条目并添加当前路径的应用。可通过「重启 PawShot」完成退出并重新打开。
 4. 识别结果可手工修正，选择目标语言并点击「翻译文字」。首次使用时，Apple 可能提示下载对应语言包；请按系统界面完成。
 
-应用使用固定的本机自签名证书，同一台 Mac 的后续构建复用同一身份。尚未使用 Developer ID 签名和公证，不能视为可直接公开发行的正式安装包。换一台 Mac 分发时需要完成正式签名、公证及兼容性验证。
+本机日常构建使用固定的自签名证书，同一台 Mac 的后续构建复用同一身份。公开发布走 GitHub Releases，由 CI 使用 Developer ID 签名并公证；见下方「下载与发布」。
 
 固定身份由应用标识与证书指纹共同约束，不再随可执行文件内容变化。不要删除或重新生成签名身份；从旧临时签名迁移、替换证书或系统自身策略变化，仍可能需要重新确认屏幕权限。设置中的「检查权限」只读取状态，不触发授权；旧接口的预检结果不会提前阻止截图，实际访问结果以 ScreenCaptureKit 为准。
+
+## 下载与发布
+
+下载地址：[github.com/youcanyoudonocannobb/shiguang-screenshot/releases](https://github.com/youcanyoudonocannobb/shiguang-screenshot/releases)。
+
+每个版本附带三个文件，DMG 供普通安装使用：
+
+- `PawShot-<版本>-arm64.dmg`：打开后把 PawShot 拖到 Applications。
+- `PawShot-<版本>-arm64.zip`：适合命令行或脚本安装。
+- `PawShot-<版本>-arm64.sha256`：校验下载，`shasum -a 256 -c PawShot-*.sha256`。
+
+需要 macOS 15 或以上与 Apple Silicon。首次启动请在「系统设置 → 隐私与安全性 → 屏幕与系统音频录制」授权；划词翻译和自动长截图还需要「辅助功能」。
+
+### 本地打包
+
+```bash
+bash scripts/package-release.sh            # 构建并生成 DMG/ZIP/校验文件
+bash scripts/package-release.sh --skip-build
+bash scripts/package-release.sh --notarize # 需 Apple ID 与公证密码环境变量
+```
+
+产物在 `dist/`，DMG 内含 `PawShot.app` 和指向 `/Applications` 的链接。使用 Developer ID 构建时传入证书名称即可：
+
+```bash
+SHIGUANG_SIGN_IDENTITY="Developer ID Application: Name (TEAMID)" bash scripts/package-release.sh
+```
+
+`SWIFT_BUILD_ARGS` 可追加 Swift 构建参数，例如 `"--arch arm64 --arch x86_64"` 生成通用二进制（打包脚本按实际架构命名文件）。
+
+### 自动发布
+
+`.github/workflows/release.yml` 在推送 `v*` 标签时构建并发布，也可在 Actions 页面手动运行并填入标签。标签必须与 `Info.plist` 的 `CFBundleShortVersionString` 一致，例如 `v1.5.3`。
+
+```bash
+git tag v1.5.3
+git push origin v1.5.3
+```
+
+仓库 Secrets 可配置以下值；缺少证书时 CI 会退回临时签名，产物仍可用于本机测试，但别人下载后会被 Gatekeeper 拦截：
+
+| Secret | 说明 |
+| --- | --- |
+| `APPLE_CERTIFICATE_P12` | Developer ID Application 证书导出的 p12，Base64 编码 |
+| `APPLE_CERTIFICATE_PASSWORD` | p12 导出密码 |
+| `APPLE_SIGNING_IDENTITY` | 证书全名，例如 `Developer ID Application: Name (TEAMID)` |
+| `APPLE_ID` | 公证使用的 Apple ID |
+| `APPLE_TEAM_ID` | 开发者 Team ID |
+| `APPLE_APP_SPECIFIC_PASSWORD` | App 专用密码，不是账号密码 |
+
+有 Developer ID 证书时 CI 会启用 hardened runtime 并签名；三项公证凭据齐全时再提交公证并 stapler。没有 Apple Developer 账号就只能自签名，用户需右键「打开」或在终端执行 `xattr -dr com.apple.quarantine /Applications/PawShot.app` 才能绕过拦截，不建议长期这样分发。
 
 ## 已实现
 
