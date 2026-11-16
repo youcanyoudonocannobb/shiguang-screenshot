@@ -415,7 +415,7 @@ struct QuickToolView: View {
             guard serial == translationSerial, requestedChinese == value else { return }
             let source = Locale.Language(identifier: "zh-Hans")
             let target = Locale.Language(identifier: "en")
-            let configuration = TranslationSession.Configuration(source: source, target: target)
+            var configuration = TranslationSession.Configuration(source: source, target: target)
             // Source and target stay zh-Hans -> en for every lookup. Invalidate the
             // configuration so SwiftUI starts a fresh task for each new phrase.
             configuration.invalidate()

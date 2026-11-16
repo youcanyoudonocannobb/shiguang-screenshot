@@ -152,3 +152,5 @@ jobs:
             校验下载：`shasum -a 256 -c PawShot-${{ steps.meta.outputs.version }}-arm64.sha256`
 
             要求 macOS 15 或以上，Apple Silicon。
+
+            首次打开若提示“无法验证开发者”，请右键应用选「打开」；仓库未配置 Apple Developer 证书时，CI 产物为临时签名，未经公证。
