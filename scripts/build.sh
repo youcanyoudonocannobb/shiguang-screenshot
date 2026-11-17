@@ -40,7 +40,10 @@ CLANG_MODULE_CACHE_PATH="$CLANG_MODULE_CACHE_PATH" swiftc \
 "$ICON_RENDERER" "$BUILD_DIR/AppIcon.iconset" "$APP/Contents/Resources/AppIcon.icns"
 if [[ "$SIGN_IDENTITY" == "-" ]]; then
     # CI fallback without certificates: ad-hoc signing keeps the bundle launchable locally.
-    codesign --force --sign - --identifier dev.shiguang.screenshot "$APP"
+    # Pin a stable designated requirement to the bundle identifier so TCC
+    # permissions (Screen Recording, Accessibility) survive local rebuilds.
+    codesign --force --sign - --identifier dev.shiguang.screenshot \
+        --requirements '=designated => identifier "dev.shiguang.screenshot"' "$APP"
 elif [[ -n "$SIGN_IDENTITY" ]]; then
     codesign --force --options runtime --timestamp \
         --sign "$SIGN_IDENTITY" --identifier dev.shiguang.screenshot "$APP"

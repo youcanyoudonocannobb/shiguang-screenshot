@@ -17,7 +17,7 @@ import tempfile
 IDENTIFIER = "dev.shiguang.screenshot"
 SIGNING_HOME = Path(os.environ.get(
     "SHIGUANG_SIGNING_HOME",
-    str(Path.home() / "Library/Application Support/ShiguangSigning"),
+    str(Path.home() / "Library/Application Support/PawShotSigning"),
 )).expanduser().resolve()
 MANIFEST = SIGNING_HOME / "identity.json"
 KEYCHAIN = SIGNING_HOME / "signing.keychain-db"

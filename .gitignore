@@ -1,5 +1,6 @@
 .build/
 .swiftpm/
+.signing*/
 dist/
 work/ScrollFixture.app/
 .DS_Store

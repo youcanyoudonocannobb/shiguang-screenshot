@@ -109,6 +109,9 @@ final class AppModel: ObservableObject {
     @Published var activeEditor: String = "editor"
     @Published var editorMode: EditorMode = .annotation
     @Published var draftImage: NSImage?
+    @Published var ocrMode: OCRMode = .text
+    @Published var ocrTable: OCRTable?
+    @Published var ocrFormula = ""
     var finishPendingAnnotation: (() -> Void)?
     private(set) var captureRect: CGRect?
     @Published var autoOCR: Bool {
@@ -162,6 +165,7 @@ final class AppModel: ObservableObject {
     var showEditor: (() -> Void)?
     var showFloatingEditor: (() -> Void)?
     var hideEditor: (() -> Void)?
+    var showToolbox: (() -> Void)?
     var showCaptureOverlay: ((NSImage, NSRect) -> Void)?
     var beginSelection: ((Bool) -> Void)?
     var closeCaptureOverlay: (() -> Void)?
@@ -574,6 +578,27 @@ final class AppModel: ObservableObject {
         notice = "已取消本次截图"
     }
 
+    func clearDocument() {
+        guard !isBusy else { return }
+        if isRecognizing { cancelRecognition() }
+        if translationJob != nil { cancelTranslation() }
+        persistCurrent()
+        draftImage = nil
+        captureRect = nil
+        draftTitle = ""
+        image = nil
+        selectedID = nil
+        sourceText = ""
+        translatedText = ""
+        ocrTable = nil
+        ocrFormula = ""
+        marks = []
+        undoMarks = []
+        redoMarks = []
+        errorMessage = nil
+        notice = "已清空当前图片"
+    }
+
     func captureCancelled() {
         activity = nil
         errorMessage = nil
@@ -648,7 +673,7 @@ final class AppModel: ObservableObject {
         guard !isBusy, image != nil else { return }
         finishPendingAnnotation?()
         presentTextWorkspace(.recognition)
-        recognize()
+        runOCR(mode: ocrMode, thenTranslate: false)
     }
 
     private func presentTextWorkspace(_ mode: EditorMode) {
@@ -727,7 +752,13 @@ final class AppModel: ObservableObject {
         activity = nil
         if ScreenCaptureService.isPermissionError(error) {
             screenPermission.captureDenied()
-            presentPermissionHelp()
+            // Do not throw a blocking authorization sheet on every transient
+            // ScreenCaptureKit failure. The system switch may already be on;
+            // show the settings window with a retry hint instead.
+            errorMessage = screenPermission.refresh()
+                ? "屏幕访问暂时不可用，请再试一次。"
+                : "屏幕访问尚未生效。请在「系统设置 → 隐私与安全性 → 屏幕与系统音频录制」中确认 PawShot 已开启，然后重启 PawShot。"
+            showWindow?()
         } else {
             errorMessage = "截图失败：\(error.localizedDescription)"
             showWindow?()
@@ -735,24 +766,59 @@ final class AppModel: ObservableObject {
     }
 
     func recognize(thenTranslate: Bool = false) {
+        runOCR(mode: .text, thenTranslate: thenTranslate)
+    }
+
+    func recognizeCurrentMode() {
+        runOCR(mode: ocrMode, thenTranslate: false)
+    }
+
+    func switchOCRMode(_ mode: OCRMode) {
+        guard ocrMode != mode else { return }
+        ocrMode = mode
+        guard image != nil, !isBusy else { return }
+        runOCR(mode: mode, thenTranslate: false)
+    }
+
+    private func runOCR(mode: OCRMode, thenTranslate: Bool) {
         guard !isBusy, let cg = renderedImage()?.cgImageValue else { return }
         let id = UUID()
         ocrID = id
-        activity = "正在设备上识别文字…"
+        ocrTable = nil
+        ocrFormula = ""
+        activity = mode == .text ? "正在设备上识别文字…" :
+            (mode == .table ? "正在识别表格结构…" : "正在识别公式…")
         ocrTask = Task {
             do {
-                let result = try await recognizeImage(cg)
+                let result: String
+                switch mode {
+                case .text:
+                    result = try await recognizeImage(cg)
+                case .table:
+                    let table = try await OCRTools.table(in: cg)
+                    guard ocrID == id else { return }
+                    ocrTable = table
+                    result = table.markdown
+                case .formula:
+                    let latex = try await OCRTools.formula(in: cg)
+                    guard ocrID == id else { return }
+                    ocrFormula = latex
+                    result = latex
+                }
                 guard ocrID == id else { return }
                 ocrWatchdog?.cancel()
                 ocrWatchdog = nil
                 ocrTask = nil
                 ocrID = nil
                 hasCompletedOCR = true
-                sourceText = result
-                translatedText = ""
+                if mode == .text { sourceText = result }
+                if mode == .table, result.isEmpty { ocrTable = nil }
+                if mode == .formula { ocrFormula = result }
                 activity = nil
-                notice = result.isEmpty ? "没有识别到文字。可以换一张更清晰的图片，或直接输入原文。" : "识别完成 · \(result.count) 个字符"
-                persistCurrent()
+                notice = result.isEmpty
+                    ? "没有识别到内容。可以换一张更清晰的图片，或直接输入原文。"
+                    : "识别完成 · \(result.count) 个字符"
+                if mode == .text { persistCurrent() }
                 if thenTranslate && !result.isEmpty { requestTranslation() }
             } catch {
                 guard ocrID == id else { return }
@@ -761,24 +827,25 @@ final class AppModel: ObservableObject {
                 ocrTask = nil
                 ocrID = nil
                 activity = nil
-                errorMessage = "文字识别失败：\(error.localizedDescription)"
+                errorMessage = "\(mode.title)失败：\(error.localizedDescription)"
             }
         }
         let isInitialRecognition = !hasCompletedOCR
         let timeout = isInitialRecognition ? ocrTiming.initialTimeout : ocrTiming.subsequentTimeout
         let deadline = ContinuousClock.now.advanced(by: timeout)
+        let modeTitle = mode.title
         ocrWatchdog = Task {
             do {
                 if isInitialRecognition && ocrTiming.preparationNoticeDelay < timeout {
                     try await Task.sleep(for: ocrTiming.preparationNoticeDelay)
                     guard ocrID == id else { return }
-                    activity = "首次文字识别仍在进行，请稍候；可取消或开始新截图。"
+                    activity = "首次\(modeTitle)仍在进行，请稍候；可取消或开始新截图。"
                 }
                 try await Task.sleep(until: deadline, clock: .continuous)
             } catch { return }
             guard ocrID == id else { return }
             cancelRecognition()
-            errorMessage = "文字识别耗时过长，已停止等待。可以重试或换一张较小的图片，也可以直接粘贴原文进行翻译。"
+            errorMessage = "\(modeTitle)耗时过长，已停止等待。可以重试或换一张较小的图片，也可以直接粘贴原文进行翻译。"
         }
     }
 

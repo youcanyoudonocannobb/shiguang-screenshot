@@ -27,7 +27,7 @@ enum ShiguangSettingsPage: String, CaseIterable, Identifiable {
         case .screenshot: return "截图"
         case .translation: return "翻译"
         case .clipboard: return "剪贴板"
-        case .quickInput: return "快捷输入"
+        case .quickInput: return "启动台"
         case .shortcuts: return "快捷键"
         case .history: return "历史记录"
         case .privacy: return "隐私与存储"
@@ -41,7 +41,7 @@ enum ShiguangSettingsPage: String, CaseIterable, Identifiable {
         case .screenshot: return "截图流程、识别和历史记录"
         case .translation: return "翻译引擎、默认语言和 AI 接口"
         case .clipboard: return "系统剪贴板历史、快捷键和本机保存"
-        case .quickInput: return "快捷键、变量命名和随机数据用法"
+        case .quickInput: return "搜索应用与文件，快捷生成变量名和测试数据"
         case .shortcuts: return "区域截图、截图翻译和剪贴板快捷键"
         case .history: return "查看最近截图、识别文字和译文"
         case .privacy: return "屏幕访问、本机处理和本地数据"
@@ -78,7 +78,7 @@ enum ShiguangSettingsPage: String, CaseIterable, Identifiable {
             return ["历史", "系统剪贴板", "复制", "监听", "记录", "图片", "GIF", "视频", "文件",
                     "100", "变量名", "驼峰", "随机", "姓名", "邮箱", "地址", "IP", "身份证"]
         case .quickInput:
-            return ["快捷输入", "启动台", "启动器", "快捷键", "热键"]
+            return ["启动台", "启动器", "快捷输入", "搜索", "应用", "文件", "快捷键", "热键"]
         case .shortcuts:
             return ["快捷键", "热键", "按键", "区域截图", "截图并翻译", "剪贴板历史",
                     "翻译剪贴板", "划词翻译", "变量名"]
@@ -407,12 +407,15 @@ private struct SettingsDetailView: View {
                             ? "使用 Apple 系统翻译；首次使用某个语言对时，可能需要下载语言包。"
                             : "翻译内容会发送到你配置的 AI 服务。") {
                 SettingsRow("翻译引擎") {
-                    Picker("翻译引擎", selection: $model.translationProvider) {
-                        ForEach(TranslationProvider.allCases) { provider in
-                            Text(provider.title).tag(provider)
+                    HStack(spacing: 0) {
+                        Spacer(minLength: 0)
+                        Picker("翻译引擎", selection: $model.translationProvider) {
+                            ForEach(TranslationProvider.allCases) { provider in
+                                Text(provider.title).tag(provider)
+                            }
                         }
+                        .labelsHidden().pickerStyle(.segmented).frame(width: 230)
                     }
-                    .labelsHidden().pickerStyle(.segmented).frame(width: 230)
                 }
             }
 
@@ -422,17 +425,20 @@ private struct SettingsDetailView: View {
                     footer: "\(model.aiAPI.detail)。每个协议分别保存 API Key，且仅写入 macOS 钥匙串；本机地址可省略 Key。测试连接会发送一次 Hello 翻译请求。"
                 ) {
                     SettingsFieldRow("协议") {
-                        Picker("AI 协议", selection: Binding(
-                            get: { model.aiAPI },
-                            set: { model.selectAIAPI($0) }
-                        )) {
-                            ForEach(AITranslationAPI.allCases) { api in
-                                Text(api.title).tag(api)
+                        HStack(spacing: 0) {
+                            Picker("AI 协议", selection: Binding(
+                                get: { model.aiAPI },
+                                set: { model.selectAIAPI($0) }
+                            )) {
+                                ForEach(AITranslationAPI.allCases) { api in
+                                    Text(api.title).tag(api)
+                                }
                             }
+                            .labelsHidden()
+                            .pickerStyle(.menu)
+                            .fixedSize()
+                            Spacer(minLength: 0)
                         }
-                        .labelsHidden()
-                        .pickerStyle(.menu)
-                        .frame(width: 190)
                     }
                     SettingsSeparator()
                     SettingsFieldRow("接口地址") {
@@ -468,13 +474,13 @@ private struct SettingsDetailView: View {
                     }
                     SettingsSeparator()
                     HStack(spacing: 10) {
-                        Button("测试连接") { model.testAITranslation() }.disabled(model.aiTesting)
-                        if model.aiTesting { ProgressView().controlSize(.small) }
+                        Spacer(minLength: 0)
                         if let message = model.aiTestMessage {
                             Text(message).font(.system(size: 11)).foregroundStyle(Palette.muted)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
-                        Spacer(minLength: 0)
+                        if model.aiTesting { ProgressView().controlSize(.small) }
+                        Button("测试连接") { model.testAITranslation() }.disabled(model.aiTesting)
                     }
                     .controlSize(.small).padding(.horizontal, 16).padding(.vertical, 12)
                 }
@@ -482,11 +488,14 @@ private struct SettingsDetailView: View {
 
             SettingsSection("语言", footer: "自动识别原文：中文默认译英语，其他语言默认译简体中文。") {
                 SettingsRow("默认目标语言") {
-                    Picker("目标语言", selection: Binding(get: { model.targetLanguage },
-                                                        set: { model.languageEdited(target: $0) })) {
-                        ForEach(LanguageChoice.targets) { Text($0.name).tag($0.id) }
+                    HStack(spacing: 0) {
+                        Spacer(minLength: 0)
+                        Picker("目标语言", selection: Binding(get: { model.targetLanguage },
+                                                            set: { model.languageEdited(target: $0) })) {
+                            ForEach(LanguageChoice.targets) { Text($0.name).tag($0.id) }
+                        }
+                        .labelsHidden().frame(width: 150)
                     }
-                    .labelsHidden().frame(width: 150)
                 }
             }
             SettingsSection("快捷入口") {
@@ -520,11 +529,18 @@ private struct SettingsDetailView: View {
     private var quickInputContent: some View {
         Group {
             SettingsSection("全局快捷键", footer: "点击输入框后直接按下组合键，也可以手动输入组合键。按 Esc 取消录入。") {
-                HotkeyRow(title: "快捷输入", settings: $model.variableNamingHotkey,
+                HotkeyRow(title: "启动台", settings: $model.variableNamingHotkey,
                           onRecordingChanged: model.setHotkeyCaptureActive)
             }
 
-            SettingsSection("使用方法", footer: "↑ / ↓ 选择结果，Return 复制并关闭，Esc 关闭面板。") {
+            SettingsSection("使用方法", footer: "↑ / ↓ 选择结果，Return 打开应用/文件或复制结果，Esc 关闭面板。") {
+                QuickInputGuideRow(
+                    symbol: "magnifyingglass",
+                    title: "搜索应用与文件",
+                    detail: "输入应用名即可打开；也可以搜索本机文件并用访达显示。",
+                    example: "Safari / 访达 / 项目文档"
+                )
+                SettingsSeparator()
                 QuickInputGuideRow(
                     symbol: "pawprint.fill",
                     title: "直接生成变量名",
@@ -545,6 +561,12 @@ private struct SettingsDetailView: View {
                     detail: "输入姓名、邮箱、地址、手机号、IP、身份证、UUID 或密码即可生成。",
                     example: "姓名 / 邮箱 / 地址 / IP / UUID / 密码"
                 )
+            }
+
+            SettingsSection("工具箱", footer: "JSON 格式化、字段排序、转义；Base64 / URL / Unicode / Hex 编解码。") {
+                SettingsActionRow(title: "打开工具箱", symbol: "wrench.and.screwdriver") {
+                    model.showToolbox?()
+                }
             }
         }
     }
@@ -568,7 +590,7 @@ private struct SettingsDetailView: View {
                     HotkeyRow(title: "划词翻译", settings: $model.selectionTranslateHotkey,
                               onRecordingChanged: model.setHotkeyCaptureActive)
                     SettingsSeparator()
-                    HotkeyRow(title: "快捷输入工具", settings: $model.variableNamingHotkey,
+                    HotkeyRow(title: "启动台", settings: $model.variableNamingHotkey,
                               onRecordingChanged: model.setHotkeyCaptureActive)
                 }
             }

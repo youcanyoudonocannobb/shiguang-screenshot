@@ -60,6 +60,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     private weak var clipboardReturnWindow: NSWindow?
     private var quickToolWindow: NSPanel?
     private var quickToolReturnApplication: NSRunningApplication?
+    private var toolboxWindow: NSPanel?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let ownPID = ProcessInfo.processInfo.processIdentifier
@@ -102,6 +103,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         model.showWorkspace = { [weak self] in self?.showWorkspace() }
         model.showFloatingEditor = { [weak self] in self?.showFloatingEditor() }
         model.hideEditor = { [weak self] in self?.hideEditorWindow() }
+        model.showToolbox = { [weak self] in self?.showToolboxWindow() }
         model.beginSelection = { [weak self] translate in self?.beginSelection(translate: translate) }
         model.showCaptureOverlay = { [weak self] image, rect in self?.showCaptureOverlay(image: image, rect: rect) }
         model.closeCaptureOverlay = { [weak self] in self?.overlayWindow?.orderOut(nil) }
@@ -195,7 +197,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         if captureController?.isActive == true { return false }
-        let activeWindows: [NSWindow?] = [quickToolWindow, clipboardWindow, recordingWindow, scrollPanel, overlayWindow, editorWindow]
+        let activeWindows: [NSWindow?] = [quickToolWindow, toolboxWindow, clipboardWindow, recordingWindow, scrollPanel, overlayWindow, editorWindow]
         if let active = activeWindows.compactMap({ $0 }).first(where: { $0.isVisible }) {
             active.makeKeyAndOrderFront(nil)
             return false
@@ -308,7 +310,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
                 backing: .buffered,
                 defer: false
             )
-            created.title = "PawShot · 快捷输入"
+            created.title = "PawShot · 启动台"
             created.titleVisibility = .hidden
             created.titlebarAppearsTransparent = true
             created.isReleasedWhenClosed = false
@@ -354,6 +356,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         panel.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
         window?.orderOut(nil)
+    }
+
+    @objc private func showToolboxWindow() {
+        window?.orderOut(nil)
+        let panel: NSPanel
+        if let existing = toolboxWindow {
+            panel = existing
+        } else {
+            let created = NSPanel(
+                contentRect: NSRect(x: 0, y: 0, width: 900, height: 620),
+                styleMask: [.titled, .closable, .miniaturizable, .resizable, .utilityWindow],
+                backing: .buffered,
+                defer: false
+            )
+            created.title = "PawShot · 工具箱"
+            created.titleVisibility = .hidden
+            created.titlebarAppearsTransparent = true
+            created.isReleasedWhenClosed = false
+            created.isMovableByWindowBackground = true
+            created.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+            created.backgroundColor = NSColor(hex: "F4F7FA")
+            created.minSize = NSSize(width: 760, height: 520)
+            created.contentView = NSHostingView(rootView: ToolboxView())
+            created.center()
+            toolboxWindow = created
+            panel = created
+        }
+        panel.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
     }
 
     private func positionQuickToolWindowAtTop(_ panel: NSPanel) {
@@ -564,9 +595,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         let selectionTranslate = menuItem("划词翻译", action: #selector(translateSelection))
         selectionTranslateMenuItem = selectionTranslate
         file.addItem(selectionTranslate)
-        let variableName = menuItem("快捷输入工具", action: #selector(showQuickToolWindow))
+        let variableName = menuItem("启动台", action: #selector(showQuickToolWindow))
         variableNameMenuItem = variableName
         file.addItem(variableName)
+        file.addItem(menuItem("工具箱", action: #selector(showToolboxWindow)))
         let clipboardItem = menuItem("剪贴板历史", action: #selector(showClipboardWindow))
         clipboardMenuItem = clipboardItem
         file.addItem(clipboardItem)
@@ -640,7 +672,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
                               action: #selector(translateClipboard), symbol: "character.book.closed"))
         menu.addItem(menuItem("划词翻译                  \(model.selectionTranslateHotkey.symbol)",
                               action: #selector(translateSelection), symbol: "text.cursor"))
-        menu.addItem(menuItem("快捷输入工具            \(model.variableNamingHotkey.symbol)",
+        menu.addItem(menuItem("启动台                  \(model.variableNamingHotkey.symbol)",
                               action: #selector(showQuickToolWindow), symbol: "textformat.abc"))
         menu.addItem(.separator())
         menu.addItem(menuItem("录制 MP4 视频…", action: #selector(recordVideo), symbol: "record.circle"))
@@ -652,6 +684,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         menu.addItem(menuItem("快速编辑", action: #selector(showEditorWindow), symbol: "macwindow"))
         menu.addItem(menuItem("导入图片…", action: #selector(importImage), symbol: "photo.badge.plus"))
         menu.addItem(menuItem("文字翻译", action: #selector(newText), symbol: "text.bubble"))
+        menu.addItem(menuItem("工具箱", action: #selector(showToolboxWindow), symbol: "wrench.and.screwdriver"))
         menu.addItem(.separator())
         menu.addItem(menuItem("偏好设置…", action: #selector(preferences), symbol: "gearshape"))
         menu.addItem(.separator())
@@ -822,11 +855,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         if text { window?.orderOut(nil) }
         editorWindow.title = model.editorMode == .recognition ? "PawShot · 文字识别" :
             (text ? "PawShot · 翻译" : "PawShot · 快速编辑")
-        editorWindow.minSize = text ? NSSize(width: model.editorMode == .recognition ? 500 : 700,
-                                             height: model.editorMode == .recognition ? 340 : 440) :
+        editorWindow.minSize = text ? NSSize(width: model.editorMode == .recognition ? 760 : 700,
+                                             height: model.editorMode == .recognition ? 500 : 440) :
             NSSize(width: AnnotationToolbar.minimumWidth, height: 400)
-        editorWindow.setContentSize(text ? NSSize(width: model.editorMode == .recognition ? 600 : 860,
-                                                  height: model.editorMode == .recognition ? 430 : 520) :
+        editorWindow.setContentSize(text ? NSSize(width: model.editorMode == .recognition ? 960 : 860,
+                                                  height: model.editorMode == .recognition ? 620 : 520) :
             NSSize(width: 980, height: 760))
         editorWindow.center()
         editorWindow?.makeKeyAndOrderFront(nil)

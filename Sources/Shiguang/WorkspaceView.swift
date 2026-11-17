@@ -240,6 +240,8 @@ struct CaptureEditorView: View {
                             .padding(.horizontal, 4)
                     }
                 }
+            } else if model.editorMode == .recognition {
+                OCRWorkspaceView(model: model)
             } else {
                 TextWorkspaceView(model: model)
             }

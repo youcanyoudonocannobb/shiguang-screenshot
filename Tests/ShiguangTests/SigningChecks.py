@@ -15,7 +15,7 @@ HELPER = PROJECT / "scripts/local-signing.py"
 IDENTIFIER = "dev.shiguang.screenshot"
 SIGNING_HOME = Path(os.environ.get(
     "SHIGUANG_SIGNING_HOME",
-    str(Path.home() / "Library/Application Support/ShiguangSigning"),
+    str(Path.home() / "Library/Application Support/PawShotSigning"),
 ))
 
 
