@@ -33,6 +33,7 @@ struct ToolboxView: View {
         .foregroundStyle(Palette.ink)
         .tint(Palette.accent)
         .preferredColorScheme(.light)
+        .animation(nil, value: tab)
     }
 
     private var header: some View {
@@ -166,6 +167,7 @@ struct ToolboxView: View {
                     }
                 }
                 .labelsHidden().pickerStyle(.segmented).frame(width: 330)
+                .animation(nil, value: encodingMode)
                 .onChange(of: encodingMode) { _, _ in encodingOutput = ""; encodingError = nil }
 
                 Spacer(minLength: 12)

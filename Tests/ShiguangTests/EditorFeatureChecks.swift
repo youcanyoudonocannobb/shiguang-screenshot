@@ -78,9 +78,90 @@ struct EditorFeatureChecks {
         old.removeValue(forKey: "fontSize")
         let decoded = try JSONDecoder().decode(Mark.self, from: JSONSerialization.data(withJSONObject: old))
         try require(decoded == mark, "Legacy mark history must remain readable")
-        let text = Mark(tool: .text, points: [UnitPoint(x: 0.2, y: 0.3)], colorHex: "111111", text: "中文 + Text", fontSize: 0.04)
+        let text = Mark(tool: .text, points: [UnitPoint(x: 0.2, y: 0.3)], colorHex: "111111",
+                        text: "中文 + Text", fontSize: 0.04, lineWidth: 0.008,
+                        arrowDoubleHeaded: true, textPresentation: .highlighted,
+                        maskStyle: .blur, maskStrength: .strong,
+                        spotlightStrength: .deep)
         let roundTrip = try JSONDecoder().decode(Mark.self, from: JSONEncoder().encode(text))
-        try require(roundTrip == text, "Text and font size must survive history round trips")
+        try require(roundTrip == text, "Advanced annotation styles must survive history round trips")
+    }
+
+    static func annotationPointSizes() async throws {
+        let suite = "Shiguang.AnnotationPointSizeChecks.\(UUID())"
+        let defaults = UserDefaults(suiteName: suite)!
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { defaults.removePersistentDomain(forName: suite); try? FileManager.default.removeItem(at: folder) }
+        let model = AppModel(historyDirectory: folder, preferences: defaults)
+        try require(model.markLineWidthPoints == AnnotationSizeMetrics.defaultLineWidthPoints &&
+                    model.numberSizePoints == AnnotationSizeMetrics.defaultNumberSizePoints &&
+                    model.textFontSize == 20 &&
+                    model.maskSizePoints == AnnotationSizeMetrics.defaultMaskSizePoints,
+                    "Annotation controls must start from explicit point sizes")
+
+        let sourceSize = CGSize(width: 400, height: 200)
+        let lineFraction = AnnotationSizeMetrics.fraction(points: 4, imageSize: sourceSize)
+        let maskFraction = AnnotationSizeMetrics.fraction(points: 24, imageSize: sourceSize)
+        try require(abs(lineFraction * Double(sourceSize.height) - 4) < 0.0001 &&
+                    abs(maskFraction * Double(sourceSize.height) - 24) < 0.0001,
+                    "Point sizes must convert to image fractions without changing their value")
+
+        let mosaic = Mark(tool: .mosaic,
+                          points: [UnitPoint(x: 0.1, y: 0.1), UnitPoint(x: 0.5, y: 0.5)],
+                          colorHex: "111111", maskStyle: .pixel,
+                          maskStrength: .medium, maskSize: maskFraction)
+        let roundTrip = try JSONDecoder().decode(Mark.self, from: JSONEncoder().encode(mosaic))
+        try require(roundTrip == mosaic, "Point-based mosaic sizes must survive history round trips")
+
+        let image = sample()
+        func linePixels(points: Double) -> Int {
+            let mark = Mark(tool: .line,
+                            points: [UnitPoint(x: 0.2, y: 0.5), UnitPoint(x: 0.8, y: 0.5)],
+                            colorHex: "E45F3C",
+                            lineWidth: AnnotationSizeMetrics.fraction(points: points, imageSize: image.size))
+            let bitmap = NSBitmapImageRep(data: ImageRenderer.render(image, marks: [mark]).pngData!)!
+            var count = 0
+            for y in 0..<bitmap.pixelsHigh {
+                for x in 0..<bitmap.pixelsWide {
+                    guard let color = bitmap.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB) else { continue }
+                    if color.redComponent > 0.65 && color.greenComponent < 0.55 && color.blueComponent < 0.55 {
+                        count += 1
+                    }
+                }
+            }
+            return count
+        }
+        let thin = linePixels(points: 2)
+        let thick = linePixels(points: 8)
+        try require(thin > 0 && thick > thin + 500,
+                    "Changing line width in points must visibly change the rendered stroke")
+
+        func numberPixels(points: Double) -> Int {
+            let fraction = AnnotationSizeMetrics.fraction(points: points, imageSize: image.size)
+            let mark = Mark(tool: .number, points: [UnitPoint(x: 0.5, y: 0.5)],
+                            colorHex: "E45F3C", text: "1",
+                            lineWidth: fraction, numberSize: fraction)
+            let bitmap = NSBitmapImageRep(data: ImageRenderer.render(image, marks: [mark]).pngData!)!
+            var count = 0
+            for y in 0..<bitmap.pixelsHigh {
+                for x in 0..<bitmap.pixelsWide {
+                    guard let color = bitmap.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB) else { continue }
+                    if color.redComponent > 0.65 && color.greenComponent < 0.55 && color.blueComponent < 0.55 {
+                        count += 1
+                    }
+                }
+            }
+            return count
+        }
+        let smallNumber = numberPixels(points: 8)
+        let largeNumber = numberPixels(points: 24)
+        try require(smallNumber > 0 && largeNumber > smallNumber * 4,
+                    "Number marker size must scale directly with its point value")
+        let number = Mark(tool: .number, points: [UnitPoint(x: 0.5, y: 0.5)],
+                          colorHex: "111111", text: "1", numberSize: 0.024)
+        let decodedNumber = try JSONDecoder().decode(Mark.self, from: JSONEncoder().encode(number))
+        try require(decodedNumber == number,
+                    "Number marker point sizes must survive history round trips")
     }
 
     static func textPixels() async throws {
@@ -112,6 +193,77 @@ struct EditorFeatureChecks {
                     abs(red(bitmap, 25, 20) - red(input, 25, 20)) > 0.5, "Mosaic must change covered pixels")
         try require(abs(red(bitmap, 24, 80) - red(input, 24, 80)) < 0.02 &&
                     abs(red(bitmap, 25, 80) - red(input, 25, 80)) < 0.02, "Pixels outside the mosaic must remain intact")
+    }
+
+    static func advancedAnnotationStyles() async throws {
+        let single = Mark(tool: .arrow,
+                          points: [UnitPoint(x: 0.2, y: 0.5), UnitPoint(x: 0.8, y: 0.5)],
+                          colorHex: "111111", lineWidth: 0.008)
+        var double = single
+        double.arrowDoubleHeaded = true
+        func bitmap(_ mark: Mark) -> NSBitmapImageRep {
+            let bitmap = NSBitmapImageRep(data: ImageRenderer.render(sample(), marks: [mark]).pngData!)!
+            return bitmap
+        }
+        let singleBitmap = bitmap(single), doubleBitmap = bitmap(double)
+        func spreadAtStart(_ image: NSBitmapImageRep) -> Int {
+            (40..<55).reduce(0) { count, x in
+                count + (40..<60).filter { y in
+                    abs(y - 50) > 3 &&
+                        image.colorAt(x: x, y: y)!.usingColorSpace(.deviceRGB)!.redComponent < 0.35
+                }.count
+            }
+        }
+        try require(spreadAtStart(doubleBitmap) > spreadAtStart(singleBitmap) + 10,
+                    "Double-headed arrows must add a visible head at the start and end")
+
+        let spotlight = Mark(tool: .spotlight,
+                             points: [UnitPoint(x: 0.25, y: 0.2), UnitPoint(x: 0.75, y: 0.8)],
+                             colorHex: "111111", spotlightStrength: .deep)
+        let spotlightBitmap = NSBitmapImageRep(data: ImageRenderer.render(sample(), marks: [spotlight]).pngData!)!
+        let outside = spotlightBitmap.colorAt(x: 10, y: 50)!.usingColorSpace(.deviceRGB)!.redComponent
+        let inside = spotlightBitmap.colorAt(x: 100, y: 50)!.usingColorSpace(.deviceRGB)!.redComponent
+        try require(outside < 0.55 && inside > 0.92,
+                    "Spotlight must dim outside the selected region while preserving the focus area")
+    }
+
+    static func fixedAspectSelection() async throws {
+        let bounds = CGRect(x: 0, y: 0, width: 1000, height: 700)
+        let drawn = CaptureSelectionGeometry.selectionRect(
+            from: CGPoint(x: 100, y: 100), to: CGPoint(x: 500, y: 300),
+            bounds: bounds, aspectRatio: 1
+        )
+        try require(abs(drawn.width - drawn.height) < 0.01 && abs(drawn.width - 400) < 0.01,
+                    "Fixed-ratio selection must use the dominant drag distance without distorting the ratio")
+        let portrait = CaptureSelectionGeometry.selectionRect(
+            from: CGPoint(x: 100, y: 100), to: CGPoint(x: 100, y: 500),
+            bounds: bounds, aspectRatio: 9.0 / 16.0
+        )
+        try require(abs(portrait.width / portrait.height - 9.0 / 16.0) < 0.001 &&
+                    abs(portrait.height - 400) < 0.01,
+                    "Portrait ratios must follow a vertical drag instead of collapsing to the minimum width")
+        let resized = CaptureSelectionGeometry.resized(
+            CGRect(x: 100, y: 100, width: 400, height: 225),
+            handle: .right, delta: CGSize(width: 100, height: 0),
+            bounds: bounds, aspectRatio: 16.0 / 9.0
+        )
+        try require(abs(resized.width / resized.height - 16.0 / 9.0) < 0.001 &&
+                    bounds.contains(resized),
+                    "Aspect-locked handle resizing must preserve the selected ratio inside the screen")
+        let edgeResized = CaptureSelectionGeometry.resized(
+            CGRect(x: 250, y: 200, width: 300, height: 300),
+            handle: .top, delta: CGSize(width: 0, height: -80),
+            bounds: bounds, aspectRatio: 1
+        )
+        try require(abs(edgeResized.width - edgeResized.height) < 0.01 &&
+                    edgeResized.width > 150 && bounds.contains(edgeResized),
+                    "Dragging a side handle with a locked ratio must resize proportionally instead of collapsing")
+        let fitted = CaptureSelectionGeometry.fittedToAspect(
+            CGRect(x: 900, y: 650, width: 200, height: 100),
+            aspectRatio: 1, bounds: bounds
+        )
+        try require(abs(fitted.width - fitted.height) < 0.01 && bounds.contains(fitted),
+                    "Switching to a fixed ratio must refit the current selection on screen")
     }
 
     static func zoomGeometry() async throws {
@@ -821,6 +973,48 @@ struct EditorFeatureChecks {
         try require(window == CGRect(x: 50, y: 150, width: 400, height: 300),
                     "Window snapping must convert global CG coordinates on offset displays")
         let initial = CGRect(x: 100, y: 150, width: 300, height: 200)
+        try require(
+            CaptureSelectionGeometry.handle(
+                at: CGPoint(x: initial.midX, y: initial.maxY + 6),
+                in: initial
+            ) == .top,
+            "Any point along the top edge must start a resize"
+        )
+        try require(
+            CaptureSelectionGeometry.handle(
+                at: CGPoint(x: initial.minX + 4, y: initial.minY + 5),
+                in: initial
+            ) == .bottomLeft,
+            "The inside corner band must also be draggable"
+        )
+        try require(
+            CaptureSelectionGeometry.handle(
+                at: CGPoint(x: initial.maxX - 5, y: initial.midY),
+                in: initial
+            ) == .right,
+            "Any point along the right edge must start a resize"
+        )
+        try require(
+            CaptureSelectionGeometry.handle(
+                at: CGPoint(x: initial.midX, y: initial.minY + 3),
+                in: initial
+            ) == .bottom,
+            "Any point along the bottom edge must start a resize"
+        )
+        try require(
+            CaptureSelectionGeometry.handle(
+                at: CGPoint(x: initial.maxX - 3, y: initial.maxY - 4),
+                in: initial
+            ) == .topRight,
+            "Every selection corner must start a two-axis resize"
+        )
+        try require(
+            CaptureSelectionGeometry.handle(
+                at: CGPoint(x: initial.midX, y: initial.midY),
+                in: initial
+            ) == nil,
+            "The selection centre must remain available for moving or annotating"
+        )
         let resized = CaptureSelectionGeometry.resized(initial, handle: .topLeft,
             delta: CGSize(width: -40, height: 50), bounds: bounds)
         try require(resized == CGRect(x: 60, y: 150, width: 340, height: 250), "Resize must retain the opposite corner in screen coordinates")
@@ -985,7 +1179,8 @@ struct EditorFeatureChecks {
         }
         try require(ellipsePixels > 500, "Ellipse fill must paint the selected interior")
         try require(linePixels > 20 && highlighterPixels > 100 && numberPixels > 100,
-                    "Line, highlighter and numbered marker must render onto the image")
+                    "Line, highlighter and numbered marker must render onto the image " +
+                    "(line=\(linePixels), highlighter=\(highlighterPixels), number=\(numberPixels))")
         model.undo()
         try require(model.marks.count == 3 && model.canRedo, "Undo must be reversible")
         model.redo()
@@ -1075,8 +1270,11 @@ struct EditorFeatureChecks {
     static func main() async {
         var checks: [(String, () async throws -> Void)] = [
             ("legacy_history_and_text_roundtrip", legacyMarks),
+            ("annotation_sizes_use_points", annotationPointSizes),
             ("text_annotation_export_pixels", textPixels),
             ("mosaic_changes_only_selected_pixels", mosaicPixels),
+            ("advanced_annotation_styles", advancedAnnotationStyles),
+            ("fixed_ratio_selection_geometry", fixedAspectSelection),
             ("cursor_anchored_zoom_and_limits", zoomGeometry),
             ("editor_close_translation_undo_and_record_actions", editorActions),
             ("apple_translation_and_menu_bar_defaults", defaultPreferences),

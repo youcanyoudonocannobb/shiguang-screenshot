@@ -48,6 +48,14 @@ struct ImageCanvas: NSViewRepresentable {
     var movesWindow = false
     var enabled = true
     var filledShapes = false
+    var lineWidthPoints = AnnotationSizeMetrics.defaultLineWidthPoints
+    var numberSizePoints = AnnotationSizeMetrics.defaultNumberSizePoints
+    var arrowDoubleHeaded = false
+    var textFontSize: Double = 20
+    var textPresentation: TextPresentation = .plain
+    var maskStyle: MaskStyle = .pixel
+    var maskSizePoints = AnnotationSizeMetrics.defaultMaskSizePoints
+    var spotlightStrength: SpotlightStrength = .light
     var onColorPick: ((String) -> Void)?
     let onMark: (Mark) -> Void
     let onEscape: () -> Void
@@ -61,7 +69,11 @@ struct ImageCanvas: NSViewRepresentable {
         view.onZoom = { zoom = $0 }
         view.configure(image: image, marks: marks, tool: tool, color: colorHex, zoom: zoom,
                        resetID: resetID, movesWindow: movesWindow, enabled: enabled,
-                       filledShapes: filledShapes)
+                       filledShapes: filledShapes, lineWidthPoints: lineWidthPoints,
+                       numberSizePoints: numberSizePoints,
+                       arrowDoubleHeaded: arrowDoubleHeaded, textFontSize: textFontSize,
+                       textPresentation: textPresentation, maskStyle: maskStyle,
+                       maskSizePoints: maskSizePoints, spotlightStrength: spotlightStrength)
     }
 }
 
@@ -78,6 +90,14 @@ final class NativeImageCanvas: NSView, NSTextFieldDelegate {
     private var tool = MarkTool.pointer
     private var color = "E45F3C"
     private var filledShapes = false
+    private var lineWidthPoints = AnnotationSizeMetrics.defaultLineWidthPoints
+    private var numberSizePoints = AnnotationSizeMetrics.defaultNumberSizePoints
+    private var arrowDoubleHeaded = false
+    private var textFontSize: Double = 20
+    private var textPresentation = TextPresentation.plain
+    private var maskStyle = MaskStyle.pixel
+    private var maskSizePoints = AnnotationSizeMetrics.defaultMaskSizePoints
+    private var spotlightStrength = SpotlightStrength.light
     private var enabled = true
     private var viewport = CanvasViewport()
     private var draft: Mark?
@@ -97,11 +117,21 @@ final class NativeImageCanvas: NSView, NSTextFieldDelegate {
     override var acceptsFirstResponder: Bool { true }
     override var mouseDownCanMoveWindow: Bool { false }
     private var imageSize: CGSize { rendered?.size ?? CGSize(width: 1, height: 1) }
+    private var imagePointSize: CGSize {
+        guard let size = image?.size, size.width > 0, size.height > 0 else { return imageSize }
+        return size
+    }
     private var imageRect: CGRect { viewport.imageRect(image: imageSize, viewport: bounds.size) }
 
     func configure(image: NSImage, marks: [Mark], tool: MarkTool, color: String, zoom: CGFloat,
                    resetID: UUID, movesWindow: Bool, enabled: Bool, inPlace: Bool = false,
-                   filledShapes: Bool = false) {
+                   filledShapes: Bool = false,
+                   lineWidthPoints: Double = AnnotationSizeMetrics.defaultLineWidthPoints,
+                   numberSizePoints: Double = AnnotationSizeMetrics.defaultNumberSizePoints,
+                   arrowDoubleHeaded: Bool = false, textFontSize: Double = 20,
+                   textPresentation: TextPresentation = .plain, maskStyle: MaskStyle = .pixel,
+                   maskSizePoints: Double = AnnotationSizeMetrics.defaultMaskSizePoints,
+                   spotlightStrength: SpotlightStrength = .light) {
         let changedImage = self.image !== image
         if changedImage {
             finishText(commit: false)
@@ -117,6 +147,14 @@ final class NativeImageCanvas: NSView, NSTextFieldDelegate {
         self.tool = tool
         self.color = color
         self.filledShapes = filledShapes
+        self.lineWidthPoints = lineWidthPoints
+        self.numberSizePoints = numberSizePoints
+        self.arrowDoubleHeaded = arrowDoubleHeaded
+        self.textFontSize = textFontSize
+        self.textPresentation = textPresentation
+        self.maskStyle = maskStyle
+        self.maskSizePoints = maskSizePoints
+        self.spotlightStrength = spotlightStrength
         self.enabled = enabled
         self.movesWindow = movesWindow
         self.inPlace = inPlace
@@ -174,7 +212,10 @@ final class NativeImageCanvas: NSView, NSTextFieldDelegate {
         let box = CGRect(x: min(first.x, last.x), y: min(first.y, last.y),
                          width: abs(first.x - last.x), height: abs(first.y - last.y))
         let path = NSBezierPath()
-        path.lineWidth = max(2, min(imageSize.width, imageSize.height) * 0.005 * rect.width / imageSize.width)
+        let displayScale = min(rect.width / max(1, imageSize.width),
+                               rect.height / max(1, imageSize.height))
+        path.lineWidth = max(2, min(imageSize.width, imageSize.height) *
+                             (mark.lineWidth ?? 0.005) * displayScale)
         path.lineCapStyle = .round
         path.lineJoinStyle = .round
         let color = NSColor(hex: mark.colorHex)
@@ -183,9 +224,18 @@ final class NativeImageCanvas: NSView, NSTextFieldDelegate {
         case .redact:
             NSColor.black.setFill(); NSBezierPath(rect: box).fill(); return
         case .mosaic:
-            NSColor.gray.withAlphaComponent(0.5).setFill()
+            NSColor.gray.withAlphaComponent(mark.maskStyle == .blur ? 0.34 : 0.48).setFill()
             NSBezierPath(rect: box).fill()
             path.appendRect(box)
+        case .spotlight:
+            NSColor.black.withAlphaComponent(mark.spotlightStrength?.alpha ?? SpotlightStrength.light.alpha)
+                .setFill()
+            let shade = NSBezierPath(rect: imageRect)
+            shade.appendRoundedRect(box, xRadius: 5, yRadius: 5)
+            shade.windingRule = .evenOdd
+            shade.fill()
+            NSColor.white.withAlphaComponent(0.42).setStroke()
+            path.appendRoundedRect(box, xRadius: 5, yRadius: 5)
         case .rectangle:
             if mark.filled == true {
                 color.setFill()
@@ -217,13 +267,21 @@ final class NativeImageCanvas: NSView, NSTextFieldDelegate {
             path.move(to: first); path.line(to: last)
             let angle = atan2(last.y - first.y, last.x - first.x)
             let length = min(path.lineWidth * 5, hypot(last.x - first.x, last.y - first.y) * 0.4)
-            for offset in [-Double.pi / 6, Double.pi / 6] {
-                path.move(to: last)
-                path.line(to: CGPoint(x: last.x - length * cos(angle + offset), y: last.y - length * sin(angle + offset)))
+            drawArrowHead(in: path, tip: last, angle: angle, length: length)
+            if mark.arrowDoubleHeaded == true {
+                drawArrowHead(in: path, tip: first, angle: angle + .pi, length: length)
             }
         }
         color.setStroke()
         path.stroke()
+    }
+
+    private func drawArrowHead(in path: NSBezierPath, tip: CGPoint, angle: CGFloat, length: CGFloat) {
+        for offset in [-Double.pi / 6, Double.pi / 6] {
+            path.move(to: tip)
+            path.line(to: CGPoint(x: tip.x - length * cos(angle + offset),
+                                  y: tip.y - length * sin(angle + offset)))
+        }
     }
 
     private func normalized(_ point: CGPoint) -> UnitPoint {
@@ -262,13 +320,25 @@ final class NativeImageCanvas: NSView, NSTextFieldDelegate {
         if tool == .number {
             let next = marks.filter { $0.tool == .number }.count + 1
             onMark?(Mark(tool: .number, points: [normalized(point)], colorHex: color,
-                         filled: nil, text: String(next), fontSize: nil))
+                         filled: nil, text: String(next), fontSize: nil,
+                         lineWidth: AnnotationSizeMetrics.fraction(
+                            points: numberSizePoints, imageSize: imagePointSize),
+                         numberSize: AnnotationSizeMetrics.fraction(
+                            points: numberSizePoints, imageSize: imagePointSize)))
             return
         }
         if tool != .pointer {
             let shouldFill = (tool == .rectangle || tool == .ellipse) && filledShapes
             draft = Mark(tool: tool, points: [normalized(point)], colorHex: color,
-                         filled: shouldFill, text: nil, fontSize: nil)
+                         filled: shouldFill, text: nil, fontSize: nil,
+                         lineWidth: AnnotationSizeMetrics.fraction(
+                            points: lineWidthPoints, imageSize: imagePointSize),
+                         arrowDoubleHeaded: arrowDoubleHeaded ? true : nil,
+                         maskStyle: tool == .mosaic ? maskStyle : nil,
+                         maskSize: tool == .mosaic
+                            ? AnnotationSizeMetrics.fraction(points: maskSizePoints, imageSize: imagePointSize)
+                            : nil,
+                         spotlightStrength: tool == .spotlight ? spotlightStrength : nil)
         }
     }
 
@@ -347,13 +417,17 @@ final class NativeImageCanvas: NSView, NSTextFieldDelegate {
         let rect = imageRect
         textAnchor = normalized(point)
         textColor = color
-        textFraction = max(18 / max(CGFloat(1), rect.height), 0.035)
+        textFraction = AnnotationSizeMetrics.fraction(points: textFontSize, imageSize: imagePointSize)
+        let displayScale = rect.height / max(1, imagePointSize.height)
         let field = NSTextField(frame: CGRect(x: point.x, y: point.y,
                                               width: max(50, min(360, bounds.maxX - point.x)),
-                                              height: max(30, rect.height * textFraction + 10)))
-        field.font = .systemFont(ofSize: rect.height * textFraction, weight: .semibold)
+                                              height: max(30, textFontSize * displayScale + 10)))
+        field.font = .systemFont(ofSize: textFontSize * displayScale, weight: .semibold)
         field.textColor = NSColor(hex: color)
-        field.backgroundColor = .white
+        field.isBezeled = false
+        field.drawsBackground = textPresentation == .highlighted
+        field.backgroundColor = textPresentation == .highlighted
+            ? NSColor(hex: color).withAlphaComponent(0.18) : .clear
         field.placeholderString = "输入文字，回车完成"
         field.focusRingType = .exterior
         field.delegate = self
@@ -369,7 +443,9 @@ final class NativeImageCanvas: NSView, NSTextFieldDelegate {
         field.delegate = nil
         field.removeFromSuperview()
         if commit, !value.isEmpty, let anchor = textAnchor {
-            onMark?(Mark(tool: .text, points: [anchor], colorHex: textColor, text: value, fontSize: textFraction))
+            onMark?(Mark(tool: .text, points: [anchor], colorHex: textColor, text: value,
+                         fontSize: textFraction, lineWidth: nil,
+                         textPresentation: textPresentation))
         }
         textAnchor = nil
     }

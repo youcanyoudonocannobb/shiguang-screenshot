@@ -233,6 +233,14 @@ struct CaptureEditorView: View {
                                     colorHex: model.markColor, zoom: $model.zoomFactor,
                                     resetID: model.viewportResetID, movesWindow: floating, enabled: !model.isBusy,
                                     filledShapes: model.fillShapes,
+                                    lineWidthPoints: model.markLineWidthPoints,
+                                    numberSizePoints: model.numberSizePoints,
+                                    arrowDoubleHeaded: model.arrowDoubleHeaded,
+                                    textFontSize: model.textFontSize,
+                                    textPresentation: model.textPresentation,
+                                    maskStyle: model.maskStyle,
+                                    maskSizePoints: model.maskSizePoints,
+                                    spotlightStrength: model.spotlightStrength,
                                     onColorPick: { model.markColor = $0; model.tool = .pointer },
                                     onMark: model.addMark, onEscape: model.closeEditor)
                             .frame(minHeight: 130, maxHeight: .infinity).layoutPriority(1)

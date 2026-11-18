@@ -1,4 +1,5 @@
 import AppKit
+import CoreImage
 import CoreText
 import Foundation
 import Vision
@@ -59,7 +60,7 @@ enum MenuBarDogStyle: String, Codable, CaseIterable, Identifiable {
 }
 
 enum MarkTool: String, Codable, CaseIterable {
-    case pointer, rectangle, ellipse, line, arrow, pen, highlighter, number, text, mosaic, redact, picker
+    case pointer, rectangle, ellipse, line, arrow, pen, highlighter, number, text, mosaic, spotlight, redact, picker
 
     var symbol: String {
         switch self {
@@ -73,6 +74,7 @@ enum MarkTool: String, Codable, CaseIterable {
         case .number: return "number.circle"
         case .text: return "textformat"
         case .mosaic: return "checkerboard.rectangle"
+        case .spotlight: return "sun.max"
         case .redact: return "rectangle.fill"
         case .picker: return "eyedropper"
         }
@@ -90,8 +92,102 @@ enum MarkTool: String, Codable, CaseIterable {
         case .number: return "编号"
         case .text: return "文字"
         case .mosaic: return "马赛克"
+        case .spotlight: return "聚光灯"
         case .redact: return "遮盖"
         case .picker: return "取色"
+        }
+    }
+}
+
+enum AnnotationSizeMetrics {
+    static let defaultLineWidthPoints = 3.0
+    static let lineWidthRange = 2.0...24.0
+    static let defaultNumberSizePoints = 14.0
+    static let numberSizeRange = 8.0...48.0
+    static let textSizeRange = 12.0...72.0
+    static let defaultMaskSizePoints = 24.0
+    static let maskSizeRange = 2.0...80.0
+    static let stepPoints = 1.0
+
+    /// Marks store sizes as a fraction of the image's shortest side so they
+    /// survive cropping and history reloads. The input and output use points.
+    static func fraction(points: Double, imageSize: CGSize) -> Double {
+        let shortestSide = max(1, min(imageSize.width, imageSize.height))
+        return max(0.0001, points / Double(shortestSide))
+    }
+}
+
+enum TextPresentation: String, CaseIterable, Codable {
+    case plain, outlined, highlighted
+
+    var title: String {
+        switch self {
+        case .plain: return "无底"
+        case .outlined: return "描边"
+        case .highlighted: return "底色"
+        }
+    }
+}
+
+enum MaskStyle: String, CaseIterable, Codable {
+    case blur, pixel
+
+    var title: String {
+        self == .blur ? "模糊" : "像素"
+    }
+}
+
+enum MaskStrength: String, CaseIterable, Codable {
+    case weak, medium, strong
+
+    var title: String {
+        switch self {
+        case .weak: return "弱"
+        case .medium: return "中"
+        case .strong: return "强"
+        }
+    }
+
+    var fraction: Double {
+        switch self {
+        case .weak: return 0.012
+        case .medium: return 0.024
+        case .strong: return 0.045
+        }
+    }
+}
+
+enum SpotlightStrength: String, CaseIterable, Codable {
+    case light, deep
+
+    var title: String { self == .light ? "浅" : "深" }
+    var alpha: Double { self == .light ? 0.36 : 0.58 }
+}
+
+enum CaptureAspectRatio: String, CaseIterable, Identifiable {
+    case free, square, fourThree, threeTwo, sixteenNine, nineSixteen
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .free: return "自由"
+        case .square: return "1:1"
+        case .fourThree: return "4:3"
+        case .threeTwo: return "3:2"
+        case .sixteenNine: return "16:9"
+        case .nineSixteen: return "9:16"
+        }
+    }
+
+    var value: CGFloat? {
+        switch self {
+        case .free: return nil
+        case .square: return 1
+        case .fourThree: return 4 / 3
+        case .threeTwo: return 3 / 2
+        case .sixteenNine: return 16 / 9
+        case .nineSixteen: return 9 / 16
         }
     }
 }
@@ -118,6 +214,14 @@ struct Mark: Codable, Identifiable, Equatable {
     var filled: Bool?
     var text: String?
     var fontSize: Double?
+    var lineWidth: Double?
+    var numberSize: Double?
+    var arrowDoubleHeaded: Bool?
+    var textPresentation: TextPresentation?
+    var maskStyle: MaskStyle?
+    var maskStrength: MaskStrength?
+    var maskSize: Double?
+    var spotlightStrength: SpotlightStrength?
 }
 
 struct CaptureRecord: Codable, Identifiable {
@@ -196,13 +300,13 @@ enum ImageRenderer {
         context.draw(source, in: CGRect(origin: .zero, size: size))
         context.translateBy(x: 0, y: size.height)
         context.scaleBy(x: 1, y: -1)
-        let width = max(2, min(size.width, size.height) * 0.005)
-        context.setLineWidth(width)
         context.setLineCap(.round)
         context.setLineJoin(.round)
         for mark in marks {
             guard let first = mark.points.first?.scaled(size),
                   let last = mark.points.last?.scaled(size) else { continue }
+            let width = max(2, min(size.width, size.height) * (mark.lineWidth ?? 0.005))
+            context.setLineWidth(width)
             let color = NSColor(hex: mark.colorHex).cgColor
             context.setStrokeColor(color)
             let rect = CGRect(x: min(first.x, last.x), y: min(first.y, last.y),
@@ -233,28 +337,47 @@ enum ImageRenderer {
                 context.setFillColor(NSColor.black.cgColor)
                 context.fill(rect)
             case .mosaic:
-                // Pixelate the composited image so earlier annotations are covered too.
-                guard rect.width > 0, rect.height > 0, let composite = context.makeImage(),
-                      let small = pixelated(composite) else { continue }
+                // Mask the composited image so earlier annotations are covered too.
+                guard rect.width > 0, rect.height > 0, let composite = context.makeImage() else { continue }
+                // `maskSize` stores the newer pt-based size. `maskStrength`
+                // remains the fallback for annotations saved by older builds.
+                let strength = mark.maskSize ?? (mark.maskStrength ?? .medium).fraction
+                let detail = max(1, min(size.width, size.height) * strength)
+                let processed: CGImage?
+                switch mark.maskStyle ?? .pixel {
+                case .blur:
+                    processed = blurred(composite, radius: max(1, detail))
+                case .pixel:
+                    processed = pixelated(composite, blockPixels: detail)
+                }
+                guard let processed else { continue }
                 context.saveGState()
                 context.clip(to: rect)
                 context.translateBy(x: 0, y: size.height)
                 context.scaleBy(x: 1, y: -1)
-                context.interpolationQuality = .none
-                context.draw(small, in: CGRect(origin: .zero, size: size))
+                context.interpolationQuality = mark.maskStyle == .blur ? .high : .none
+                context.draw(processed, in: CGRect(origin: .zero, size: size))
+                context.restoreGState()
+            case .spotlight:
+                context.saveGState()
+                context.setFillColor(NSColor.black.withAlphaComponent(
+                    mark.spotlightStrength?.alpha ?? SpotlightStrength.light.alpha).cgColor)
+                let path = CGMutablePath()
+                path.addRect(CGRect(origin: .zero, size: size))
+                path.addRoundedRect(in: rect,
+                                    cornerWidth: min(rect.width, rect.height) * 0.025,
+                                    cornerHeight: min(rect.width, rect.height) * 0.025)
+                context.addPath(path)
+                context.fillPath(using: .evenOdd)
+                context.setStrokeColor(CGColor(gray: 1, alpha: 0.28))
+                context.setLineWidth(max(1, width * 0.45))
+                context.stroke(rect)
                 context.restoreGState()
             case .number:
-                drawNumber(mark.text ?? "1", at: first, color: color, imageSize: size, context: context)
+                drawNumber(mark.text ?? "1", at: first, color: color, imageSize: size,
+                           sizeFraction: mark.numberSize, context: context)
             case .text:
-                guard let text = mark.text, !text.isEmpty else { continue }
-                context.saveGState()
-                context.clip(to: CGRect(origin: .zero, size: size))
-                NSGraphicsContext.saveGraphicsState()
-                NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: true)
-                let font = NSFont.systemFont(ofSize: max(8, (mark.fontSize ?? 0.035) * size.height), weight: .semibold)
-                (text as NSString).draw(at: first, withAttributes: [.font: font, .foregroundColor: NSColor(hex: mark.colorHex)])
-                NSGraphicsContext.restoreGraphicsState()
-                context.restoreGState()
+                drawText(mark, at: first, imageSize: size, context: context)
             case .pen:
                 context.beginPath()
                 context.move(to: first)
@@ -275,10 +398,9 @@ enum ImageRenderer {
                 context.addLine(to: last)
                 let angle = atan2(last.y - first.y, last.x - first.x)
                 let length = min(width * 5, hypot(last.x - first.x, last.y - first.y) * 0.4)
-                for offset in [-Double.pi / 6, Double.pi / 6] {
-                    context.move(to: last)
-                    context.addLine(to: CGPoint(x: last.x - length * cos(angle + offset),
-                                               y: last.y - length * sin(angle + offset)))
+                drawArrowHead(in: context, tip: last, angle: angle, length: length)
+                if mark.arrowDoubleHeaded == true {
+                    drawArrowHead(in: context, tip: first, angle: angle + .pi, length: length)
                 }
                 context.strokePath()
             }
@@ -288,19 +410,28 @@ enum ImageRenderer {
     }
 
     private static func drawNumber(_ text: String, at point: CGPoint, color: CGColor,
-                                   imageSize: CGSize, context: CGContext) {
-        let radius = max(11, min(34, min(imageSize.width, imageSize.height) * 0.022))
+                                   imageSize: CGSize, sizeFraction: Double?,
+                                   context: CGContext) {
+        let shortestSide = min(imageSize.width, imageSize.height)
+        let radius: CGFloat
+        if let sizeFraction {
+            radius = max(2, min(shortestSide * 0.45,
+                                shortestSide * max(0.002, sizeFraction)))
+        } else {
+            // Number marks created before point sizing have no stored size.
+            radius = max(9, min(46, shortestSide * 0.022))
+        }
         let badge = CGRect(x: point.x - radius, y: point.y - radius,
                            width: radius * 2, height: radius * 2)
         context.saveGState()
         context.setFillColor(color)
         context.fillEllipse(in: badge)
         context.setStrokeColor(CGColor(gray: 1, alpha: 0.94))
-        context.setLineWidth(max(2, radius * 0.12))
+        context.setLineWidth(max(1, radius * 0.12))
         context.strokeEllipse(in: badge.insetBy(dx: 1, dy: 1))
         NSGraphicsContext.saveGraphicsState()
         NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: true)
-        let font = NSFont.monospacedDigitSystemFont(ofSize: max(13, radius * 1.05), weight: .bold)
+        let font = NSFont.monospacedDigitSystemFont(ofSize: max(5, radius * 1.05), weight: .bold)
         let attributes: [NSAttributedString.Key: Any] = [
             .font: font,
             .foregroundColor: NSColor.white
@@ -314,8 +445,57 @@ enum ImageRenderer {
         context.restoreGState()
     }
 
-    private static func pixelated(_ source: CGImage) -> CGImage? {
-        let block = max(10, Int(Double(min(source.width, source.height)) * 0.025))
+    private static func drawArrowHead(in context: CGContext, tip: CGPoint,
+                                      angle: CGFloat, length: CGFloat) {
+        for offset in [-Double.pi / 6, Double.pi / 6] {
+            context.move(to: tip)
+            context.addLine(to: CGPoint(x: tip.x - length * cos(angle + offset),
+                                        y: tip.y - length * sin(angle + offset)))
+        }
+    }
+
+    private static func drawText(_ mark: Mark, at point: CGPoint,
+                                 imageSize: CGSize, context: CGContext) {
+        guard let text = mark.text, !text.isEmpty else { return }
+        context.saveGState()
+        context.clip(to: CGRect(origin: .zero, size: imageSize))
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: true)
+        let foreground = NSColor(hex: mark.colorHex)
+        let font = NSFont.systemFont(ofSize: max(8, (mark.fontSize ?? 0.035) * imageSize.height),
+                                    weight: .semibold)
+        var attributes: [NSAttributedString.Key: Any] = [
+            .font: font,
+            .foregroundColor: foreground
+        ]
+        let presentation = mark.textPresentation ?? .plain
+        if presentation == .outlined {
+            let rgb = foreground.usingColorSpace(.sRGB) ?? foreground
+            let luminance = 0.2126 * rgb.redComponent + 0.7152 * rgb.greenComponent + 0.0722 * rgb.blueComponent
+            attributes[.strokeColor] = luminance > 0.72 ? NSColor.black : NSColor.white
+            attributes[.strokeWidth] = -3.2
+        }
+        let value = text as NSString
+        if presentation == .highlighted {
+            let textSize = value.size(withAttributes: attributes)
+            let padding = max(3, font.pointSize * 0.2)
+            let box = CGRect(x: point.x - padding, y: point.y - padding * 0.55,
+                             width: textSize.width + padding * 2,
+                             height: textSize.height + padding * 1.1)
+            foreground.withAlphaComponent(0.2).setFill()
+            NSBezierPath(roundedRect: box, xRadius: padding * 0.7, yRadius: padding * 0.7).fill()
+            foreground.withAlphaComponent(0.34).setStroke()
+            let border = NSBezierPath(roundedRect: box, xRadius: padding * 0.7, yRadius: padding * 0.7)
+            border.lineWidth = max(0.7, font.pointSize * 0.035)
+            border.stroke()
+        }
+        value.draw(at: point, withAttributes: attributes)
+        NSGraphicsContext.restoreGraphicsState()
+        context.restoreGState()
+    }
+
+    private static func pixelated(_ source: CGImage, blockPixels: CGFloat) -> CGImage? {
+        let block = max(1, Int(blockPixels.rounded()))
         let width = max(1, source.width / block)
         let height = max(1, source.height / block)
         guard let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8,
@@ -324,6 +504,18 @@ enum ImageRenderer {
         context.interpolationQuality = .low
         context.draw(source, in: CGRect(x: 0, y: 0, width: width, height: height))
         return context.makeImage()
+    }
+
+    private static let ciContext = CIContext(options: [.cacheIntermediates: false])
+
+    private static func blurred(_ source: CGImage, radius: Double) -> CGImage? {
+        let input = CIImage(cgImage: source)
+        let extent = input.extent
+        guard let filter = CIFilter(name: "CIGaussianBlur") else { return nil }
+        filter.setValue(input.clampedToExtent(), forKey: kCIInputImageKey)
+        filter.setValue(radius, forKey: kCIInputRadiusKey)
+        guard let output = filter.outputImage?.cropped(to: extent) else { return nil }
+        return ciContext.createCGImage(output, from: extent)
     }
 }
 

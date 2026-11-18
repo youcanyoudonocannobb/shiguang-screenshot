@@ -23,6 +23,8 @@ struct QuickToolView: View {
     @StoredState private var translationTimeoutTask: Task<Void, Never>?
     @StoredState private var fileEntries: [LauncherEntry] = []
     @StoredState private var fileSearchTask: Task<Void, Never>?
+    @StoredState private var reportedHeight: CGFloat = QuickToolView.collapsedHeight
+    @StoredState private var shrinkTask: Task<Void, Never>?
     @StateObject private var index = LauncherIndex.shared
     @FocusState private var inputFocused: Bool
 
@@ -185,11 +187,39 @@ struct QuickToolView: View {
             scheduleFileSearch()
         }
         .onChange(of: preferredHeight, initial: true) { _, height in
-            onHeightChange(height)
+            reportPanelHeight(height)
         }
         .onDisappear {
             translationTimeoutTask?.cancel()
             fileSearchTask?.cancel()
+            shrinkTask?.cancel()
+        }
+    }
+
+    /// Grow right away but let the panel settle before shrinking, so results
+    /// arriving in several batches no longer make the launcher jump up and down.
+    private func reportPanelHeight(_ height: CGFloat) {
+        if height >= reportedHeight {
+            shrinkTask?.cancel()
+            shrinkTask = nil
+            guard height > reportedHeight else { return }
+            reportedHeight = height
+            onHeightChange(height)
+            return
+        }
+        if height <= Self.collapsedHeight {
+            shrinkTask?.cancel()
+            shrinkTask = nil
+            reportedHeight = height
+            onHeightChange(height)
+            return
+        }
+        shrinkTask?.cancel()
+        shrinkTask = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(300))
+            guard !Task.isCancelled, height < reportedHeight else { return }
+            reportedHeight = height
+            onHeightChange(height)
         }
     }
 
@@ -532,9 +562,10 @@ struct QuickToolView: View {
 
     private func scheduleFileSearch() {
         fileSearchTask?.cancel()
-        fileEntries = []
         let value = trimmedQuery
         let lower = value.lowercased()
+        // Keep the previous file results until the debounced search returns so
+        // the panel does not collapse and re-expand on every keystroke.
         guard value.count >= 2, invocation == nil,
               !value.hasPrefix("/"), lower != "json", lower != "工具箱" else {
             fileEntries = []

@@ -13,6 +13,7 @@ swiftc -parse-as-library -swift-version 5 -target "$(uname -m)-apple-macosx15.0"
     "$PROJECT_DIR/Sources/Shiguang/SelectedTextReader.swift" \
     "$PROJECT_DIR/Sources/Shiguang/AppRelauncher.swift" \
     "$PROJECT_DIR/Sources/Shiguang/AppModel.swift" \
+    "$PROJECT_DIR/Sources/Shiguang/OCRTools.swift" \
     "$PROJECT_DIR/Sources/Shiguang/ImageCanvas.swift" \
     "$PROJECT_DIR/Sources/Shiguang/CaptureSelectionGeometry.swift" \
     "$PROJECT_DIR/Sources/Shiguang/ScreenRecorder.swift" \

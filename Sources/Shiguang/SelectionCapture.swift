@@ -18,9 +18,11 @@ final class SelectionCaptureController: NSObject {
     private var activeScreen: NSScreen?
     private var hoveredRect: CGRect?
     private var hoveredScreen = CGRect.zero
+    private var windowCandidates: [CGRect] = []
     private var captureTask: Task<Void, Never>?
     private var captureWatchdog: Task<Void, Never>?
     private var preparationTask: Task<Void, Never>?
+    private var prefetchTask: Task<(CGRect, NSImage?), Never>?
     private var escapeHotKey: EventHotKeyRef?
     var isActive: Bool { !windows.isEmpty || captureTask != nil || preparationTask != nil }
 
@@ -35,9 +37,8 @@ final class SelectionCaptureController: NSObject {
         cancel()
         if let targetApplication, !targetApplication.isTerminated,
            targetApplication.processIdentifier != ProcessInfo.processInfo.processIdentifier {
-            targetApplication.activate(options: [])
             preparationTask = Task {
-                do { try await Task.sleep(for: .milliseconds(400)) } catch { return }
+                do { try await settleFocus(on: targetApplication) } catch { return }
                 preparationTask = nil
                 presentSelection()
             }
@@ -50,6 +51,9 @@ final class SelectionCaptureController: NSObject {
         startPoint = nil
         currentPoint = nil
         activeScreen = nil
+        hoveredRect = nil
+        hoveredScreen = .zero
+        cacheWindowCandidates()
         guard !NSScreen.screens.isEmpty else {
             onError(CaptureFailure.displayUnavailable)
             return
@@ -91,6 +95,8 @@ final class SelectionCaptureController: NSObject {
         captureTask = nil
         captureWatchdog?.cancel()
         captureWatchdog = nil
+        prefetchTask?.cancel()
+        prefetchTask = nil
         if let escapeHotKey { UnregisterEventHotKey(escapeHotKey) }
         escapeHotKey = nil
         guard !windows.isEmpty else { return }
@@ -101,6 +107,8 @@ final class SelectionCaptureController: NSObject {
         currentPoint = nil
         activeScreen = nil
         hoveredRect = nil
+        hoveredScreen = .zero
+        windowCandidates.removeAll(keepingCapacity: false)
     }
 
     func cancelByUser() {
@@ -113,12 +121,14 @@ final class SelectionCaptureController: NSObject {
         startPoint = point
         currentPoint = point
         activeScreen = NSScreen.screens.first { $0.frame == screenFrame }
+        startSnapshotPrefetch(for: activeScreen)
+        // A new drag invalidates hover holes on the other displays too.
         refresh()
     }
 
     fileprivate func mouseDragged(to point: NSPoint) {
         currentPoint = point
-        refresh()
+        refresh(screenFrame: activeScreen?.frame)
     }
 
     fileprivate func mouseUp() {
@@ -130,11 +140,14 @@ final class SelectionCaptureController: NSObject {
             .intersection(NSRect(origin: .zero, size: screen.frame.size))
         if local.width <= 4, local.height <= 4, hoveredScreen == screen.frame, let hoveredRect { local = hoveredRect }
         let excluded = Set(windows.map { CGWindowID($0.windowNumber) })
-        cancel()
         guard !local.isNull, local.width > 4, local.height > 4 else {
+            cancel()
             onCancel()
             return
         }
+        let prefetched = prefetchTask
+        prefetchTask = nil
+        cancel()
         let global = NSRect(x: screen.frame.minX + local.minX,
                             y: screen.frame.minY + local.minY,
                             width: local.width, height: local.height)
@@ -154,10 +167,26 @@ final class SelectionCaptureController: NSObject {
             do {
                 // Returning focus after dismissing the panel also restores Stage Manager's target window.
                 if let targetApplication, !targetApplication.isTerminated {
-                    targetApplication.activate(options: [])
-                    try await Task.sleep(for: .milliseconds(400))
-                } else { try await Task.sleep(for: .milliseconds(90)) }
+                    try await settleFocus(on: targetApplication)
+                } else { try await Task.sleep(for: .milliseconds(50)) }
                 try Task.checkCancellation()
+                if let prefetched {
+                    let (prefetchedFrame, snapshot) = await prefetched.value
+                    if prefetchedFrame == screen.frame, let snapshot {
+                        if let onScreenSelected {
+                            captureTask = nil
+                            onScreenSelected(snapshot, screen, global)
+                            return
+                        }
+                        if let image = CaptureSelectionGeometry.crop(
+                            snapshot, rect: local, displaySize: screen.frame.size
+                        ) {
+                            captureTask = nil
+                            onComplete(image, global)
+                            return
+                        }
+                    }
+                }
                 if let onRegionSelected {
                     captureTask = nil
                     onRegionSelected(screen, local, global)
@@ -185,28 +214,83 @@ final class SelectionCaptureController: NSObject {
         }
     }
 
-    fileprivate func refresh() {
-        windows.compactMap { $0.contentView as? SelectionView }.forEach { $0.needsDisplay = true }
+    private func startSnapshotPrefetch(for screen: NSScreen?) {
+        guard onRegionSelected == nil, prefetchTask == nil, let screen else { return }
+        let screenFrame = screen.frame
+        let excluded = Set(windows.map { CGWindowID($0.windowNumber) })
+        prefetchTask = Task { @MainActor in
+            do {
+                let image = try await ScreenCaptureService.capture(
+                    screen: screen,
+                    selection: CGRect(origin: .zero, size: screenFrame.size),
+                    excludingWindowIDs: excluded
+                )
+                return (screenFrame, image)
+            } catch {
+                return (screenFrame, nil)
+            }
+        }
+    }
+
+    private func settleFocus(on application: NSRunningApplication) async throws {
+        application.activate(options: [])
+        let clock = ContinuousClock()
+        let deadline = clock.now.advanced(by: .milliseconds(160))
+        while !application.isActive, clock.now < deadline {
+            try await Task.sleep(for: .milliseconds(8))
+        }
+        // Give Stage Manager/WindowServer one short pass to restore the app's
+        // visible window before ScreenCaptureKit reads the display.
+        try await Task.sleep(for: .milliseconds(40))
+    }
+
+    fileprivate func refresh(screenFrame: CGRect? = nil) {
+        let views = windows.compactMap { $0.contentView as? SelectionView }
+        if let screenFrame {
+            views.filter { $0.screenFrame == screenFrame }.forEach { $0.needsDisplay = true }
+        } else {
+            views.forEach { $0.needsDisplay = true }
+        }
     }
 
     fileprivate func hover(at point: NSPoint, screenFrame: CGRect) {
-        guard startPoint == nil,
-              let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] else { return }
+        guard startPoint == nil else { return }
         let global = CGPoint(x: screenFrame.minX + point.x, y: screenFrame.minY + point.y)
-        let primaryTop = NSScreen.screens.first?.frame.maxY ?? screenFrame.maxY
-        let cgPoint = CGPoint(x: global.x, y: primaryTop - global.y)
-        let ignored = Set(["Dock", "Window Server", "WindowManager", "Control Center", "Notification Center"])
-        hoveredRect = windows.lazy.compactMap { item -> CGRect? in
-            guard let layer = item[kCGWindowLayer as String] as? Int, (0...3).contains(layer),
-                  let pid = item[kCGWindowOwnerPID as String] as? Int32, pid != ProcessInfo.processInfo.processIdentifier,
-                  let owner = item[kCGWindowOwnerName as String] as? String, !ignored.contains(owner),
-                  let bounds = item[kCGWindowBounds as String] as? NSDictionary,
-                  let rect = CGRect(dictionaryRepresentation: bounds as CFDictionary), rect.width > 60, rect.height > 40,
-                  rect.contains(cgPoint) else { return nil }
-            return CaptureSelectionGeometry.windowRect(rect, primaryTop: primaryTop, screenFrame: screenFrame)
+        let previousScreen = hoveredScreen
+        hoveredRect = windowCandidates.lazy.compactMap { rect in
+            guard rect.contains(global) else { return nil }
+            let clipped = rect.intersection(screenFrame)
+            guard !clipped.isNull, clipped.width >= 8, clipped.height >= 8 else { return nil }
+            return clipped.offsetBy(dx: -screenFrame.minX, dy: -screenFrame.minY)
         }.first
         hoveredScreen = screenFrame
-        refresh()
+        if previousScreen != screenFrame {
+            refresh(screenFrame: previousScreen)
+        }
+        refresh(screenFrame: screenFrame)
+    }
+
+    private func cacheWindowCandidates() {
+        windowCandidates.removeAll(keepingCapacity: true)
+        guard let windows = CGWindowListCopyWindowInfo(
+            [.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID
+        ) as? [[String: Any]] else { return }
+        let primaryTop = NSScreen.screens.first?.frame.maxY ?? 0
+        let ignored = Set(["Dock", "Window Server", "WindowManager", "Control Center", "Notification Center"])
+        windowCandidates = windows.compactMap { item in
+            guard let layer = item[kCGWindowLayer as String] as? Int, (0...3).contains(layer),
+                  let pid = item[kCGWindowOwnerPID as String] as? Int32,
+                  pid != ProcessInfo.processInfo.processIdentifier,
+                  let owner = item[kCGWindowOwnerName as String] as? String,
+                  !ignored.contains(owner),
+                  let bounds = item[kCGWindowBounds as String] as? NSDictionary,
+                  let rect = CGRect(dictionaryRepresentation: bounds as CFDictionary),
+                  rect.width > 60, rect.height > 40 else { return nil }
+            return CGRect(
+                x: rect.minX, y: primaryTop - rect.maxY,
+                width: rect.width, height: rect.height
+            )
+        }
     }
 
     fileprivate func selection(in view: SelectionView) -> NSRect? {
@@ -256,29 +340,29 @@ final class SelectionView: NSView {
     }
 
     override func draw(_ dirtyRect: NSRect) {
+        let mask = NSBezierPath(rect: bounds)
+        if let rect = controller?.selection(in: self) {
+            mask.appendRect(rect)
+            mask.windingRule = .evenOdd
+        }
         SelectionChrome.mask.setFill()
-        NSBezierPath(rect: bounds).fill()
+        mask.fill()
         let prompt = (controller?.prompt ?? "") as NSString
         let attributes: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: 15, weight: .medium), .foregroundColor: NSColor.white
+            .font: NSFont.systemFont(ofSize: 13.5, weight: .semibold), .foregroundColor: NSColor.white
         ]
         let size = prompt.size(withAttributes: attributes)
-        let badge = CGRect(x: (bounds.width - size.width) / 2 - 16, y: bounds.height - 86,
-                           width: size.width + 32, height: 40)
-        NSColor(hex: "172A38").withAlphaComponent(0.9).setFill()
-        NSBezierPath(roundedRect: badge, xRadius: 12, yRadius: 12).fill()
-        SelectionChrome.accent.withAlphaComponent(0.35).setStroke()
-        let promptBorder = NSBezierPath(roundedRect: badge, xRadius: 12, yRadius: 12)
-        promptBorder.lineWidth = 1
+        let badge = CGRect(x: (bounds.width - size.width) / 2 - 15, y: bounds.height - 78,
+                           width: size.width + 30, height: 34)
+        NSColor(hex: "172A38").withAlphaComponent(0.88).setFill()
+        NSBezierPath(roundedRect: badge, xRadius: 17, yRadius: 17).fill()
+        NSColor.white.withAlphaComponent(0.12).setStroke()
+        let promptBorder = NSBezierPath(roundedRect: badge, xRadius: 17, yRadius: 17)
+        promptBorder.lineWidth = 0.8
         promptBorder.stroke()
-        prompt.draw(at: CGPoint(x: badge.minX + 16, y: badge.minY + 10), withAttributes: attributes)
+        prompt.draw(at: CGPoint(x: badge.minX + 15, y: badge.minY + (badge.height - size.height) / 2),
+                    withAttributes: attributes)
         if let rect = controller?.selection(in: self) {
-            if let context = NSGraphicsContext.current?.cgContext {
-                context.saveGState()
-                context.setBlendMode(.clear)
-                context.fill(rect)
-                context.restoreGState()
-            }
             if let context = NSGraphicsContext.current?.cgContext {
                 SelectionChrome.draw(in: rect, context: context)
             }
@@ -286,7 +370,7 @@ final class SelectionView: NSView {
             // Real-time dimensions badge
             if rect.width > 20 && rect.height > 15 {
                 let text = "\(Int((rect.width * backingScale).rounded())) × \(Int((rect.height * backingScale).rounded())) px" as NSString
-                let font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .medium)
+                let font = NSFont.monospacedDigitSystemFont(ofSize: 10.5, weight: .semibold)
                 let attrs: [NSAttributedString.Key: Any] = [
                     .font: font,
                     .foregroundColor: NSColor.white
@@ -294,14 +378,16 @@ final class SelectionView: NSView {
                 let textSize = text.size(withAttributes: attrs)
                 let badgeY = rect.minY >= textSize.height + 10 ? rect.minY - textSize.height - 8 : rect.maxY + 6
                 let badgeRect = NSRect(x: rect.minX, y: max(4, badgeY),
-                                       width: textSize.width + 12, height: textSize.height + 6)
-                NSColor(hex: "172A38").withAlphaComponent(0.9).setFill()
-                NSBezierPath(roundedRect: badgeRect, xRadius: 4, yRadius: 4).fill()
-                SelectionChrome.accent.withAlphaComponent(0.45).setStroke()
-                let badgeBorder = NSBezierPath(roundedRect: badgeRect, xRadius: 4, yRadius: 4)
-                badgeBorder.lineWidth = 1
+                                       width: textSize.width + 14, height: textSize.height + 7)
+                NSColor(hex: "172A38").withAlphaComponent(0.88).setFill()
+                NSBezierPath(roundedRect: badgeRect, xRadius: 6, yRadius: 6).fill()
+                NSColor.white.withAlphaComponent(0.12).setStroke()
+                let badgeBorder = NSBezierPath(roundedRect: badgeRect, xRadius: 6, yRadius: 6)
+                badgeBorder.lineWidth = 0.8
                 badgeBorder.stroke()
-                text.draw(at: NSPoint(x: badgeRect.minX + 6, y: badgeRect.minY + 3), withAttributes: attrs)
+                text.draw(at: NSPoint(x: badgeRect.minX + 7,
+                                      y: badgeRect.minY + (badgeRect.height - textSize.height) / 2),
+                          withAttributes: attrs)
             }
         }
     }

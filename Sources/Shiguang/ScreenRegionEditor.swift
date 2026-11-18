@@ -42,6 +42,8 @@ private final class ScreenRegionEditorView: NSView {
     private var dragHandle: SelectionHandle?
     private var selecting = false
     private var subscription: AnyCancellable?
+    private var refreshScheduled = false
+    private var cachedToolbarSize = CGSize.zero
     private let decoration = SelectionDecorationView()
     private let toolbar: NSHostingView<ScreenCaptureToolbar>
 
@@ -70,7 +72,7 @@ private final class ScreenRegionEditorView: NSView {
         }
         model.finishPendingAnnotation = { [weak canvas] in canvas?.commitPendingText() }
         subscription = model.objectWillChange.sink { [weak self] _ in
-            DispatchQueue.main.async { [weak self] in self?.refresh() }
+            self?.scheduleRefresh()
         }
         refresh()
     }
@@ -78,23 +80,43 @@ private final class ScreenRegionEditorView: NSView {
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
     override var acceptsFirstResponder: Bool { true }
 
+    private func scheduleRefresh() {
+        guard !refreshScheduled else { return }
+        refreshScheduled = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.refreshScheduled = false
+            self.refresh()
+        }
+    }
+
     private func refresh() {
         guard let image = model.image else { return }
         canvas.frame = selection
         canvas.configure(image: image, marks: model.marks, tool: model.tool, color: model.markColor,
             zoom: model.zoomFactor, resetID: model.viewportResetID, movesWindow: false,
-            enabled: !model.isBusy, inPlace: true, filledShapes: model.fillShapes)
+            enabled: !model.isBusy, inPlace: true, filledShapes: model.fillShapes,
+            lineWidthPoints: model.markLineWidthPoints, numberSizePoints: model.numberSizePoints,
+            arrowDoubleHeaded: model.arrowDoubleHeaded,
+            textFontSize: model.textFontSize, textPresentation: model.textPresentation,
+            maskStyle: model.maskStyle, maskSizePoints: model.maskSizePoints,
+            spotlightStrength: model.spotlightStrength)
         decoration.frame = bounds
         decoration.selection = selection
         decoration.scale = screen.backingScaleFactor
         decoration.needsDisplay = true
-        toolbar.layoutSubtreeIfNeeded()
-        let fitted = toolbar.fittingSize
-        let size = fitted.width > 100 && fitted.height > 20 ? fitted
-            : CGSize(width: AnnotationToolbar.minimumWidth, height: 46 + AnnotationToolbar.hoverSpace)
+        if cachedToolbarSize.width <= 100 || cachedToolbarSize.height <= 20 {
+            toolbar.layoutSubtreeIfNeeded()
+            let fitted = toolbar.fittingSize
+            cachedToolbarSize = fitted.width > 100 && fitted.height > 20 ? fitted
+                : CGSize(width: AnnotationToolbar.minimumWidth, height: 46 + AnnotationToolbar.hoverSpace)
+        }
+        let size = cachedToolbarSize
         let visible = screen.visibleFrame.offsetBy(dx: -screen.frame.minX, dy: -screen.frame.minY)
         let barSize = CGSize(width: size.width, height: max(20, size.height - AnnotationToolbar.hoverSpace))
-        var frame = CaptureSelectionGeometry.toolbarFrame(selection: selection, size: barSize, visible: visible)
+        var frame = CaptureSelectionGeometry.toolbarFrame(
+            selection: selection, size: barSize, visible: visible, horizontal: .center
+        )
         // Grow upward so the hover label has room without moving the bar.
         frame.size.height += AnnotationToolbar.hoverSpace
         toolbar.frame = frame
@@ -111,10 +133,7 @@ private final class ScreenRegionEditorView: NSView {
     }
 
     private func handle(at point: CGPoint) -> SelectionHandle? {
-        SelectionHandle.allCases.first { handle in
-            let center = handle.point(in: selection)
-            return abs(point.x - center.x) <= 7 && abs(point.y - center.y) <= 7
-        }
+        CaptureSelectionGeometry.handle(at: point, in: selection, tolerance: 9)
     }
 
     override func hitTest(_ point: NSPoint) -> NSView? {
@@ -125,11 +144,25 @@ private final class ScreenRegionEditorView: NSView {
     }
 
     override func resetCursorRects() {
-        for item in SelectionHandle.allCases {
-            let p = item.point(in: selection)
-            let cursor: NSCursor = [.left, .right].contains(item) ? .resizeLeftRight :
-                ([.top, .bottom].contains(item) ? .resizeUpDown : .crosshair)
-            addCursorRect(CGRect(x: p.x - 6, y: p.y - 6, width: 12, height: 12), cursor: cursor)
+        let band: CGFloat = 9
+        let edgeRects: [(SelectionHandle, CGRect)] = [
+            (.top, CGRect(x: selection.minX, y: selection.maxY - band,
+                          width: selection.width, height: band * 2)),
+            (.bottom, CGRect(x: selection.minX, y: selection.minY - band,
+                             width: selection.width, height: band * 2)),
+            (.left, CGRect(x: selection.minX - band, y: selection.minY,
+                           width: band * 2, height: selection.height)),
+            (.right, CGRect(x: selection.maxX - band, y: selection.minY,
+                            width: band * 2, height: selection.height))
+        ]
+        for (item, rect) in edgeRects {
+            addCursorRect(rect, cursor: item.resizeCursor)
+        }
+        for item in SelectionHandle.allCases where item.isCorner {
+            let point = item.point(in: selection)
+            addCursorRect(CGRect(x: point.x - band, y: point.y - band,
+                                 width: band * 2, height: band * 2),
+                          cursor: item.resizeCursor)
         }
     }
 
@@ -148,10 +181,12 @@ private final class ScreenRegionEditorView: NSView {
         let point = event.locationInWindow
         if let dragHandle {
             changeSelection(CaptureSelectionGeometry.resized(startRect, handle: dragHandle,
-                delta: CGSize(width: point.x - startPoint.x, height: point.y - startPoint.y), bounds: bounds))
+                delta: CGSize(width: point.x - startPoint.x, height: point.y - startPoint.y),
+                bounds: bounds))
         } else if selecting {
-            let rect = CGRect(x: min(startPoint.x, point.x), y: min(startPoint.y, point.y),
-                              width: abs(point.x - startPoint.x), height: abs(point.y - startPoint.y)).intersection(bounds)
+            let rect = CaptureSelectionGeometry.selectionRect(
+                from: startPoint, to: point, bounds: bounds
+            )
             if rect.width >= 8 && rect.height >= 8 { changeSelection(rect) }
         }
     }
@@ -170,12 +205,37 @@ private final class ScreenRegionEditorView: NSView {
         selection = rect
         let global = rect.offsetBy(dx: screen.frame.minX, dy: screen.frame.minY)
         model.updateCaptureRegion(image, rect: global) { CaptureSelectionGeometry.remap($0, from: previous, to: rect) }
-        refresh()
+        // objectWillChange schedules one coalesced refresh for all published
+        // values that updateCaptureRegion changes.
     }
 
     override func keyDown(with event: NSEvent) {
         if event.keyCode == 53 { model.discardDraft(); return }
         if event.keyCode == 36 || event.keyCode == 76 { model.confirmDraft(); return }
+        if event.modifierFlags.intersection([.command, .control, .option]).isEmpty,
+           let key = event.charactersIgnoringModifiers?.lowercased() {
+            let tools: [String: MarkTool] = [
+                "1": .rectangle, "2": .ellipse, "3": .arrow, "4": .line,
+                "5": .pen, "6": .highlighter, "7": .text, "8": .number,
+                "9": .mosaic
+            ]
+            if let tool = tools[key] {
+                model.tool = tool
+                return
+            }
+            if key == "o" {
+                model.recognizeInWindow()
+                return
+            }
+            if key == "s" {
+                model.captureScrolling(.automatic)
+                return
+            }
+            if key == "t" {
+                model.requestPin()
+                return
+            }
+        }
         let step: CGFloat = event.modifierFlags.contains(.shift) ? 10 : 1 / screen.backingScaleFactor
         var dx: CGFloat = 0, dy: CGFloat = 0
         switch event.keyCode {
@@ -185,7 +245,10 @@ private final class ScreenRegionEditorView: NSView {
         case 126: dy = step
         default: super.keyDown(with: event); return
         }
-        if !model.isBusy { changeSelection(CaptureSelectionGeometry.clamped(selection.offsetBy(dx: dx, dy: dy), to: bounds)) }
+        if !model.isBusy {
+            changeSelection(CaptureSelectionGeometry.clamped(selection.offsetBy(dx: dx, dy: dy), to: bounds))
+            window?.invalidateCursorRects(for: self)
+        }
     }
 }
 
@@ -209,17 +272,23 @@ private final class SelectionDecorationView: NSView {
             SelectionChrome.draw(in: selection, context: context)
         }
         let text = "\(Int((selection.width * scale).rounded())) × \(Int((selection.height * scale).rounded())) px" as NSString
-        let attributes: [NSAttributedString.Key: Any] = [.font: NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .medium), .foregroundColor: NSColor.white]
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: NSFont.monospacedDigitSystemFont(ofSize: 10.5, weight: .semibold),
+            .foregroundColor: NSColor.white
+        ]
         let size = text.size(withAttributes: attributes)
         let y = selection.maxY + size.height + 8 < bounds.maxY ? selection.maxY + 4 : selection.maxY - size.height - 8
-        let badge = CGRect(x: min(selection.minX, bounds.maxX - size.width - 14), y: y, width: size.width + 14, height: size.height + 6)
-        NSColor(hex: "172A38").withAlphaComponent(0.92).setFill()
-        NSBezierPath(roundedRect: badge, xRadius: 4, yRadius: 4).fill()
-        SelectionChrome.accent.withAlphaComponent(0.5).setStroke()
-        let badgeBorder = NSBezierPath(roundedRect: badge, xRadius: 4, yRadius: 4)
-        badgeBorder.lineWidth = 1
+        let badge = CGRect(x: min(selection.minX, bounds.maxX - size.width - 16),
+                           y: y, width: size.width + 16, height: size.height + 7)
+        NSColor(hex: "172A38").withAlphaComponent(0.88).setFill()
+        NSBezierPath(roundedRect: badge, xRadius: 6, yRadius: 6).fill()
+        NSColor.white.withAlphaComponent(0.12).setStroke()
+        let badgeBorder = NSBezierPath(roundedRect: badge, xRadius: 6, yRadius: 6)
+        badgeBorder.lineWidth = 0.8
         badgeBorder.stroke()
-        text.draw(at: CGPoint(x: badge.minX + 7, y: badge.minY + 3), withAttributes: attributes)
+        text.draw(at: CGPoint(x: badge.minX + 8,
+                              y: badge.minY + (badge.height - size.height) / 2),
+                  withAttributes: attributes)
         setAccessibilityLabel(text as String)
     }
 }

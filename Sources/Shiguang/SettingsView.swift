@@ -110,11 +110,14 @@ struct SettingsSidebarGroup: Identifiable {
 struct SettingsView: View {
     @ObservedObject var model: AppModel
     @ObservedObject var clipboard: ClipboardHistory
-    @AppStorage("settings.selectedPage") private var selectedPageRaw = ShiguangSettingsPage.general.rawValue
+    @AppStorage("settings.selectedPage") private var storedPageRaw = ShiguangSettingsPage.general.rawValue
+    @StoredState private var selectedPage = ShiguangSettingsPage(
+        rawValue: UserDefaults.standard.string(forKey: "settings.selectedPage") ?? ""
+    ) ?? .general
     @StoredState private var query = ""
 
     private var selection: ShiguangSettingsPage {
-        ShiguangSettingsPage(rawValue: selectedPageRaw) ?? .general
+        selectedPage
     }
 
     var body: some View {
@@ -140,8 +143,24 @@ struct SettingsView: View {
         .onChange(of: query) { _, value in
             let matches = ShiguangSettingsPage.allCases.filter { $0.matches(value) }
             if !matches.contains(selection), let first = matches.first {
-                selectedPageRaw = first.rawValue
+                select(first)
             }
+        }
+        .onChange(of: selectedPage) { _, page in
+            storedPageRaw = page.rawValue
+        }
+        .onChange(of: storedPageRaw) { _, raw in
+            guard let page = ShiguangSettingsPage(rawValue: raw), page != selectedPage else { return }
+            select(page)
+        }
+    }
+
+    private func select(_ page: ShiguangSettingsPage) {
+        guard page != selectedPage else { return }
+        // Do not route a click through UserDefaults and a second SwiftUI update.
+        // The selected page must be visible on the next display pass.
+        withTransaction(Transaction(animation: nil)) {
+            selectedPage = page
         }
     }
 
@@ -191,7 +210,7 @@ struct SettingsView: View {
                                 }
                                 ForEach(pages) { page in
                                     SettingsSidebarRow(page: page, isSelected: selection == page) {
-                                        selectedPageRaw = page.rawValue
+                                        select(page)
                                     }
                                 }
                             }
@@ -331,7 +350,9 @@ private struct SettingsDetailView: View {
             .padding(28)
             .frame(maxWidth: .infinity, alignment: .top)
         }
-        .id(page)
+        // Keep the hosting ScrollView alive while switching pages. Recreating
+        // every detail view (and all of its controls) is the expensive part.
+        .animation(nil, value: page)
         .background(Palette.background)
         .onChange(of: page) { _, _ in revealsAIKey = false }
     }
@@ -407,15 +428,15 @@ private struct SettingsDetailView: View {
                             ? "使用 Apple 系统翻译；首次使用某个语言对时，可能需要下载语言包。"
                             : "翻译内容会发送到你配置的 AI 服务。") {
                 SettingsRow("翻译引擎") {
-                    HStack(spacing: 0) {
-                        Spacer(minLength: 0)
-                        Picker("翻译引擎", selection: $model.translationProvider) {
-                            ForEach(TranslationProvider.allCases) { provider in
-                                Text(provider.title).tag(provider)
-                            }
+                    Picker("翻译引擎", selection: $model.translationProvider) {
+                        ForEach(TranslationProvider.allCases) { provider in
+                            Text(provider.title).tag(provider)
                         }
-                        .labelsHidden().pickerStyle(.segmented).frame(width: 230)
                     }
+                    .labelsHidden()
+                    .pickerStyle(.segmented)
+                    .frame(width: 230, alignment: .trailing)
+                    .animation(nil, value: model.translationProvider)
                 }
             }
 
@@ -424,21 +445,18 @@ private struct SettingsDetailView: View {
                     "AI 服务",
                     footer: "\(model.aiAPI.detail)。每个协议分别保存 API Key，且仅写入 macOS 钥匙串；本机地址可省略 Key。测试连接会发送一次 Hello 翻译请求。"
                 ) {
-                    SettingsFieldRow("协议") {
-                        HStack(spacing: 0) {
-                            Picker("AI 协议", selection: Binding(
-                                get: { model.aiAPI },
-                                set: { model.selectAIAPI($0) }
-                            )) {
-                                ForEach(AITranslationAPI.allCases) { api in
-                                    Text(api.title).tag(api)
-                                }
+                    SettingsRow("协议") {
+                        Picker("AI 协议", selection: Binding(
+                            get: { model.aiAPI },
+                            set: { model.selectAIAPI($0) }
+                        )) {
+                            ForEach(AITranslationAPI.allCases) { api in
+                                Text(api.title).tag(api)
                             }
-                            .labelsHidden()
-                            .pickerStyle(.menu)
-                            .fixedSize()
-                            Spacer(minLength: 0)
                         }
+                        .labelsHidden()
+                        .pickerStyle(.menu)
+                        .frame(width: 210, alignment: .trailing)
                     }
                     SettingsSeparator()
                     SettingsFieldRow("接口地址") {
@@ -488,14 +506,13 @@ private struct SettingsDetailView: View {
 
             SettingsSection("语言", footer: "自动识别原文：中文默认译英语，其他语言默认译简体中文。") {
                 SettingsRow("默认目标语言") {
-                    HStack(spacing: 0) {
-                        Spacer(minLength: 0)
-                        Picker("目标语言", selection: Binding(get: { model.targetLanguage },
-                                                            set: { model.languageEdited(target: $0) })) {
-                            ForEach(LanguageChoice.targets) { Text($0.name).tag($0.id) }
-                        }
-                        .labelsHidden().frame(width: 150)
+                    Picker("目标语言", selection: Binding(get: { model.targetLanguage },
+                                                        set: { model.languageEdited(target: $0) })) {
+                        ForEach(LanguageChoice.targets) { Text($0.name).tag($0.id) }
                     }
+                    .labelsHidden()
+                    .pickerStyle(.menu)
+                    .frame(width: 150, alignment: .trailing)
                 }
             }
             SettingsSection("快捷入口") {

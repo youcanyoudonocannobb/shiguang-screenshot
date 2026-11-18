@@ -92,6 +92,15 @@ final class AppModel: ObservableObject {
     @Published var marks: [Mark] = []
     @Published var tool: MarkTool = .pointer
     @Published var markColor = "E45F3C"
+    @Published var markLineWidthPoints = AnnotationSizeMetrics.defaultLineWidthPoints
+    @Published var numberSizePoints = AnnotationSizeMetrics.defaultNumberSizePoints
+    @Published var arrowDoubleHeaded = false
+    @Published var textFontSize: Double = 20
+    @Published var textPresentation: TextPresentation = .plain
+    @Published var maskStyle: MaskStyle = .pixel
+    @Published var maskSizePoints = AnnotationSizeMetrics.defaultMaskSizePoints
+    @Published var spotlightStrength: SpotlightStrength = .light
+    @Published var captureAspectRatio: CaptureAspectRatio = .free
     @Published var fillShapes: Bool {
         didSet { preferences.set(fillShapes, forKey: "fillShapes") }
     }
@@ -478,6 +487,7 @@ final class AppModel: ObservableObject {
         undoMarks = []
         redoMarks = []
         tool = .pointer
+        captureAspectRatio = .free
         notice = "编辑中 · 点击 ✅ 复制到剪贴板"
         let automatic = inlineRect == nil && (autoTranslate || autoOCR)
         if translate || automatic {
@@ -491,16 +501,20 @@ final class AppModel: ObservableObject {
 
     func updateCaptureRegion(_ newImage: NSImage, rect: CGRect, remap: (Mark) -> Mark) {
         guard draftImage != nil, editorMode == .annotation, !isBusy else { return }
-        marks = marks.map(remap)
-        undoMarks = undoMarks.map { $0.map(remap) }
-        redoMarks = redoMarks.map { $0.map(remap) }
-        image = newImage
-        draftImage = newImage
+        let mappedMarks = marks.map(remap)
+        let mappedUndo = undoMarks.map { $0.map(remap) }
+        let mappedRedo = redoMarks.map { $0.map(remap) }
+        if mappedMarks != marks { marks = mappedMarks }
+        if mappedUndo != undoMarks { undoMarks = mappedUndo }
+        if mappedRedo != redoMarks { redoMarks = mappedRedo }
+        if image !== newImage { image = newImage }
+        if draftImage !== newImage { draftImage = newImage }
         captureRect = rect
-        sourceText = ""
-        translatedText = ""
-        zoomFactor = 1
-        notice = "调整选区 · 点击 ✅ 复制到剪贴板"
+        if !sourceText.isEmpty { sourceText = "" }
+        if !translatedText.isEmpty { translatedText = "" }
+        if zoomFactor != 1 { zoomFactor = 1 }
+        let selectionNotice = "调整选区 · 点击 ✅ 复制到剪贴板"
+        if notice != selectionNotice { notice = selectionNotice }
     }
 
     func acceptDraft() {
@@ -573,6 +587,7 @@ final class AppModel: ObservableObject {
         undoMarks = []
         redoMarks = []
         tool = .pointer
+        captureAspectRatio = .free
         editorMode = .annotation
         errorMessage = nil
         notice = "已取消本次截图"

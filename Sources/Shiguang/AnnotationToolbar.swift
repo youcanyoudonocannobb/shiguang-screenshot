@@ -10,94 +10,59 @@ struct AnnotationToolbar: View {
     var showsCompletion = true
     @StoredState private var showsRecordingOptions = false
     @StoredState private var showsScrollOptions = false
-    @StoredState private var showsColors = false
     @StoredState private var showsMoreTools = false
+    @StoredState private var styleTool: MarkTool?
     @StoredState private var hoveredTitle: String?
     @StoredState private var hoverFrames: [String: CGRect] = [:]
     private static let primaryMarkTools: [MarkTool] = [
         .rectangle, .ellipse, .line, .arrow, .pen, .number, .text, .mosaic, .picker
     ]
+    private static let markColors = [
+        "F45C93", "F05A52", "F29A38", "F1CF45",
+        "58B75B", "3F7EE0", "111111", "FFFFFF"
+    ]
 
     var body: some View {
-        HStack(spacing: 5) {
-            groupBox {
+        HStack(spacing: 8) {
+            annotationCluster
+            actionCluster
+        }
+        .overlay(alignment: .topLeading) { hoverChip }
+        .coordinateSpace(name: "annotationToolbar")
+        .fixedSize(horizontal: true, vertical: true)
+        .tint(.white)
+        .preferredColorScheme(.dark)
+        .animation(.easeOut(duration: 0.12), value: hoveredTitle)
+        .onChange(of: model.tool) { _, tool in
+            if Self.primaryMarkTools.contains(tool), tool != .picker, !model.isBusy {
+                styleTool = tool
+            } else if tool == .pointer || tool == .picker || model.isBusy {
+                styleTool = nil
+            }
+        }
+    }
+
+    private var annotationCluster: some View {
+        toolbarCluster {
             if showsSelectionTools {
                 action("移动选区", symbol: "cursorarrow", selected: model.tool == .pointer) {
                     model.tool = .pointer
+                    styleTool = nil
                     model.resetViewport()
                 }
             }
             ForEach(Self.primaryMarkTools, id: \.self) { tool in
-                if tool == .text {
-                    action(tool.title, text: "T", selected: model.tool == tool) {
-                        model.tool = model.tool == tool ? .pointer : tool
-                    }.disabled(model.isBusy)
-                } else {
-                    action(tool.title, symbol: tool.symbol, selected: model.tool == tool) {
-                        model.tool = model.tool == tool ? .pointer : tool
-                    }.disabled(model.isBusy)
-                }
+                markToolButton(tool)
             }
-            Button { showsColors.toggle() } label: {
-                ZStack(alignment: .bottomTrailing) {
-                    Image(systemName: "paintpalette.fill")
-                        .font(.system(size: 16, weight: .medium))
-                    Circle()
-                        .fill(Color(hex: model.markColor))
-                        .frame(width: 10, height: 10)
-                        .overlay(Circle().stroke(Palette.overlay, lineWidth: 2))
-                        .offset(x: 2, y: 2)
-                }
-                .frame(width: 30, height: 32)
-                .foregroundStyle(.white)
-                .contentShape(RoundedRectangle(cornerRadius: 6))
-                .background(showsColors ? Color.white.opacity(0.16) : .clear,
-                            in: RoundedRectangle(cornerRadius: 6))
-            }
-            .buttonStyle(ToolbarActionStyle())
-            .onHover { hoveredTitle = $0 ? "标注颜色" : nil }
-            .onGeometryChange(for: CGRect.self) { $0.frame(in: .named("annotationToolbar")) } action: { hoverFrames["标注颜色"] = $0 }
-            .help("标注颜色")
-            .accessibilityLabel("标注颜色")
-            .popover(isPresented: $showsColors, arrowEdge: .top) {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("标注颜色")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.86))
-                    HStack(spacing: 9) {
-                        ForEach(["216D91", "347A69", "D58B3D", "C95959", "FFFFFF", "172A38"], id: \.self) { hex in
-                            Button {
-                                model.markColor = hex
-                                showsColors = false
-                            } label: {
-                                Circle()
-                                    .fill(Color(hex: hex))
-                                    .frame(width: 24, height: 24)
-                                    .overlay(Circle().stroke(hex == "FFFFFF" ? Palette.line : .clear, lineWidth: 1))
-                                    .padding(3)
-                                    .overlay(Circle().stroke(model.markColor == hex ? Color.white : .clear, lineWidth: 2))
-                            }
-                            .buttonStyle(.plain)
-                            .accessibilityLabel("标注颜色 \(hex)")
-                        }
-                    }
-                }
-                .padding(13)
-                .background(Palette.overlay)
-                .preferredColorScheme(.dark)
-            }
-            action("更多功能", symbol: "ellipsis", selected: showsMoreTools || moreToolsActive) {
-                showsMoreTools.toggle()
-            }
-            .popover(isPresented: $showsMoreTools, arrowEdge: .top) {
-                moreToolsPanel
-            }
-            }
-            groupBox {
+            moreToolsButton
+        }
+    }
+
+    private var actionCluster: some View {
+        toolbarCluster {
             action("撤销", symbol: "arrow.uturn.backward") { model.undo() }.disabled(!model.canUndo)
             action("重做", symbol: "arrow.uturn.forward") { model.redo() }.disabled(!model.canRedo)
-            }
-            groupBox {
+            clusterDivider
             action(model.isRecognizing ? "取消文字识别" : "文字识别", symbol: model.isRecognizing ? "stop.circle" : "text.viewfinder") {
                 if model.isRecognizing { model.cancelRecognition() }
                 else { model.recognizeInWindow() }
@@ -134,46 +99,402 @@ struct AnnotationToolbar: View {
                         }
                     }
                 }
-            }
-            groupBox {
+            clusterDivider
             action("打开剪贴板", symbol: "doc.on.clipboard") { model.showClipboard?() }
             action("钉住到桌面", symbol: "pin") {
                 model.requestPin()
             }
             .disabled(model.isBusy)
-            }
             if showsCompletion, model.draftImage != nil {
-                completionDivider
-                completionAction("取消截图", symbol: "xmark", tint: Color(hex: "E28B86")) {
+                clusterDivider
+                completionAction("取消截图", symbol: "xmark", prominent: false) {
                     model.discardDraft()
                 }
-                completionAction("复制到剪贴板并完成", symbol: "checkmark", tint: Color(hex: "82C9A6")) {
+                completionAction("复制到剪贴板并完成", symbol: "checkmark", prominent: true) {
                     model.confirmDraft()
                 }
             } else if showsCompletion {
-                completionDivider
+                clusterDivider
                 action("关闭截图 (Esc)", symbol: "xmark") { model.closeEditor() }
             }
         }
-        .padding(7)
-        .background(
-            LinearGradient(colors: [Palette.overlayRaised, Palette.overlay],
-                           startPoint: .top, endPoint: .bottom),
-            in: RoundedRectangle(cornerRadius: 13, style: .continuous)
-        )
-        .overlay(alignment: .top) {
-            RoundedRectangle(cornerRadius: 13, style: .continuous)
-                .stroke(LinearGradient(colors: [.white.opacity(0.16), .clear],
-                                       startPoint: .top, endPoint: .bottom), lineWidth: 1)
+    }
+
+    private func markToolButton(_ tool: MarkTool) -> some View {
+        Group {
+            if tool == .text {
+                action(tool.title, text: "T", selected: model.tool == tool) {
+                    chooseMarkTool(tool)
+                }
+            } else {
+                action(tool.title, symbol: tool.symbol, selected: model.tool == tool) {
+                    chooseMarkTool(tool)
+                }
+            }
         }
-        .overlay(RoundedRectangle(cornerRadius: 13, style: .continuous).stroke(.white.opacity(0.13)))
-        .overlay(alignment: .topLeading) { hoverChip }
-        .shadow(color: .black.opacity(0.24), radius: 12, y: 5)
-        .coordinateSpace(name: "annotationToolbar")
-        .fixedSize(horizontal: true, vertical: true)
-        .tint(.white)
+        .disabled(model.isBusy)
+        .popover(isPresented: stylePopoverBinding(for: tool), arrowEdge: .bottom) {
+            toolStylePanel(tool)
+        }
+    }
+
+    private func chooseMarkTool(_ tool: MarkTool) {
+        if tool == .picker {
+            model.tool = .picker
+            styleTool = nil
+            return
+        }
+        if model.tool == tool {
+            styleTool = styleTool == tool ? nil : tool
+        } else {
+            model.tool = tool
+            styleTool = tool
+        }
+    }
+
+    private func stylePopoverBinding(for tool: MarkTool) -> Binding<Bool> {
+        Binding(
+            get: { styleTool == tool && model.tool == tool && !model.isBusy },
+            set: { show in
+                if show {
+                    styleTool = tool
+                } else if styleTool == tool {
+                    styleTool = nil
+                }
+            }
+        )
+    }
+
+    private func toolStylePanel(_ tool: MarkTool) -> some View {
+        HStack(spacing: 7) {
+            if supportsColor(tool) {
+                ForEach(Self.markColors, id: \.self) { hex in
+                    colorSwatch(hex)
+                }
+                if !Self.markColors.contains(model.markColor.uppercased()) {
+                    colorSwatch(model.markColor)
+                }
+                colorDivider
+                Button {
+                    styleTool = nil
+                    model.tool = .picker
+                } label: {
+                    Image(systemName: "eyedropper")
+                        .font(.system(size: 14.5, weight: .medium))
+                        .frame(width: 26, height: 28)
+                        .foregroundStyle(.white)
+                }
+                .buttonStyle(ToolbarActionStyle())
+                .help("从截图取色")
+                .accessibilityLabel("从截图取色")
+            }
+            if supportsShapeFill(tool) {
+                if supportsColor(tool) { colorDivider }
+                fillStyleToggle
+            }
+            if supportsStroke(tool) {
+                if supportsColor(tool) || supportsShapeFill(tool) { colorDivider }
+                lineWeightToggle
+            }
+            if tool == .number {
+                colorDivider
+                numberSizeToggle
+            }
+            if tool == .arrow {
+                colorDivider
+                arrowHeadToggle
+            }
+            if tool == .text {
+                colorDivider
+                textControls
+            }
+            if tool == .mosaic {
+                maskControls
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(Palette.overlay, in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 13, style: .continuous)
+            .stroke(.white.opacity(0.12), lineWidth: 0.8))
+        .shadow(color: .black.opacity(0.28), radius: 10, y: 4)
         .preferredColorScheme(.dark)
-        .animation(.easeOut(duration: 0.12), value: hoveredTitle)
+    }
+
+    private func colorSwatch(_ hex: String) -> some View {
+        let normalized = hex.uppercased()
+        let selected = model.markColor.uppercased() == normalized
+        return Button {
+            model.markColor = normalized
+        } label: {
+            Circle()
+                .fill(Color(hex: normalized))
+                .frame(width: 20, height: 20)
+                .overlay(Circle().stroke(
+                    normalized == "FFFFFF" ? .black.opacity(0.18) : .white.opacity(0.14),
+                    lineWidth: 0.7
+                ))
+                .padding(3)
+                .overlay(Circle().stroke(selected ? Palette.overlayAccent : .clear,
+                                          lineWidth: 2))
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .help(selected ? "当前标注颜色" : "使用此标注颜色")
+        .accessibilityLabel(selected ? "当前标注颜色 \(normalized)" : "标注颜色 \(normalized)")
+    }
+
+    private func supportsColor(_ tool: MarkTool) -> Bool {
+        [.rectangle, .ellipse, .line, .arrow, .pen, .highlighter, .number, .text].contains(tool)
+    }
+
+    private func supportsShapeFill(_ tool: MarkTool) -> Bool {
+        tool == .rectangle || tool == .ellipse
+    }
+
+    private func supportsStroke(_ tool: MarkTool) -> Bool {
+        [.rectangle, .ellipse, .line, .arrow, .pen, .highlighter].contains(tool)
+    }
+
+    private var fillStyleToggle: some View {
+        HStack(spacing: 2) {
+            fillStyleButton("空心", filled: false)
+            fillStyleButton("实心", filled: true)
+        }
+        .padding(2)
+        .background(.white.opacity(0.07),
+                    in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+
+    private func fillStyleButton(_ title: String, filled: Bool) -> some View {
+        let selected = model.fillShapes == filled
+        return Button {
+            model.fillShapes = filled
+        } label: {
+            Text(title)
+                .font(.system(size: 10.5, weight: .semibold))
+                .foregroundStyle(selected ? .white : .white.opacity(0.62))
+                .frame(height: 24)
+                .padding(.horizontal, 8)
+                .background(selected ? .white.opacity(0.16) : .clear,
+                            in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(title)
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+
+    private var lineWeightToggle: some View {
+        stepperControl(
+            value: pointLabel(model.markLineWidthPoints),
+            decreaseHelp: "减小线条粗细",
+            increaseHelp: "增大线条粗细",
+            canDecrease: model.markLineWidthPoints > AnnotationSizeMetrics.lineWidthRange.lowerBound,
+            canIncrease: model.markLineWidthPoints < AnnotationSizeMetrics.lineWidthRange.upperBound,
+            decrease: {
+                model.markLineWidthPoints = stepped(
+                    model.markLineWidthPoints,
+                    by: -AnnotationSizeMetrics.stepPoints,
+                    within: AnnotationSizeMetrics.lineWidthRange
+                )
+            },
+            increase: {
+                model.markLineWidthPoints = stepped(
+                    model.markLineWidthPoints,
+                    by: AnnotationSizeMetrics.stepPoints,
+                    within: AnnotationSizeMetrics.lineWidthRange
+                )
+            }
+        )
+    }
+
+    private var numberSizeToggle: some View {
+        stepperControl(
+            value: pointLabel(model.numberSizePoints),
+            decreaseHelp: "减小序号大小",
+            increaseHelp: "增大序号大小",
+            canDecrease: model.numberSizePoints > AnnotationSizeMetrics.numberSizeRange.lowerBound,
+            canIncrease: model.numberSizePoints < AnnotationSizeMetrics.numberSizeRange.upperBound,
+            decrease: {
+                model.numberSizePoints = stepped(
+                    model.numberSizePoints,
+                    by: -AnnotationSizeMetrics.stepPoints,
+                    within: AnnotationSizeMetrics.numberSizeRange
+                )
+            },
+            increase: {
+                model.numberSizePoints = stepped(
+                    model.numberSizePoints,
+                    by: AnnotationSizeMetrics.stepPoints,
+                    within: AnnotationSizeMetrics.numberSizeRange
+                )
+            }
+        )
+    }
+
+    private func pointLabel(_ value: Double) -> String {
+        "\(Int(value.rounded())) pt"
+    }
+
+    private func stepped(_ value: Double, by delta: Double,
+                         within range: ClosedRange<Double>) -> Double {
+        min(range.upperBound, max(range.lowerBound, value + delta))
+    }
+
+    private func stepperControl(value: String, decreaseHelp: String, increaseHelp: String,
+                                canDecrease: Bool, canIncrease: Bool,
+                                decrease: @escaping () -> Void,
+                                increase: @escaping () -> Void) -> some View {
+        HStack(spacing: 1) {
+            stepperButton(symbol: "minus", help: decreaseHelp,
+                          enabled: canDecrease, perform: decrease)
+            Text(value)
+                .font(.system(size: 10.5, weight: .semibold, design: .rounded))
+                .foregroundStyle(.white)
+                .frame(width: 42, height: 24)
+                .background(.white.opacity(0.08),
+                            in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+            stepperButton(symbol: "plus", help: increaseHelp,
+                          enabled: canIncrease, perform: increase)
+        }
+        .padding(2)
+        .background(.white.opacity(0.07),
+                    in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+
+    private func stepperButton(symbol: String, help: String, enabled: Bool,
+                               perform: @escaping () -> Void) -> some View {
+        Button(action: perform) {
+            Image(systemName: symbol)
+                .font(.system(size: 9.5, weight: .bold))
+                .foregroundStyle(.white.opacity(enabled ? 1 : 0.3))
+                .frame(width: 24, height: 24)
+                .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .disabled(!enabled)
+        .help(help)
+        .accessibilityLabel(help)
+    }
+
+    private var arrowHeadToggle: some View {
+        HStack(spacing: 2) {
+            compactChoice("单头", selected: !model.arrowDoubleHeaded) {
+                model.arrowDoubleHeaded = false
+            }
+            compactChoice("双头", selected: model.arrowDoubleHeaded) {
+                model.arrowDoubleHeaded = true
+            }
+        }
+        .padding(2)
+        .background(.white.opacity(0.07),
+                    in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+
+    private var textControls: some View {
+        HStack(spacing: 5) {
+            stepperControl(
+                value: pointLabel(model.textFontSize),
+                decreaseHelp: "减小字号",
+                increaseHelp: "增大字号",
+                canDecrease: model.textFontSize > AnnotationSizeMetrics.textSizeRange.lowerBound,
+                canIncrease: model.textFontSize < AnnotationSizeMetrics.textSizeRange.upperBound,
+                decrease: {
+                    model.textFontSize = stepped(
+                        model.textFontSize,
+                        by: -AnnotationSizeMetrics.stepPoints,
+                        within: AnnotationSizeMetrics.textSizeRange
+                    )
+                },
+                increase: {
+                    model.textFontSize = stepped(
+                        model.textFontSize,
+                        by: AnnotationSizeMetrics.stepPoints,
+                        within: AnnotationSizeMetrics.textSizeRange
+                    )
+                }
+            )
+
+            HStack(spacing: 2) {
+                ForEach(TextPresentation.allCases, id: \.self) { style in
+                    compactChoice(style.title, selected: model.textPresentation == style) {
+                        model.textPresentation = style
+                    }
+                }
+            }
+            .padding(2)
+            .background(.white.opacity(0.07),
+                        in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        }
+    }
+
+    private var maskControls: some View {
+        HStack(spacing: 5) {
+            stepperControl(
+                value: pointLabel(model.maskSizePoints),
+                decreaseHelp: "减小马赛克颗粒",
+                increaseHelp: "增大马赛克颗粒",
+                canDecrease: model.maskSizePoints > AnnotationSizeMetrics.maskSizeRange.lowerBound,
+                canIncrease: model.maskSizePoints < AnnotationSizeMetrics.maskSizeRange.upperBound,
+                decrease: {
+                    model.maskSizePoints = stepped(
+                        model.maskSizePoints,
+                        by: -AnnotationSizeMetrics.stepPoints,
+                        within: AnnotationSizeMetrics.maskSizeRange
+                    )
+                },
+                increase: {
+                    model.maskSizePoints = stepped(
+                        model.maskSizePoints,
+                        by: AnnotationSizeMetrics.stepPoints,
+                        within: AnnotationSizeMetrics.maskSizeRange
+                    )
+                }
+            )
+
+            HStack(spacing: 2) {
+                ForEach(MaskStyle.allCases, id: \.self) { style in
+                    compactChoice(style.title, selected: model.maskStyle == style) {
+                        model.maskStyle = style
+                    }
+                }
+            }
+            .padding(2)
+            .background(.white.opacity(0.07),
+                        in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        }
+    }
+
+    private func compactChoice(_ title: String, selected: Bool,
+                               perform: @escaping () -> Void) -> some View {
+        Button(action: perform) {
+            Text(title)
+                .font(.system(size: 10.5, weight: .semibold))
+                .foregroundStyle(selected ? .white : .white.opacity(0.62))
+                .frame(height: 24)
+                .padding(.horizontal, 7)
+                .background(selected ? .white.opacity(0.16) : .clear,
+                            in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(title)
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+
+    private var colorDivider: some View {
+        Rectangle()
+            .fill(.white.opacity(0.14))
+            .frame(width: 1, height: 20)
+            .padding(.horizontal, 2)
+    }
+
+    private var moreToolsButton: some View {
+        action("更多功能", symbol: "ellipsis", selected: showsMoreTools || moreToolsActive) {
+            showsMoreTools.toggle()
+        }
+        .popover(isPresented: $showsMoreTools, arrowEdge: .top) {
+            moreToolsPanel
+        }
     }
 
     /// Hover label drawn above the bar. The AppKit tooltip path (`help`) was
@@ -200,26 +521,34 @@ struct AnnotationToolbar: View {
         }
     }
 
-    private func groupBox<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+    private func toolbarCluster<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
         HStack(spacing: 1) { content() }
             .padding(.horizontal, 5)
-            .padding(.vertical, 3)
-            .background(.white.opacity(0.055),
-                        in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous)
-                .stroke(.white.opacity(0.06), lineWidth: 1))
+            .padding(.vertical, 4)
+            .background(
+                LinearGradient(colors: [Palette.overlayRaised.opacity(0.98),
+                                        Palette.overlay.opacity(0.98)],
+                               startPoint: .top, endPoint: .bottom),
+                in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+            )
+            .overlay(alignment: .top) {
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .stroke(LinearGradient(colors: [.white.opacity(0.16), .clear],
+                                           startPoint: .top, endPoint: .bottom), lineWidth: 0.8)
+            }
+            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(.white.opacity(0.12), lineWidth: 0.8))
+            .shadow(color: .black.opacity(0.24), radius: 8, y: 4)
     }
 
-    private var divider: some View {
-        Rectangle().fill(.white.opacity(0.18)).frame(width: 1, height: 20).padding(.horizontal, 3)
-    }
-
-    private var completionDivider: some View {
-        Rectangle().fill(.white.opacity(0.22)).frame(width: 1, height: 24).padding(.horizontal, 6)
+    private var clusterDivider: some View {
+        Rectangle().fill(.white.opacity(0.14))
+            .frame(width: 1, height: 17)
+            .padding(.horizontal, 3)
     }
 
     private var moreToolsActive: Bool {
-        model.fillShapes || model.tool == .highlighter || model.tool == .redact
+        model.tool == .highlighter || model.tool == .redact
     }
 
     private var moreToolsPanel: some View {
@@ -320,41 +649,39 @@ struct AnnotationToolbar: View {
     }
 
     private func icon(_ symbol: String, selected: Bool = false) -> some View {
-        ZStack(alignment: .bottom) {
-            Image(systemName: symbol)
-                .font(.system(size: 17, weight: .medium))
-                .frame(width: 30, height: 32)
+        ZStack {
             if selected {
-                Capsule()
-                    .fill(Palette.overlayAccent)
-                    .frame(width: 11, height: 2)
-                    .padding(.bottom, 2)
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(Palette.accent)
+                    .frame(width: 25, height: 25)
+                    .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .stroke(.white.opacity(0.18), lineWidth: 0.7))
             }
+            Image(systemName: symbol)
+                .font(.system(size: 15.5, weight: .medium))
+                .frame(width: 28, height: 30)
         }
         .foregroundStyle(.white)
         .contentShape(RoundedRectangle(cornerRadius: 6))
-        .background(selected ? Color.white.opacity(0.14) : .clear,
-                    in: RoundedRectangle(cornerRadius: 6))
     }
 
     private func action(_ title: String, text: String, selected: Bool = false,
                         perform: @escaping () -> Void) -> some View {
         Button(action: perform) {
-            ZStack(alignment: .bottom) {
-                Text(text)
-                    .font(.system(size: 16.5, weight: .semibold, design: .rounded))
-                    .frame(width: 30, height: 32)
+            ZStack {
                 if selected {
-                    Capsule()
-                        .fill(Palette.overlayAccent)
-                        .frame(width: 11, height: 2)
-                        .padding(.bottom, 2)
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(Palette.accent)
+                        .frame(width: 25, height: 25)
+                        .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .stroke(.white.opacity(0.18), lineWidth: 0.7))
                 }
+                Text(text)
+                    .font(.system(size: 15.5, weight: .semibold, design: .rounded))
+                    .frame(width: 28, height: 30)
             }
             .foregroundStyle(.white)
             .contentShape(RoundedRectangle(cornerRadius: 6))
-            .background(selected ? Color.white.opacity(0.14) : .clear,
-                        in: RoundedRectangle(cornerRadius: 6))
         }
         .buttonStyle(ToolbarActionStyle())
         .help(title)
@@ -375,16 +702,21 @@ struct AnnotationToolbar: View {
         .onGeometryChange(for: CGRect.self) { $0.frame(in: .named("annotationToolbar")) } action: { hoverFrames[title] = $0 }
     }
 
-    private func completionAction(_ title: String, symbol: String, tint: Color,
+    private func completionAction(_ title: String, symbol: String, prominent: Bool,
                                   perform: @escaping () -> Void) -> some View {
         Button(action: perform) {
             Image(systemName: symbol)
-                .font(.system(size: 17, weight: .bold))
-                .foregroundStyle(tint)
-                .frame(width: 34, height: 32)
-                .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
-                .overlay(RoundedRectangle(cornerRadius: 8).stroke(tint.opacity(0.5), lineWidth: 1))
-                .contentShape(RoundedRectangle(cornerRadius: 8))
+                .font(.system(size: prominent ? 13 : 15, weight: .bold))
+                .foregroundStyle(prominent ? Color.white : Color.white.opacity(0.82))
+                .frame(width: 28, height: 30)
+                .background(
+                    Circle().fill(prominent ? Palette.accent : Color.clear)
+                )
+                .overlay(
+                    Circle().stroke(prominent ? Color.white.opacity(0.22) : Color.clear,
+                                    lineWidth: 0.8)
+                )
+                .contentShape(Circle())
         }
         .buttonStyle(ToolbarActionStyle())
         .help(title)
@@ -466,7 +798,6 @@ private struct ToolbarActionStyle: ButtonStyle {
             .background(configuration.isPressed ? Color.white.opacity(0.18) :
                             (hovered ? Color.white.opacity(0.10) : .clear),
                         in: RoundedRectangle(cornerRadius: 6))
-            .scaleEffect(hovered && enabled ? 1.05 : 1)
             .opacity(enabled ? 1 : 0.32)
             .animation(.easeOut(duration: 0.12), value: hovered)
             .onHover { hovered = $0 }

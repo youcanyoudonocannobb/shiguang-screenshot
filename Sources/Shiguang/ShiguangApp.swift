@@ -59,6 +59,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     private var clipboardReturnApplication: NSRunningApplication?
     private weak var clipboardReturnWindow: NSWindow?
     private var quickToolWindow: NSPanel?
+    private var quickToolTopEdge: CGFloat?
+    private var quickToolPendingHeight: CGFloat?
+    private var quickToolResizeScheduled = false
     private var quickToolReturnApplication: NSRunningApplication?
     private var toolboxWindow: NSPanel?
 
@@ -392,13 +395,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             ?? NSScreen.main
         let visible = screen?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1200, height: 800)
         let size = panel.frame.size
+        quickToolTopEdge = visible.maxY - 24
         panel.setFrameOrigin(NSPoint(
             x: visible.midX - size.width / 2,
-            y: visible.maxY - size.height - 24
+            y: (quickToolTopEdge ?? visible.maxY - 24) - size.height
         ))
     }
 
     private func resizeQuickToolWindow(to contentHeight: CGFloat) {
+        quickToolPendingHeight = contentHeight
+        guard !quickToolResizeScheduled else { return }
+        quickToolResizeScheduled = true
+        // Coalesce the height updates SwiftUI emits during a single layout pass
+        // so the panel resizes once instead of flickering between heights.
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.quickToolResizeScheduled = false
+            guard let height = self.quickToolPendingHeight else { return }
+            self.quickToolPendingHeight = nil
+            self.applyQuickToolWindowHeight(height)
+        }
+    }
+
+    private func applyQuickToolWindowHeight(_ contentHeight: CGFloat) {
         guard let panel = quickToolWindow else { return }
         let targetSize = NSSize(
             width: QuickToolView.panelWidth,
@@ -406,7 +425,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         )
         guard abs(panel.frame.width - targetSize.width) > 0.5 ||
               abs(panel.frame.height - targetSize.height) > 0.5 else { return }
-        let top = panel.frame.maxY
+        // Keep the top edge pinned; animated resizes stacked on fast typing made
+        // the launcher visibly bounce up and down.
+        if let expectedTop = quickToolTopEdge, abs(panel.frame.maxY - expectedTop) > 1 {
+            // The user dragged the panel; follow its new position from now on.
+            quickToolTopEdge = panel.frame.maxY
+        }
+        let top = quickToolTopEdge ?? panel.frame.maxY
         let midX = panel.frame.midX
         let targetFrame = NSRect(
             x: midX - targetSize.width / 2,
@@ -414,7 +439,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             width: targetSize.width,
             height: targetSize.height
         )
-        panel.setFrame(targetFrame, display: true, animate: panel.isVisible)
+        panel.setFrame(targetFrame, display: true)
     }
 
     private func closeQuickToolWindow() {
