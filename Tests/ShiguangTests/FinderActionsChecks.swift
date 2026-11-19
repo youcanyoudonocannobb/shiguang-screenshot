@@ -1,5 +1,5 @@
 import Darwin
-import Foundation
+import AppKit
 
 private struct CheckFailure: LocalizedError {
     let message: String
@@ -37,7 +37,7 @@ struct FinderActionsChecks {
             let actions: [FinderAction] = [
                 .create(.text), .create(.markdown), .create(.json), .create(.csv),
                 .copyPaths, .copyNames, .openTerminal, .transfer(.copy), .transfer(.move),
-                .archive(.compress), .archive(.extract), .openFavorite(UUID()),
+                .archive(.compress), .archive(.extract), .openFavorite(UUID()), .openWith(UUID()),
             ]
             for action in actions {
                 let request = try grant.scope.request(action, for: [folder]).unwrap()
@@ -75,13 +75,87 @@ struct FinderActionsChecks {
             let scope = try FinderFiles.grant(for: root).scope
             let old = try PropertyListEncoder().encode(LegacySettings(scope: scope, language: .japanese))
             let migrated = try PropertyListDecoder().decode(FinderMenuSettings.self, from: old)
-            try check(migrated.scope == scope && migrated.depth == .two && migrated.language == .japanese,
+            try check(migrated.scope == scope && migrated.depth == .two && migrated.language == .japanese &&
+                      migrated.apps.isEmpty,
                       "Restoring an existing folder grant defaults to two menu levels")
             let favorite = FinderMenuFavorite(id: UUID(), title: "项目", symbol: "folder")
-            let custom = FinderMenuSettings(scope: scope, language: .english, depth: .one, favorites: [favorite])
+            let app = FinderMenuApp(id: UUID(), title: "Visual Studio Code", icon: Data([0x89, 0x50, 0x4E, 0x47]))
+            let custom = FinderMenuSettings(scope: scope, language: .english, depth: .one, favorites: [favorite],
+                                            apps: [app])
             let data = try PropertyListEncoder().encode(custom)
             let restored = try PropertyListDecoder().decode(FinderMenuSettings.self, from: data)
-            try check(restored.depth == .one && restored.favorites == [favorite], "Publish custom depth and favorite folder")
+            try check(restored.depth == .one && restored.favorites == [favorite] && restored.apps == [app],
+                      "Publish custom depth, favorite folders and apps")
+        }
+    }
+
+    /// Apps added in Settings open the Finder selection. The request names
+    /// the app only by ID, so the extension cannot make PawShot launch
+    /// anything the user did not add.
+    static func openWithApps() async throws {
+        try await withFixture { root in
+            let fm = FileManager.default
+            let grant = try FinderFiles.grant(for: root)
+            let folder = root.appendingPathComponent("项目 Folder", isDirectory: true)
+            try fm.createDirectory(at: folder, withIntermediateDirectories: false)
+            let first = folder.appendingPathComponent("说明 1.md")
+            let second = folder.appendingPathComponent("data,2 & more.json")
+            try Data("# 说明\n".utf8).write(to: first)
+            try Data("{}\n".utf8).write(to: second)
+
+            let id = UUID()
+            let request = try grant.scope.request(.openWith(id), for: [second, first, folder]).unwrap()
+            try check(FinderActionRequest(url: try request.url.unwrap()) == request,
+                      "Opening several items with an app keeps each item in order")
+            func physical(_ url: URL) -> String { url.resolvingSymlinksInPath().standardizedFileURL.path }
+            let items = try request.paths.map { physical(try FinderFiles.item(at: $0, in: grant).url) }
+            try check(items == [second, first, folder].map(physical), "Each selected item resolves inside the grant")
+            try check(grant.scope.request(.openWith(id), for: [root]) != nil,
+                      "Right-clicking a folder's background opens that folder in the app")
+            let favorite = try grant.scope.request(.openFavorite(id), for: [folder]).unwrap()
+            try check(FinderActionRequest(url: try favorite.url.unwrap())?.action == .openFavorite(id),
+                      "Apps and favorite folders use separate routes")
+            for route in ["open-with-not-an-id", "open-with-", "open-with-\(id.uuidString)-extra"] {
+                let url = try URL(string: "pawshot-finder://\(route)?scope=\(grant.scope.id)&item=").unwrap()
+                try check(FinderActionRequest(url: url) == nil, "Reject \(route)")
+            }
+            let withPath = try URL(string: "pawshot-finder://open-with-\(id.uuidString)/Applications/Calculator.app" +
+                                   "?scope=\(grant.scope.id)&item=").unwrap()
+            try check(FinderActionRequest(url: withPath) == nil, "A request cannot name an app by path")
+
+            let bundle = root.appendingPathComponent("Fixture Editor.app", isDirectory: true)
+            try fm.createDirectory(at: bundle.appendingPathComponent("Contents/MacOS"), withIntermediateDirectories: true)
+            let info: [String: Any] = ["CFBundleIdentifier": "dev.shiguang.fixture-editor",
+                                       "CFBundleName": "Fixture Editor", "CFBundlePackageType": "APPL"]
+            try PropertyListSerialization.data(fromPropertyList: info, format: .xml, options: 0)
+                .write(to: bundle.appendingPathComponent("Contents/Info.plist"))
+            let app = try FinderApp(bundleAt: bundle).unwrap()
+            try check(app.bundleIdentifier == "dev.shiguang.fixture-editor" && app.title == "Fixture Editor",
+                      "An added app keeps its bundle ID and shows its name without .app")
+            try check(FinderApp(bundleAt: first) == nil && FinderApp(bundleAt: folder) == nil,
+                      "Only app bundles can be added")
+            let copy = try FinderApp(bundleAt: bundle).unwrap()
+            try check(copy.id != app.id && copy.isSameApp(as: app), "Adding the same app again is detected")
+
+            let restored = try PropertyListDecoder().decode(
+                [FinderApp].self, from: PropertyListEncoder().encode([app])
+            )
+            try check(restored == [app], "Added apps survive a relaunch")
+
+            let entry = app.menuEntry
+            let pixels = try NSBitmapImageRep(data: entry.icon.unwrap()).unwrap()
+            try check(entry.id == app.id && entry.title == "Fixture Editor" &&
+                      pixels.pixelsWide == 32 && pixels.pixelsHigh == 32,
+                      "The menu shows the app's name and a 16 pt icon at 2x")
+            let center = pixels.colorAt(x: 16, y: 16)?.alphaComponent ?? 0
+            try check(center > 0.5, "The menu icon is drawn, not blank")
+
+            let moved = root.appendingPathComponent("Moved Editor.app", isDirectory: true)
+            try fm.moveItem(at: bundle, to: moved)
+            try check(app.resolvedURL(locate: { $0 == "dev.shiguang.fixture-editor" ? moved : nil }) == moved,
+                      "An app that moved is found again by its bundle ID")
+            try check(app.resolvedURL(locate: { _ in nil }) == nil, "A deleted app is reported as unavailable")
+            try check(FinderAppError.unavailable.errorDescription?.isEmpty == false, "Explain a missing app")
         }
     }
 
@@ -400,6 +474,7 @@ struct FinderActionsChecks {
         let cases: [(String, () async throws -> Void)] = [
             ("finder_request_roundtrip_and_scope", route),
             ("menu_depth_and_favorites_preferences", menuPreferences),
+            ("open_with_apps_requests_and_bundles", openWithApps),
             ("all_folders_coverage_and_cross_folder_actions", allFoldersCoverage),
             ("new_file_formats_names_and_cancel", namesAndCancel),
             ("no_overwrite_under_concurrency", exclusiveCreation),

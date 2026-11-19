@@ -1,6 +1,7 @@
 import AppKit
 import FinderSync
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct FinderFavorite: Codable, Identifiable {
     var id = UUID()
@@ -37,6 +38,7 @@ final class FinderActionsCoordinator: NSObject, ObservableObject, NSWindowDelega
     private static let allFoldersKey = "finderActions.allFoldersID"
     private static let menuDepthKey = "finderActions.menuDepth"
     private static let favoritesKey = "finderActions.favoriteFolders"
+    private static let appsKey = "finderActions.openWithApps"
 
     @Published private var grant = UserDefaults.standard.data(forKey: grantKey)
         .flatMap { try? PropertyListDecoder().decode(FinderFolderGrant.self, from: $0) }
@@ -52,7 +54,9 @@ final class FinderActionsCoordinator: NSObject, ObservableObject, NSWindowDelega
     }
     @Published private(set) var favorites = UserDefaults.standard.data(forKey: favoritesKey)
         .flatMap { try? PropertyListDecoder().decode([FinderFavorite].self, from: $0) } ?? FinderFavorite.standardDirectories()
-    private var folderPicker: NSOpenPanel?
+    @Published private(set) var apps = UserDefaults.standard.data(forKey: appsKey)
+        .flatMap { try? PropertyListDecoder().decode([FinderApp].self, from: $0) } ?? []
+    private var picker: NSOpenPanel?
     private(set) var window: NSPanel?
     private(set) var pendingFileOperation: Task<Void, Never>?
 
@@ -92,7 +96,7 @@ final class FinderActionsCoordinator: NSObject, ObservableObject, NSWindowDelega
 
     func publishSettings() {
         FinderMenuSettings(scope: activeScope, language: .stored, depth: menuDepth,
-                           favorites: favorites.map(\.menuEntry)).publish()
+                           favorites: favorites.map(\.menuEntry), apps: apps.map(\.menuEntry)).publish()
     }
 
     func addFavorite() {
@@ -112,6 +116,34 @@ final class FinderActionsCoordinator: NSObject, ObservableObject, NSWindowDelega
         guard let data = try? PropertyListEncoder().encode(folders) else { return }
         UserDefaults.standard.set(data, forKey: Self.favoritesKey)
         favorites = folders
+        publishSettings()
+    }
+
+    func addApps() {
+        choose(title: "选择应用", prompt: "添加", parent: NSApp.keyWindow, configure: { panel in
+            panel.allowedContentTypes = [.applicationBundle]
+            panel.canChooseFiles = true
+            panel.canChooseDirectories = false
+            panel.allowsMultipleSelection = true
+            panel.directoryURL = URL(fileURLWithPath: "/Applications", isDirectory: true)
+        }) { [weak self] urls in
+            guard let self else { return }
+            var apps = self.apps
+            for app in urls.compactMap(FinderApp.init(bundleAt:)) where !apps.contains(where: { $0.isSameApp(as: app) }) {
+                apps.append(app)
+            }
+            self.saveApps(apps)
+        }
+    }
+
+    func removeApp(_ id: UUID) {
+        saveApps(apps.filter { $0.id != id })
+    }
+
+    private func saveApps(_ apps: [FinderApp]) {
+        guard let data = try? PropertyListEncoder().encode(apps) else { return }
+        UserDefaults.standard.set(data, forKey: Self.appsKey)
+        self.apps = apps
         publishSettings()
     }
 
@@ -171,6 +203,12 @@ final class FinderActionsCoordinator: NSObject, ObservableObject, NSWindowDelega
                     presentError(L("常用目录已移动或不可用。"))
                     return
                 }
+            case .openWith(let id):
+                guard let app = apps.first(where: { $0.id == id })?.resolvedURL() else {
+                    throw FinderAppError.unavailable
+                }
+                let items = try request.paths.map { try FinderFiles.item(at: $0, in: grant).url }
+                open(items, with: app, addsToRecentItems: true)
             }
         } catch {
             presentError(error.localizedDescription)
@@ -212,14 +250,17 @@ final class FinderActionsCoordinator: NSObject, ObservableObject, NSWindowDelega
     }
 
     private func openTerminal(at folder: URL) {
-        let workspace = NSWorkspace.shared
-        guard let terminal = workspace.urlForApplication(withBundleIdentifier: "com.apple.Terminal") else {
+        guard let terminal = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.Terminal") else {
             presentError(L("找不到终端应用。"))
             return
         }
+        open([folder], with: terminal, addsToRecentItems: false)
+    }
+
+    private func open(_ items: [URL], with app: URL, addsToRecentItems: Bool) {
         let configuration = NSWorkspace.OpenConfiguration()
-        configuration.addsToRecentItems = false
-        workspace.open([folder], withApplicationAt: terminal, configuration: configuration) { [weak self] _, error in
+        configuration.addsToRecentItems = addsToRecentItems
+        NSWorkspace.shared.open(items, withApplicationAt: app, configuration: configuration) { [weak self] _, error in
             guard let error else { return }
             Task { @MainActor in self?.presentError(error.localizedDescription) }
         }
@@ -265,29 +306,39 @@ final class FinderActionsCoordinator: NSObject, ObservableObject, NSWindowDelega
 
     private func chooseFolder(initial: URL?, title: String, prompt: String, parent: NSWindow?,
                               onSelection: @escaping (URL) -> Void) {
-        guard folderPicker == nil else {
-            folderPicker?.makeKeyAndOrderFront(nil)
+        choose(title: title, prompt: prompt, parent: parent, configure: { panel in
+            panel.canChooseDirectories = true
+            panel.canChooseFiles = false
+            panel.allowsMultipleSelection = false
+            panel.canCreateDirectories = true
+            panel.directoryURL = initial
+        }) { urls in
+            if let folder = urls.first { onSelection(folder) }
+        }
+    }
+
+    /// Shows one open panel at a time; a second request brings back the first.
+    private func choose(title: String, prompt: String, parent: NSWindow?, configure: (NSOpenPanel) -> Void,
+                        onSelection: @escaping ([URL]) -> Void) {
+        guard picker == nil else {
+            picker?.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
             return
         }
-        let picker = NSOpenPanel()
-        picker.canChooseDirectories = true
-        picker.canChooseFiles = false
-        picker.allowsMultipleSelection = false
-        picker.canCreateDirectories = true
-        picker.directoryURL = initial
-        picker.title = L(title)
-        picker.prompt = L(prompt)
-        folderPicker = picker
-        let completion: (NSApplication.ModalResponse) -> Void = { [weak self, weak picker] result in
-            let folder = picker?.url
-            self?.folderPicker = nil
-            if result == .OK, let folder { onSelection(folder) }
+        let panel = NSOpenPanel()
+        configure(panel)
+        panel.title = L(title)
+        panel.prompt = L(prompt)
+        picker = panel
+        let completion: (NSApplication.ModalResponse) -> Void = { [weak self, weak panel] result in
+            let urls = panel?.urls ?? []
+            self?.picker = nil
+            if result == .OK, !urls.isEmpty { onSelection(urls) }
         }
         if let parent {
-            picker.beginSheetModal(for: parent, completionHandler: completion)
+            panel.beginSheetModal(for: parent, completionHandler: completion)
         } else {
-            picker.begin(completionHandler: completion)
+            panel.begin(completionHandler: completion)
             NSApp.activate(ignoringOtherApps: true)
         }
     }

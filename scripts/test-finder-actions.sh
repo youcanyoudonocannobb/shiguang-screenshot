@@ -8,6 +8,7 @@ swiftc -parse-as-library -swift-version 5 -target "$(uname -m)-apple-macosx15.0"
     "$PROJECT_DIR/Sources/Shiguang/Localization.swift" \
     "$PROJECT_DIR/Sources/Shiguang/FinderActionRequest.swift" \
     "$PROJECT_DIR/Sources/Shiguang/FinderFiles.swift" \
+    "$PROJECT_DIR/Sources/Shiguang/FinderApps.swift" \
     "$PROJECT_DIR/Tests/ShiguangTests/FinderActionsChecks.swift" \
     -o "$BUILD_DIR/PawShotFinderActionsChecks"
 "$BUILD_DIR/PawShotFinderActionsChecks"

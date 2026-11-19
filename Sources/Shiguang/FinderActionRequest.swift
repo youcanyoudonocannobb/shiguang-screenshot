@@ -49,6 +49,8 @@ enum FinderAction: Equatable {
     case transfer(FinderTransfer)
     case archive(FinderArchiveOperation)
     case openFavorite(UUID)
+    /// Opens the selection with an app the user added in Settings.
+    case openWith(UUID)
 
     var needsInteraction: Bool {
         switch self {
@@ -66,6 +68,7 @@ enum FinderAction: Equatable {
         case .transfer(let operation): return operation.rawValue + "-into"
         case .archive(let operation): return operation.rawValue
         case .openFavorite(let id): return "favorite-" + id.uuidString.lowercased()
+        case .openWith(let id): return "open-with-" + id.uuidString.lowercased()
         }
     }
 
@@ -80,14 +83,21 @@ enum FinderAction: Equatable {
         default:
             if let operation = FinderArchiveOperation(rawValue: route) {
                 self = .archive(operation)
-            } else if route.hasPrefix("favorite-"), let id = UUID(uuidString: String(route.dropFirst("favorite-".count))) {
+            } else if let id = Self.id(in: route, after: "favorite-") {
                 self = .openFavorite(id)
+            } else if let id = Self.id(in: route, after: "open-with-") {
+                self = .openWith(id)
             } else {
                 guard route.hasPrefix("new-"),
                       let format = FinderFileFormat(rawValue: String(route.dropFirst(4))) else { return nil }
                 self = .create(format)
             }
         }
+    }
+
+    private static func id(in route: String, after prefix: String) -> UUID? {
+        guard route.hasPrefix(prefix) else { return nil }
+        return UUID(uuidString: String(route.dropFirst(prefix.count)))
     }
 }
 
@@ -206,6 +216,15 @@ struct FinderMenuFavorite: Codable, Equatable {
     let symbol: String
 }
 
+/// An app the Finder menu offers to open the selection with. PawShot renders
+/// the icon, so the sandboxed extension never reads other app bundles.
+struct FinderMenuApp: Codable, Equatable {
+    let id: UUID
+    let title: String
+    /// A 16 pt PNG at 2x.
+    let icon: Data?
+}
+
 // Keep the existing preference domain so installed extensions retain the selected folder.
 struct FinderMenuSettings: Codable {
     static let domain = "dev.shiguang.screenshot.finder-menu"
@@ -216,12 +235,15 @@ struct FinderMenuSettings: Codable {
     let language: AppLanguage
     let depth: FinderMenuDepth
     let favorites: [FinderMenuFavorite]
+    let apps: [FinderMenuApp]
 
-    init(scope: FinderScope?, language: AppLanguage, depth: FinderMenuDepth, favorites: [FinderMenuFavorite]) {
+    init(scope: FinderScope?, language: AppLanguage, depth: FinderMenuDepth, favorites: [FinderMenuFavorite],
+         apps: [FinderMenuApp] = []) {
         self.scope = scope
         self.language = language
         self.depth = depth
         self.favorites = favorites
+        self.apps = apps
     }
 
     init(from decoder: Decoder) throws {
@@ -231,6 +253,7 @@ struct FinderMenuSettings: Codable {
         let storedDepth = try values.decodeIfPresent(Int.self, forKey: .depth)
         depth = storedDepth.flatMap(FinderMenuDepth.init(rawValue:)) ?? .two
         favorites = try values.decodeIfPresent([FinderMenuFavorite].self, forKey: .favorites) ?? []
+        apps = try values.decodeIfPresent([FinderMenuApp].self, forKey: .apps) ?? []
     }
 
     static func load() -> Self? {

@@ -10,8 +10,10 @@ final class PawShotFinderSync: FIFinderSync {
     private var scope: FinderScope?
     private var depth: FinderMenuDepth = .two
     private var favorites: [FinderMenuFavorite] = []
-    private var favoriteTags: [UUID: Int] = [:]
-    private var nextFavoriteTag = 1
+    private var apps: [FinderMenuApp] = []
+    private var appIcons: [UUID: NSImage] = [:]
+    private var menuTags: [UUID: Int] = [:]
+    private var nextMenuTag = 1
     private var titles: [String: String] = [:]
     private var icons: [String: NSImage] = [:]
     private var iconAppearance: NSAppearance?
@@ -46,10 +48,17 @@ final class PawShotFinderSync: FIFinderSync {
         scope = settings?.scope
         depth = settings?.depth ?? .two
         favorites = settings?.favorites ?? []
-        let favoriteIDs = Set(favorites.map(\.id))
-        favoriteTags = favoriteTags.filter { favoriteIDs.contains($0.key) }
+        apps = settings?.apps ?? []
+        appIcons = Dictionary(apps.compactMap { app in
+            app.icon.flatMap(NSImage.init(data:)).map { icon -> (UUID, NSImage) in
+                icon.size = NSSize(width: 16, height: 16)
+                return (app.id, icon)
+            }
+        }, uniquingKeysWith: { first, _ in first })
+        let menuIDs = Set(favorites.map(\.id) + apps.map(\.id))
+        menuTags = menuTags.filter { menuIDs.contains($0.key) }
         let keys = ["新建文件", "复制路径", "复制文件名", "在终端中打开", "复制到…", "移动到…",
-                    "常用目录", "打开「%@」", "压缩为 ZIP", "解压到此处"] +
+                    "常用目录", "打开「%@」", "压缩为 ZIP", "解压到此处", "用应用打开", "用「%@」打开"] +
             FinderFileFormat.allCases.flatMap { [$0.menuTitle, $0.windowTitle] }
         let bundle = Bundle(url: containingApp) ?? .main
         titles = Dictionary(uniqueKeysWithValues: keys.map {
@@ -87,11 +96,13 @@ final class PawShotFinderSync: FIFinderSync {
         case .contextualMenuForContainer:
             guard let folder = controller.targetedURL(), scope.relativePath(to: folder) != nil else { return nil }
             addNewFiles(to: actions)
+            addApps(to: actions, action: #selector(openFolderWithApp(_:)))
             add("复制路径", icon: "link", #selector(copyFolderPath(_:)), to: actions)
             add("在终端中打开", icon: "terminal", #selector(openFolderTerminal(_:)), to: actions)
         case .contextualMenuForItems:
             let selected = selection()
             guard let request = scope.request(.copyPaths, for: selected) else { return nil }
+            addApps(to: actions, action: #selector(openSelectionWithApp(_:)))
             let volumeRoots = Set((controller.directoryURLs ?? []).map { $0.standardizedFileURL.path })
             let canTransfer = !request.paths.contains(.root) &&
                 !selected.contains { volumeRoots.contains($0.standardizedFileURL.path) }
@@ -136,14 +147,34 @@ final class PawShotFinderSync: FIFinderSync {
         for favorite in favorites {
             let title = depth == .one ? String(format: label("打开「%@」"), favorite.title) : favorite.title
             let item = list.addItem(withTitle: title, action: #selector(openFavorite(_:)), keyEquivalent: "")
-            // Finder copies the menu item across processes and preserves its integer tag.
-            if favoriteTags[favorite.id] == nil {
-                favoriteTags[favorite.id] = nextFavoriteTag
-                nextFavoriteTag += 1
-            }
-            item.tag = favoriteTags[favorite.id] ?? 0
+            item.tag = tag(for: favorite.id)
             setImage(favorite.symbol, on: item)
         }
+    }
+
+    private func addApps(to menu: NSMenu, action: Selector) {
+        guard !apps.isEmpty else { return }
+        let list = actionGroup("用应用打开", icon: "arrow.up.forward.app", in: menu)
+        for app in apps {
+            let title = depth == .one ? String(format: label("用「%@」打开"), app.title) : app.title
+            let item = list.addItem(withTitle: title, action: action, keyEquivalent: "")
+            item.tag = tag(for: app.id)
+            if let icon = appIcons[app.id] { show(icon, on: item) } else { setImage("app.dashed", on: item) }
+        }
+    }
+
+    /// Finder copies menu items across processes and keeps only their integer tag.
+    private func tag(for id: UUID) -> Int {
+        if let tag = menuTags[id] { return tag }
+        let tag = nextMenuTag
+        nextMenuTag += 1
+        menuTags[id] = tag
+        return tag
+    }
+
+    private func menuID(for sender: Any?) -> UUID? {
+        guard let item = sender as? NSMenuItem else { return nil }
+        return menuTags.first { $0.value == item.tag }?.key
     }
 
     private func actionGroup(_ key: String, icon: String, in menu: NSMenu) -> NSMenu {
@@ -164,7 +195,11 @@ final class PawShotFinderSync: FIFinderSync {
 
     private func setImage(_ symbol: String, on item: NSMenuItem) {
         if icons[symbol] == nil { icons[symbol] = makeIcon(symbol) }
-        item.image = icons[symbol]
+        show(icons[symbol], on: item)
+    }
+
+    private func show(_ image: NSImage?, on item: NSMenuItem) {
+        item.image = image
         // The public property was added in macOS 27. Use its setter so older SDKs can build the extension.
         if item.responds(to: NSSelectorFromString("setPreferredImageVisibility:")) {
             item.setValue(1, forKey: "preferredImageVisibility") // NSMenuItem.ImageVisibility.visible
@@ -209,6 +244,7 @@ final class PawShotFinderSync: FIFinderSync {
         case "doc.badge.plus", "doc.richtext", "textformat", "arrow.right.to.line": return .systemPurple
         case "terminal", "desktopcomputer": return .systemIndigo
         case "link": return .systemTeal
+        case "arrow.up.forward.app": return .systemPink
         default: return NSColor(srgbRed: 0.07, green: 0.25, blue: 0.68, alpha: 1)
         }
     }
@@ -235,9 +271,17 @@ final class PawShotFinderSync: FIFinderSync {
     @objc func extract(_ sender: Any?) { send(.archive(.extract), for: selection()) }
 
     @objc func openFavorite(_ sender: Any?) {
-        guard let item = sender as? NSMenuItem, let id = favoriteTags.first(where: { $0.value == item.tag })?.key,
+        guard let id = menuID(for: sender), favorites.contains(where: { $0.id == id }),
               let source = controller.targetedURL() ?? selection().first else { return }
         send(.openFavorite(id), for: [source])
+    }
+
+    @objc func openFolderWithApp(_ sender: Any?) { openWithApp(sender, items: targetedFolder()) }
+    @objc func openSelectionWithApp(_ sender: Any?) { openWithApp(sender, items: selection()) }
+
+    private func openWithApp(_ sender: Any?, items: [URL]) {
+        guard let id = menuID(for: sender), apps.contains(where: { $0.id == id }) else { return }
+        send(.openWith(id), for: items)
     }
 
     private func send(_ action: FinderAction, for urls: [URL]) {

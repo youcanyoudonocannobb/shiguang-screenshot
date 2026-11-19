@@ -85,7 +85,8 @@ enum ShiguangSettingsPage: String, CaseIterable, Identifiable {
         case .quickInput:
             return ["启动台", "启动器", "快捷输入", "搜索", "应用", "文件", "快捷键", "热键"]
         case .finderActions:
-            return ["Finder", "访达", "右键", "Markdown", "新建", "文件夹", "路径", "终端", "移动", "压缩", "解压", "目录", "层数", "扩展", "授权", "完整磁盘访问"]
+            return ["Finder", "访达", "右键", "Markdown", "新建", "文件夹", "路径", "终端", "移动", "压缩", "解压", "目录", "层数", "扩展", "授权", "完整磁盘访问",
+                    "应用", "软件", "打开方式", "用应用打开"]
         case .shortcuts:
             return ["快捷键", "热键", "按键", "区域截图", "截图并翻译", "剪贴板历史",
                     "翻译剪贴板", "划词翻译", "变量名"]
@@ -706,7 +707,7 @@ private struct SettingsDetailView: View {
                     Button("系统设置") { finderActions.manageExtension() }
                 }
                 SettingsSeparator()
-                SettingsRow("菜单层数", detail: finderActions.menuDepth == .two ? "新建文件与常用目录按类展开" : "操作直接显示在右键菜单") {
+                SettingsRow("菜单层数", detail: finderActions.menuDepth == .two ? "新建文件、应用和常用目录按类展开" : "操作直接显示在右键菜单") {
                     Picker("菜单层数", selection: $finderActions.menuDepth) {
                         ForEach(FinderMenuDepth.allCases, id: \.rawValue) { depth in
                             Text(LocalizedStringKey(depth.title)).tag(depth)
@@ -742,6 +743,15 @@ private struct SettingsDetailView: View {
                             Button("选择文件夹…") { finderActions.selectFolder() }
                         }
                     }
+                }
+            }
+            SettingsSection("用应用打开") {
+                ForEach(finderActions.apps) { app in
+                    FinderAppRow(app: app) { finderActions.removeApp(app.id) }
+                    SettingsSeparator()
+                }
+                SettingsActionRow(title: "添加应用", symbol: "plus.app") {
+                    finderActions.addApps()
                 }
             }
             SettingsSection("常用目录") {
@@ -1301,6 +1311,29 @@ private struct SettingsActionRow: View {
         .buttonStyle(.plain)
         .onHover { hovered = $0 }
         .accessibilityLabel(Text(LocalizedStringKey(title)))
+    }
+}
+
+/// An app the Finder menu can open items with, shown with its own icon.
+private struct FinderAppRow: View {
+    let app: FinderApp
+    let onRemove: () -> Void
+
+    var body: some View {
+        HStack(spacing: 12) {
+            // App icons carry their own margins, so 32 pt lines up with the 30 pt tiles.
+            Image(nsImage: app.icon).resizable().interpolation(.high).frame(width: 32, height: 32)
+                .padding(-1)
+                .accessibilityHidden(true)
+            SettingsRowLabel(title: app.title, detail: app.resolvedURL()?.path ?? "找不到应用")
+            Spacer(minLength: 0)
+            Button(action: onRemove) { Image(systemName: "minus.circle") }
+                .controlSize(.small)
+                .accessibilityLabel(Text("移除应用"))
+        }
+        .font(.system(size: 12))
+        .padding(.horizontal, 16).padding(.vertical, 12)
+        .frame(minHeight: 54)
     }
 }
 
