@@ -60,12 +60,11 @@ private final class ScreenRegionEditorView: NSView {
         addSubview(canvas)
         addSubview(decoration)
         addSubview(toolbar)
-        canvas.onMark = { [weak model] in model?.addMark($0) }
+        // Moving, deleting, re-editing and restyling marks all go through the
+        // model; only creating marks was wired here before, so existing marks
+        // could not be moved in the on-screen editor.
+        canvas.bindAnnotationEditing(to: model)
         canvas.onEscape = { [weak model] in model?.discardDraft() }
-        canvas.onColorPick = { [weak model] color in
-            model?.markColor = color
-            model?.tool = .pointer
-        }
         canvas.onZoom = { [weak model] in model?.zoomFactor = $0 }
         canvas.onSelectionDrag = { [weak self] event, phase in
             guard let self, !model.isBusy else { return }
@@ -217,12 +216,8 @@ private final class ScreenRegionEditorView: NSView {
         if event.keyCode == 36 || event.keyCode == 76 { model.confirmDraft(); return }
         if event.modifierFlags.intersection([.command, .control, .option]).isEmpty,
            let key = event.charactersIgnoringModifiers?.lowercased() {
-            let tools: [String: MarkTool] = [
-                "1": .rectangle, "2": .ellipse, "3": .arrow, "4": .line,
-                "5": .pen, "6": .highlighter, "7": .text, "8": .number,
-                "9": .mosaic
-            ]
-            if let tool = tools[key] {
+            // Digits follow the toolbar order, so key n is the n-th button.
+            if let tool = MarkTool.forShortcut(key) {
                 model.tool = tool
                 return
             }

@@ -379,6 +379,33 @@ final class ClipboardHistory: ObservableObject {
         } catch { message = "清空失败：\(error.localizedDescription)" }
     }
 
+    /// Deletes one entry (as in Maccy and Paste) and keeps a neighbouring row
+    /// selected so the list stays keyboard-driven.
+    func remove(_ entry: ClipboardEntry) {
+        guard let index = entries.firstIndex(where: { $0.id == entry.id }) else { return }
+        let visibleIndex = filteredEntries.firstIndex(where: { $0.id == entry.id })
+        var updated = entries
+        updated.remove(at: index)
+        do {
+            try saveIndex(updated)
+        } catch {
+            message = "删除失败：\(error.localizedDescription)"
+            return
+        }
+        entries = updated
+        previews[entry.id] = nil
+        try? FileManager.default.removeItem(at: payloadURL(entry))
+        pruneMedia()
+        if selectedID == entry.id || selectedID == nil {
+            let remaining = filteredEntries
+            if let visibleIndex, !remaining.isEmpty {
+                selectedID = remaining[min(visibleIndex, remaining.count - 1)].id
+            } else {
+                selectedID = remaining.first?.id
+            }
+        }
+    }
+
     private func publish(_ snapshot: ClipboardSnapshot, ownedFileName: String? = nil,
                          successMessage: String = "已复制到剪贴板，可按 ⌘V 粘贴。") throws {
         try snapshot.write(to: pasteboard)

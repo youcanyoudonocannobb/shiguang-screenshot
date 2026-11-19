@@ -39,6 +39,36 @@ struct HotkeySettings: Codable, Equatable {
         return flags
     }
 
+    /// The key equivalent AppKit needs to draw this shortcut natively in a
+    /// menu. Named keys use the control characters or function-key code points
+    /// that NSMenuItem expects instead of their display names.
+    var menuKeyEquivalent: String {
+        func functionKey(_ value: Int) -> String {
+            UnicodeScalar(UInt32(value)).map { String(Character($0)) } ?? ""
+        }
+        switch key.uppercased() {
+        case "SPACE": return " "
+        case "↩": return "\r"
+        case "⇥": return "\t"
+        case "⌫": return "\u{8}"
+        case "ESC": return "\u{1b}"
+        case "⌦": return functionKey(NSDeleteFunctionKey)
+        case "←": return functionKey(NSLeftArrowFunctionKey)
+        case "→": return functionKey(NSRightArrowFunctionKey)
+        case "↓": return functionKey(NSDownArrowFunctionKey)
+        case "↑": return functionKey(NSUpArrowFunctionKey)
+        case "↖": return functionKey(NSHomeFunctionKey)
+        case "↘": return functionKey(NSEndFunctionKey)
+        case "⇞": return functionKey(NSPageUpFunctionKey)
+        case "⇟": return functionKey(NSPageDownFunctionKey)
+        case let name where name.count > 1 && name.hasPrefix("F"):
+            guard let number = Int(name.dropFirst()), (1...35).contains(number) else { return "" }
+            return functionKey(NSF1FunctionKey + number - 1)
+        default:
+            return key.count == 1 ? key.lowercased() : ""
+        }
+    }
+
     private static let keyNames: [UInt16: String] = [
         0: "A", 1: "S", 2: "D", 3: "F", 4: "H", 5: "G", 6: "Z", 7: "X",
         8: "C", 9: "V", 11: "B", 12: "Q", 13: "W", 14: "E", 15: "R",

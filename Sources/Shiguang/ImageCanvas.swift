@@ -39,6 +39,7 @@ struct CanvasViewport {
 }
 
 struct ImageCanvas: NSViewRepresentable {
+    let model: AppModel
     let image: NSImage
     let marks: [Mark]
     let tool: MarkTool
@@ -56,22 +57,13 @@ struct ImageCanvas: NSViewRepresentable {
     var maskStyle: MaskStyle = .pixel
     var maskSizePoints = AnnotationSizeMetrics.defaultMaskSizePoints
     var spotlightStrength: SpotlightStrength = .light
-    var onColorPick: ((String) -> Void)?
-    let onMark: (Mark) -> Void
-    var onBeginMarkEdit: ((UUID) -> Void)?
-    var onUpdateMark: ((Mark) -> Void)?
-    var onFinishMarkEdit: (() -> Void)?
     let onEscape: () -> Void
 
     func makeNSView(context: Context) -> NativeImageCanvas { NativeImageCanvas() }
 
     func updateNSView(_ view: NativeImageCanvas, context: Context) {
-        view.onMark = onMark
-        view.onBeginMarkEdit = onBeginMarkEdit
-        view.onUpdateMark = onUpdateMark
-        view.onFinishMarkEdit = onFinishMarkEdit
+        view.bindAnnotationEditing(to: model)
         view.onEscape = onEscape
-        view.onColorPick = onColorPick
         view.onZoom = { zoom = $0 }
         view.configure(image: image, marks: marks, tool: tool, color: colorHex, zoom: zoom,
                        resetID: resetID, movesWindow: movesWindow, enabled: enabled,
@@ -83,6 +75,35 @@ struct ImageCanvas: NSViewRepresentable {
     }
 }
 
+extension NativeImageCanvas {
+    /// Routes every annotation edit to the model. Each editor host must use
+    /// this so moving, deleting and restyling marks behave (and undo) the same
+    /// in the on-screen selection editor and the editor window.
+    func bindAnnotationEditing(to model: AppModel) {
+        onMark = { [weak model] in model?.addMark($0) }
+        onBeginMarkEdit = { [weak model] in model?.beginEditingMark($0) }
+        onUpdateMark = { [weak model] in model?.updateMark($0) }
+        onFinishMarkEdit = { [weak model] in model?.finishEditingMark() }
+        onDeleteMark = { [weak model] in model?.deleteMark($0) }
+        onSelectMark = { [weak model] mark, size in model?.adoptStyle(of: mark, imagePointSize: size) }
+        onColorPick = { [weak model] in model?.applyPickedColor($0) }
+    }
+}
+
+/// The toolbar values a canvas was last configured with. Comparing two
+/// snapshots tells which control the user just changed.
+private struct CanvasStyle: Equatable {
+    var color: String
+    var filled: Bool
+    var lineWidthPoints: Double
+    var numberSizePoints: Double
+    var arrowDoubleHeaded: Bool
+    var textFontSize: Double
+    var textPresentation: TextPresentation
+    var maskStyle: MaskStyle
+    var maskSizePoints: Double
+}
+
 final class NativeImageCanvas: NSView, NSTextFieldDelegate {
     enum SelectionDrag { case began, changed, ended }
     var onSelectionDrag: ((NSEvent, SelectionDrag) -> Void)?
@@ -90,6 +111,9 @@ final class NativeImageCanvas: NSView, NSTextFieldDelegate {
     var onBeginMarkEdit: ((UUID) -> Void)?
     var onUpdateMark: ((Mark) -> Void)?
     var onFinishMarkEdit: (() -> Void)?
+    var onDeleteMark: ((UUID) -> Void)?
+    /// Called when the user clicks an existing mark, with the image size in points.
+    var onSelectMark: ((Mark, CGSize) -> Void)?
     var onEscape: (() -> Void)?
     var onColorPick: ((String) -> Void)?
     var onZoom: ((CGFloat) -> Void)?
@@ -125,6 +149,13 @@ final class NativeImageCanvas: NSView, NSTextFieldDelegate {
     private var editingMark: Mark?
     private var editingPointIndex: Int?
     private var didBeginMarkEdit = false
+    /// An existing text mark whose content is open in the text field; it is
+    /// hidden from the rendered image until editing ends.
+    private var editingTextMark: Mark?
+    private var fieldPresentation = TextPresentation.plain
+    private var hasConfiguredStyle = false
+    private var isConfiguring = false
+    private var nudgeRegisteredUndo = false
 
     override var isFlipped: Bool { true }
     override var acceptsFirstResponder: Bool { true }
@@ -135,6 +166,12 @@ final class NativeImageCanvas: NSView, NSTextFieldDelegate {
         return size
     }
     private var imageRect: CGRect { viewport.imageRect(image: imageSize, viewport: bounds.size) }
+    private var currentStyle: CanvasStyle {
+        CanvasStyle(color: color, filled: filledShapes, lineWidthPoints: lineWidthPoints,
+                    numberSizePoints: numberSizePoints, arrowDoubleHeaded: arrowDoubleHeaded,
+                    textFontSize: textFontSize, textPresentation: textPresentation,
+                    maskStyle: maskStyle, maskSizePoints: maskSizePoints)
+    }
 
     func configure(image: NSImage, marks: [Mark], tool: MarkTool, color: String, zoom: CGFloat,
                    resetID: UUID, movesWindow: Bool, enabled: Bool, inPlace: Bool = false,
@@ -145,7 +182,10 @@ final class NativeImageCanvas: NSView, NSTextFieldDelegate {
                    textPresentation: TextPresentation = .plain, maskStyle: MaskStyle = .pixel,
                    maskSizePoints: Double = AnnotationSizeMetrics.defaultMaskSizePoints,
                    spotlightStrength: SpotlightStrength = .light) {
+        isConfiguring = true
+        defer { isConfiguring = false }
         let changedImage = self.image !== image
+        let previousStyle = currentStyle
         if changedImage {
             finishText(commit: false)
             viewport = CanvasViewport()
@@ -155,13 +195,11 @@ final class NativeImageCanvas: NSView, NSTextFieldDelegate {
         if changedImage || self.marks != marks {
             self.image = image
             self.marks = marks
-            rendered = ImageRenderer.render(image, marks: marks)
             if let selectedMarkID, !marks.contains(where: { $0.id == selectedMarkID }) {
                 self.selectedMarkID = nil
             }
+            rerender()
         }
-        if self.tool != tool { finishText(commit: true); draft = nil }
-        self.tool = tool
         self.color = color
         self.filledShapes = filledShapes
         self.lineWidthPoints = lineWidthPoints
@@ -171,6 +209,24 @@ final class NativeImageCanvas: NSView, NSTextFieldDelegate {
         self.textPresentation = textPresentation
         self.maskStyle = maskStyle
         self.maskSizePoints = maskSizePoints
+        let nextStyle = currentStyle
+        // A toolbar change made while a mark is selected, or while text is
+        // being typed, restyles it (as in CleanShot X and Snipaste).
+        if hasConfiguredStyle, !changedImage, previousStyle != nextStyle {
+            styleDidChange(from: previousStyle, to: nextStyle)
+        }
+        hasConfiguredStyle = true
+        if self.tool != tool {
+            finishText(commit: true)
+            draft = nil
+            // Choosing another drawing tool ends the selection. The eyedropper
+            // keeps it so the sampled color can be applied to the selected mark.
+            if self.tool != .picker, tool != .picker, let selectedMarkID,
+               marks.first(where: { $0.id == selectedMarkID })?.tool != tool {
+                self.selectedMarkID = nil
+            }
+        }
+        self.tool = tool
         self.spotlightStrength = spotlightStrength
         self.enabled = enabled
         self.movesWindow = movesWindow
@@ -188,6 +244,134 @@ final class NativeImageCanvas: NSView, NSTextFieldDelegate {
         }
         needsDisplay = true
         window?.invalidateCursorRects(for: self)
+    }
+
+    private func rerender() {
+        guard let image else { rendered = nil; return }
+        let visible = editingTextMark.map { editing in marks.filter { $0.id != editing.id } } ?? marks
+        rendered = ImageRenderer.render(image, marks: visible)
+    }
+
+    /// Shows an edit immediately instead of waiting for the model to round-trip it.
+    private func replaceLocally(_ mark: Mark) {
+        guard let index = marks.firstIndex(where: { $0.id == mark.id }) else { return }
+        marks[index] = mark
+        rerender()
+        needsDisplay = true
+    }
+
+    /// Model callbacks triggered from `configure` run inside a SwiftUI or
+    /// AppKit update pass, so they are deferred instead of mutating the
+    /// model mid-update.
+    private func publish(_ body: @escaping (NativeImageCanvas) -> Void) {
+        if isConfiguring {
+            DispatchQueue.main.async { [weak self] in
+                if let self { body(self) }
+            }
+        } else {
+            body(self)
+        }
+    }
+
+    private func publishEdit(_ mark: Mark) {
+        publish { canvas in
+            canvas.onBeginMarkEdit?(mark.id)
+            canvas.onUpdateMark?(mark)
+            canvas.onFinishMarkEdit?()
+        }
+    }
+
+    private func styleDidChange(from old: CanvasStyle, to new: CanvasStyle) {
+        if let field = textField {
+            if old.color.uppercased() != new.color.uppercased() { textColor = new.color }
+            if old.textFontSize != new.textFontSize {
+                textFraction = AnnotationSizeMetrics.textFraction(points: new.textFontSize,
+                                                                  imageSize: imagePointSize)
+            }
+            if old.textPresentation != new.textPresentation { fieldPresentation = new.textPresentation }
+            styleTextField(field)
+            return
+        }
+        guard enabled, let selectedMarkID,
+              let original = marks.first(where: { $0.id == selectedMarkID }) else { return }
+        let updated = Self.restyled(original, from: old, to: new, imageSize: imagePointSize)
+        guard updated != original else { return }
+        replaceLocally(updated)
+        publishEdit(updated)
+    }
+
+    /// Applies only the toolbar value that changed, and only when the mark
+    /// does not already show it. Selecting a mark copies its style into the
+    /// toolbar, and that round trip must not rewrite the mark.
+    private static func restyled(_ mark: Mark, from old: CanvasStyle, to new: CanvasStyle,
+                                 imageSize: CGSize) -> Mark {
+        var updated = mark
+        let shortestSide = min(imageSize.width, imageSize.height)
+        func shown(_ fraction: Double?, base: CGFloat, range: ClosedRange<Double>) -> Double? {
+            fraction.map { AnnotationSizeMetrics.points(fromFraction: $0, base: base, within: range) }
+        }
+        if old.color.uppercased() != new.color.uppercased(), mark.tool.usesColor,
+           mark.colorHex.uppercased() != new.color.uppercased() {
+            updated.colorHex = new.color
+        }
+        if old.filled != new.filled, mark.tool == .rectangle || mark.tool == .ellipse,
+           (mark.filled == true) != new.filled {
+            updated.filled = new.filled
+        }
+        if old.lineWidthPoints != new.lineWidthPoints, mark.tool.usesStroke,
+           shown(mark.lineWidth, base: shortestSide,
+                 range: AnnotationSizeMetrics.lineWidthRange) != new.lineWidthPoints {
+            updated.lineWidth = AnnotationSizeMetrics.fraction(points: new.lineWidthPoints,
+                                                               imageSize: imageSize)
+        }
+        if old.numberSizePoints != new.numberSizePoints, mark.tool == .number,
+           shown(mark.numberSize, base: shortestSide,
+                 range: AnnotationSizeMetrics.numberSizeRange) != new.numberSizePoints {
+            let fraction = AnnotationSizeMetrics.fraction(points: new.numberSizePoints, imageSize: imageSize)
+            updated.numberSize = fraction
+            updated.lineWidth = fraction
+        }
+        if old.arrowDoubleHeaded != new.arrowDoubleHeaded, mark.tool == .arrow,
+           (mark.arrowDoubleHeaded == true) != new.arrowDoubleHeaded {
+            updated.arrowDoubleHeaded = new.arrowDoubleHeaded ? true : nil
+        }
+        if mark.tool == .text {
+            if old.textFontSize != new.textFontSize,
+               shown(mark.fontSize, base: imageSize.height,
+                     range: AnnotationSizeMetrics.textSizeRange) != new.textFontSize {
+                updated.fontSize = AnnotationSizeMetrics.textFraction(points: new.textFontSize,
+                                                                      imageSize: imageSize)
+            }
+            if old.textPresentation != new.textPresentation,
+               (mark.textPresentation ?? .plain) != new.textPresentation {
+                updated.textPresentation = new.textPresentation
+            }
+        }
+        if mark.tool == .mosaic {
+            if old.maskStyle != new.maskStyle, (mark.maskStyle ?? .pixel) != new.maskStyle {
+                updated.maskStyle = new.maskStyle
+            }
+            if old.maskSizePoints != new.maskSizePoints,
+               shown(mark.maskSize, base: shortestSide,
+                     range: AnnotationSizeMetrics.maskSizeRange) != new.maskSizePoints {
+                updated.maskSize = AnnotationSizeMetrics.fraction(points: new.maskSizePoints,
+                                                                  imageSize: imageSize)
+            }
+        }
+        return updated
+    }
+
+    /// Moves every point by the same offset without pushing the mark further
+    /// outside the image. Marks may already overhang after the selection shrinks.
+    static func translated(_ mark: Mark, dx: Double, dy: Double) -> Mark {
+        let xs = mark.points.map(\.x), ys = mark.points.map(\.y)
+        let minX = xs.min() ?? 0, maxX = xs.max() ?? 1
+        let minY = ys.min() ?? 0, maxY = ys.max() ?? 1
+        let clampedX = min(max(0, 1 - maxX), max(min(0, -minX), dx))
+        let clampedY = min(max(0, 1 - maxY), max(min(0, -minY), dy))
+        var moved = mark
+        moved.points = mark.points.map { UnitPoint(x: $0.x + clampedX, y: $0.y + clampedY) }
+        return moved
     }
 
     override func layout() {
@@ -217,7 +401,7 @@ final class NativeImageCanvas: NSView, NSTextFieldDelegate {
                       hints: [.interpolation: NSImageInterpolation.high])
         NSBezierPath(rect: rect).addClip()
         if let draft { drawDraft(draft, rect: rect) }
-        if let selectedMarkID,
+        if let selectedMarkID, selectedMarkID != editingTextMark?.id,
            let selectedMark = marks.first(where: { $0.id == selectedMarkID }) {
             drawSelection(for: selectedMark, in: rect)
         }
@@ -476,15 +660,28 @@ final class NativeImageCanvas: NSView, NSTextFieldDelegate {
         editingMark = nil
         editingPointIndex = nil
         didBeginMarkEdit = false
+        nudgeRegisteredUndo = false
         guard imageRect.contains(point) else { return }
 
-        if enabled, tool != .picker, let hit = hitMark(at: point) {
+        if tool == .picker {
+            // Sampling keeps the current selection, so the picked color can
+            // be applied to the selected mark.
+            if enabled, let picked = sampledColor(at: point) { onColorPick?(picked) }
+            return
+        }
+
+        if enabled, let hit = hitMark(at: point) {
             // Existing annotations take precedence over creating another mark.
             // This lets users drag immediately after drawing, even while the
             // drawing tool is still selected.
+            if event.clickCount >= 2, hit.tool == .text {
+                beginEditingText(hit)
+                return
+            }
             selectedMarkID = hit.id
             editingMark = hit
             editingPointIndex = handleIndex(for: hit, at: point, in: imageRect)
+            onSelectMark?(hit, imagePointSize)
             needsDisplay = true
             return
         } else {
@@ -507,12 +704,11 @@ final class NativeImageCanvas: NSView, NSTextFieldDelegate {
         }
         guard enabled else { return }
         if tool == .text { beginText(at: point); return }
-        if tool == .picker {
-            if let picked = sampledColor(at: point) { onColorPick?(picked) }
-            return
-        }
         if tool == .number {
-            let next = marks.filter { $0.tool == .number }.count + 1
+            // Continue after the highest number so deleting a marker never
+            // produces a duplicate.
+            let next = (marks.filter { $0.tool == .number }
+                .compactMap { Int($0.text ?? "") }.max() ?? 0) + 1
             let mark = Mark(tool: .number, points: [normalized(point)], colorHex: color,
                             filled: nil, text: String(next), fontSize: nil,
                             lineWidth: AnnotationSizeMetrics.fraction(
@@ -550,20 +746,12 @@ final class NativeImageCanvas: NSView, NSTextFieldDelegate {
             if let editingPointIndex {
                 updated.points[editingPointIndex] = normalized(point)
             } else {
-                let deltaX = Double((point.x - dragStart.x) / max(1, rect.width))
-                let deltaY = Double((point.y - dragStart.y) / max(1, rect.height))
-                let minX = original.points.map(\.x).min() ?? 0
-                let maxX = original.points.map(\.x).max() ?? 1
-                let minY = original.points.map(\.y).min() ?? 0
-                let maxY = original.points.map(\.y).max() ?? 1
-                let clampedX = min(1 - maxX, max(-minX, deltaX))
-                let clampedY = min(1 - maxY, max(-minY, deltaY))
-                updated.points = original.points.map {
-                    UnitPoint(x: $0.x + clampedX, y: $0.y + clampedY)
-                }
+                updated = Self.translated(original,
+                                          dx: Double((point.x - dragStart.x) / max(1, rect.width)),
+                                          dy: Double((point.y - dragStart.y) / max(1, rect.height)))
             }
+            replaceLocally(updated)
             onUpdateMark?(updated)
-            needsDisplay = true
             return
         }
         if isMovingSelection { onSelectionDrag?(event, .changed); return }
@@ -615,7 +803,9 @@ final class NativeImageCanvas: NSView, NSTextFieldDelegate {
         let x = min(cg.width - 1, max(0, Int(unitX * CGFloat(cg.width))))
         let y = min(cg.height - 1, max(0, Int(unitY * CGFloat(cg.height))))
         let bitmap = NSBitmapImageRep(cgImage: cg)
-        guard let color = bitmap.colorAt(x: x, y: bitmap.pixelsHigh - 1 - y)?
+        // Bitmap rows start at the top, like the flipped view, so y needs no
+        // flipping; flipping it sampled the mirrored pixel.
+        guard let color = bitmap.colorAt(x: x, y: y)?
             .usingColorSpace(.sRGB) else { return nil }
         return String(format: "%02X%02X%02X",
                       Int((color.redComponent * 255).rounded()),
@@ -639,8 +829,53 @@ final class NativeImageCanvas: NSView, NSTextFieldDelegate {
     }
 
     override func keyDown(with event: NSEvent) {
-        if event.keyCode == 53 { cancelOperation(nil) }
-        else { super.keyDown(with: event) }
+        if event.keyCode == 53 { cancelOperation(nil); return }
+        let plain = event.modifierFlags.intersection([.command, .control, .option]).isEmpty
+        if plain, enabled, textField == nil, let selectedMarkID,
+           let mark = marks.first(where: { $0.id == selectedMarkID }) {
+            if event.keyCode == 51 || event.keyCode == 117, let onDeleteMark {
+                marks.removeAll { $0.id == mark.id }
+                self.selectedMarkID = nil
+                editingMark = nil
+                rerender()
+                needsDisplay = true
+                onDeleteMark(mark.id)
+                return
+            }
+            if [123, 124, 125, 126].contains(event.keyCode) {
+                // A selected mark takes the arrow keys; without a selection
+                // they fall through and move the capture region instead.
+                nudge(mark, keyCode: event.keyCode,
+                      step: event.modifierFlags.contains(.shift) ? 10 : 1,
+                      isRepeat: event.isARepeat)
+                return
+            }
+        }
+        super.keyDown(with: event)
+    }
+
+    /// Moves the selected mark by whole image points. Holding the key is one
+    /// undo step; every new press is another.
+    private func nudge(_ mark: Mark, keyCode: UInt16, step: CGFloat, isRepeat: Bool) {
+        let size = imagePointSize
+        var dx: CGFloat = 0, dy: CGFloat = 0
+        switch keyCode {
+        case 123: dx = -step
+        case 124: dx = step
+        case 125: dy = step // The view is flipped, so down is +y.
+        case 126: dy = -step
+        default: return
+        }
+        let moved = Self.translated(mark, dx: Double(dx / max(1, size.width)),
+                                    dy: Double(dy / max(1, size.height)))
+        guard moved != mark else { return }
+        if !isRepeat || !nudgeRegisteredUndo {
+            onBeginMarkEdit?(mark.id)
+            nudgeRegisteredUndo = true
+        }
+        replaceLocally(moved)
+        onUpdateMark?(moved)
+        onFinishMarkEdit?()
     }
 
     override func cancelOperation(_ sender: Any?) {
@@ -648,27 +883,137 @@ final class NativeImageCanvas: NSView, NSTextFieldDelegate {
         else { draft = nil; onEscape?() }
     }
 
+    // MARK: Keys typed while a toolbar popover is key
+
+    private static let popoverKeyTargets = NSHashTable<NativeImageCanvas>.weakObjects()
+    private static var popoverKeyMonitor: Any?
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        guard window != nil else { return }
+        Self.popoverKeyTargets.add(self)
+        guard Self.popoverKeyMonitor == nil else { return }
+        Self.popoverKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            let forwarded = MainActor.assumeIsolated { NativeImageCanvas.forwardPopoverKey(event) }
+            return forwarded ? nil : event
+        }
+    }
+
+    enum PopoverKeyRoute: Equatable { case popover, canvas, openText }
+
+    /// Where a key typed in a toolbar popover belongs. Style popovers open on
+    /// tool and mark selection and become the key window, which swallowed
+    /// Delete, the arrow keys, Return and the tool shortcuts. Esc still
+    /// closes the popover, Tab keeps moving between its controls, and a value
+    /// being typed in the popover keeps every key.
+    nonisolated static func popoverKeyRoute(keyCode: UInt16,
+                                            modifiers: NSEvent.ModifierFlags,
+                                            popoverIsEditingText: Bool,
+                                            canvasIsEditingText: Bool) -> PopoverKeyRoute {
+        if popoverIsEditingText || keyCode == 53 || keyCode == 48 { return .popover }
+        let flags = modifiers.intersection([.command, .control, .option])
+        if canvasIsEditingText {
+            // Typing continues in the open text mark; Option types symbols.
+            // Letters must never reach the tool shortcuts here.
+            return flags.subtracting(.option).isEmpty ? .openText : .popover
+        }
+        // Space stays with the popover for keyboard navigation.
+        return flags.isEmpty && keyCode != 49 ? .canvas : .popover
+    }
+
+    private static func forwardPopoverKey(_ event: NSEvent) -> Bool {
+        guard let source = event.window, let parent = source.parent,
+              NSStringFromClass(type(of: source)).contains("Popover"),
+              let canvas = popoverKeyTargets.allObjects.first(where: {
+                  $0.window === parent && parent.isVisible && !$0.isHiddenOrHasHiddenAncestor
+              })
+        else { return false }
+        switch popoverKeyRoute(keyCode: event.keyCode, modifiers: event.modifierFlags,
+                               popoverIsEditingText: source.firstResponder is NSText,
+                               canvasIsEditingText: canvas.textField != nil) {
+        case .popover:
+            return false
+        case .canvas:
+            canvas.keyDown(with: event)
+            return true
+        case .openText:
+            // Give the keyboard back first so input methods keep composing
+            // in the text mark, then deliver this key to it.
+            guard let editor = canvas.textField?.currentEditor() else { return false }
+            parent.makeKey()
+            editor.keyDown(with: event)
+            return true
+        }
+    }
+
     private func beginText(at point: CGPoint) {
-        let rect = imageRect
-        textAnchor = normalized(point)
+        editingTextMark = nil
         textColor = color
-        textFraction = AnnotationSizeMetrics.fraction(points: textFontSize, imageSize: imagePointSize)
-        let displayScale = rect.height / max(1, imagePointSize.height)
-        let field = NSTextField(frame: CGRect(x: point.x, y: point.y,
-                                              width: max(50, min(360, bounds.maxX - point.x)),
-                                              height: max(30, textFontSize * displayScale + 10)))
-        field.font = .systemFont(ofSize: textFontSize * displayScale, weight: .semibold)
-        field.textColor = NSColor(hex: color)
+        // Text renders relative to the image height, so its size must be
+        // stored against the height as well.
+        textFraction = AnnotationSizeMetrics.textFraction(points: textFontSize, imageSize: imagePointSize)
+        fieldPresentation = textPresentation
+        openTextField(anchor: normalized(point), text: "")
+    }
+
+    /// Double-clicking a text mark reopens it in place, keeping its identity.
+    private func beginEditingText(_ mark: Mark) {
+        guard let anchor = mark.points.first else { return }
+        editingTextMark = mark
+        selectedMarkID = mark.id
+        textColor = mark.colorHex
+        textFraction = mark.fontSize ?? 0.035
+        fieldPresentation = mark.textPresentation ?? .plain
+        rerender()
+        openTextField(anchor: anchor, text: mark.text ?? "")
+        needsDisplay = true
+    }
+
+    private func openTextField(anchor: UnitPoint, text: String) {
+        textAnchor = anchor
+        let origin = imagePoint(anchor, in: imageRect)
+        // The field's cell insets its text by 2 pt; offset it so the typed
+        // text lines up with where the mark is drawn.
+        let field = NSTextField(frame: CGRect(x: origin.x - 2, y: origin.y, width: 60, height: 30))
         field.isBezeled = false
-        field.drawsBackground = textPresentation == .highlighted
-        field.backgroundColor = textPresentation == .highlighted
-            ? NSColor(hex: color).withAlphaComponent(0.18) : .clear
-        field.placeholderString = "输入文字，回车完成"
+        field.isBordered = false
+        field.cell?.wraps = false
+        field.cell?.isScrollable = true
+        field.placeholderString = L("输入文字")
         field.focusRingType = .exterior
+        field.stringValue = text
         field.delegate = self
         textField = field
+        styleTextField(field)
         addSubview(field)
         window?.makeFirstResponder(field)
+        field.currentEditor()?.selectedRange = NSRange(location: (text as NSString).length, length: 0)
+    }
+
+    private func styleTextField(_ field: NSTextField) {
+        // Match ImageRenderer: the font is a fraction of the image height,
+        // drawn at the current display scale.
+        let displayScale = imageRect.height / max(1, imageSize.height)
+        let fontSize = max(8, CGFloat(textFraction) * imageSize.height) * displayScale
+        field.font = .systemFont(ofSize: max(4, fontSize), weight: .semibold)
+        field.textColor = NSColor(hex: textColor)
+        field.drawsBackground = fieldPresentation == .highlighted
+        field.backgroundColor = fieldPresentation == .highlighted
+            ? NSColor(hex: textColor).withAlphaComponent(0.18) : .clear
+        resizeTextField(field)
+    }
+
+    private func resizeTextField(_ field: NSTextField) {
+        guard let font = field.font else { return }
+        // Grow with the text, starting at the placeholder's width, instead of
+        // a fixed 360 pt box that dwarfed short labels.
+        let attributes: [NSAttributedString.Key: Any] = [.font: font]
+        let placeholder = ((field.placeholderString ?? "") as NSString).size(withAttributes: attributes)
+        let typed = (field.stringValue as NSString).size(withAttributes: attributes)
+        let available = max(40, bounds.maxX - field.frame.minX)
+        let width = min(available, ceil(max(placeholder.width, typed.width)) + 24)
+        let height = max(24, ceil(font.ascender - font.descender + font.leading) + 6)
+        field.setFrameSize(CGSize(width: width, height: height))
     }
 
     private func finishText(commit: Bool) {
@@ -677,19 +1022,50 @@ final class NativeImageCanvas: NSView, NSTextFieldDelegate {
         let value = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         field.delegate = nil
         field.removeFromSuperview()
-        if commit, !value.isEmpty, let anchor = textAnchor {
+        let anchor = textAnchor
+        textAnchor = nil
+        if let original = editingTextMark {
+            editingTextMark = nil
+            if commit, value.isEmpty {
+                // Clearing the text removes the annotation.
+                marks.removeAll { $0.id == original.id }
+                if selectedMarkID == original.id { selectedMarkID = nil }
+                rerender()
+                publish { $0.onDeleteMark?(original.id) }
+            } else if commit {
+                var updated = original
+                updated.text = value
+                // Only record values that changed, so reopening text without
+                // editing it adds no undo step.
+                if textColor.uppercased() != original.colorHex.uppercased() { updated.colorHex = textColor }
+                if textFraction != (original.fontSize ?? 0.035) { updated.fontSize = textFraction }
+                if fieldPresentation != (original.textPresentation ?? .plain) {
+                    updated.textPresentation = fieldPresentation
+                }
+                replaceLocally(updated)
+                if updated != original { publishEdit(updated) }
+            } else {
+                rerender()
+            }
+            needsDisplay = true
+            return
+        }
+        if commit, !value.isEmpty, let anchor {
             let mark = Mark(tool: .text, points: [anchor], colorHex: textColor, text: value,
                             fontSize: textFraction, lineWidth: nil,
-                            textPresentation: textPresentation)
+                            textPresentation: fieldPresentation)
             selectedMarkID = mark.id
-            onMark?(mark)
+            publish { $0.onMark?(mark) }
         }
-        textAnchor = nil
     }
 
     func commitPendingText() { finishText(commit: true) }
 
     func controlTextDidEndEditing(_ notification: Notification) { finishText(commit: true) }
+
+    func controlTextDidChange(_ notification: Notification) {
+        if let textField { resizeTextField(textField) }
+    }
 
     func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
         if commandSelector == #selector(NSResponder.cancelOperation(_:)) {

@@ -158,6 +158,27 @@ struct ClipboardChecks {
                     "A missing file must not replace the current clipboard")
     }
 
+    static func removeSingleEntry() throws {
+        let f = Fixture(); defer { f.clean() }
+        try f.history.copyText("Oldest fixture")
+        try f.history.copyText("Middle fixture")
+        try f.history.copyText("Newest fixture")
+        f.history.prepareForDisplay()
+        f.history.moveSelection(1)
+        let middle = f.history.entries[1]
+        try require(f.history.selectedID == middle.id, "Select the middle entry")
+        f.history.remove(middle)
+        try require(f.history.entries.map(\.summary) == ["Newest fixture", "Oldest fixture"],
+                    "Removing an entry must keep every other entry in order")
+        try require(f.history.selectedID == f.history.entries[1].id,
+                    "Removing the selected entry must select the row that took its place")
+        let reopened = ClipboardHistory(directory: f.folder, pasteboard: f.board, preferences: f.defaults)
+        try require(reopened.entries.map(\.summary) == ["Newest fixture", "Oldest fixture"],
+                    "A removed entry must stay removed after relaunch")
+        try require(f.board.string(forType: .string) == "Newest fixture",
+                    "Removing history must not change the current clipboard")
+    }
+
     static func main() {
         let unchanged = NSPasteboard.general.changeCount
         let checks: [(String, () throws -> Void)] = [
@@ -166,7 +187,8 @@ struct ClipboardChecks {
             ("native_gif_and_video_file_clipboard", nativeMediaRepresentations),
             ("current_and_in_flight_media_lifetime", retentionAndInFlightMedia),
             ("concealed_content_and_corrupt_index", concealedAndCorruptData),
-            ("missing_file_preserves_clipboard_and_keyboard_navigation", missingFilesAndNavigation)
+            ("missing_file_preserves_clipboard_and_keyboard_navigation", missingFilesAndNavigation),
+            ("remove_single_entry_keeps_selection_and_clipboard", removeSingleEntry)
         ]
         var failures = 0
         for (name, run) in checks {

@@ -99,6 +99,28 @@ enum MarkTool: String, Codable, CaseIterable {
         case .picker: return L("取色")
         }
     }
+
+    /// The drawing tools in toolbar order.
+    static let toolbarOrder: [MarkTool] = [
+        .rectangle, .ellipse, .line, .arrow, .pen, .number, .text, .mosaic, .picker
+    ]
+
+    /// Number keys pick tools in toolbar order, as in Snipaste and PixPin.
+    static func forShortcut(_ key: String) -> MarkTool? {
+        guard key.count == 1, let digit = Int(key),
+              toolbarOrder.indices.contains(digit - 1) else { return nil }
+        return toolbarOrder[digit - 1]
+    }
+
+    /// Tools whose marks carry a user-selected color.
+    var usesColor: Bool {
+        [.rectangle, .ellipse, .line, .arrow, .pen, .highlighter, .number, .text].contains(self)
+    }
+
+    /// Tools whose marks are drawn with the line-width setting.
+    var usesStroke: Bool {
+        [.rectangle, .ellipse, .line, .arrow, .pen, .highlighter].contains(self)
+    }
 }
 
 enum AnnotationSizeMetrics {
@@ -130,6 +152,18 @@ enum AnnotationSizeMetrics {
     static func fraction(points: Double, imageSize: CGSize) -> Double {
         let shortestSide = max(1, min(imageSize.width, imageSize.height))
         return max(0.0001, points / Double(shortestSide))
+    }
+
+    /// Text is rendered relative to the image height, so its stored size must
+    /// use the height too; the shortest side enlarged text in portrait crops.
+    static func textFraction(points: Double, imageSize: CGSize) -> Double {
+        max(0.0001, points / Double(max(1, imageSize.height)))
+    }
+
+    /// Converts a stored fraction back to the whole-point value shown in the toolbar.
+    static func points(fromFraction fraction: Double, base: CGFloat,
+                       within range: ClosedRange<Double>) -> Double {
+        min(range.upperBound, max(range.lowerBound, (fraction * Double(max(1, base))).rounded()))
     }
 }
 
@@ -255,6 +289,9 @@ struct CaptureRecord: Codable, Identifiable {
 struct LanguageChoice: Identifiable {
     let id: String
     let name: String
+    /// Language names stay in their own script; only "auto detect" follows
+    /// the interface language.
+    var displayName: String { id == "auto" ? L(name) : name }
     static let targets = [
         LanguageChoice(id: "zh-Hans", name: "简体中文"),
         LanguageChoice(id: "zh-Hant", name: "繁體中文"),

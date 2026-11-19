@@ -14,9 +14,7 @@ struct AnnotationToolbar: View {
     @StoredState private var styleTool: MarkTool?
     @StoredState private var hoveredTitle: String?
     @StoredState private var hoverFrames: [String: CGRect] = [:]
-    private static let primaryMarkTools: [MarkTool] = [
-        .rectangle, .ellipse, .line, .arrow, .pen, .number, .text, .mosaic, .picker
-    ]
+    private static let primaryMarkTools = MarkTool.toolbarOrder
     private static let markColors = [
         "F45C93", "F05A52", "F29A38", "F1CF45",
         "58B75B", "3F7EE0", "111111", "FFFFFF"
@@ -74,7 +72,7 @@ struct AnnotationToolbar: View {
             action("长截图", symbol: "rectangle.expand.vertical") { showsScrollOptions.toggle() }
                 .disabled(model.isBusy && !model.isRecognizing)
                 .popover(isPresented: $showsScrollOptions, arrowEdge: .top) {
-                    CaptureOptionsPanel(title: "长截图", hint: "使用当前选区，完成拼接后可继续编辑。") {
+                    CaptureOptionsPanel(title: "长截图") {
                         CaptureOptionButton("自动滚动并拼接", detail: "自动向下滚动并连接画面", symbol: "arrow.down") {
                             showsScrollOptions = false
                             model.captureScrolling(.automatic)
@@ -88,7 +86,7 @@ struct AnnotationToolbar: View {
             action("录制", symbol: "record.circle") { showsRecordingOptions.toggle() }
                 .disabled(model.isBusy && !model.isRecognizing)
                 .popover(isPresented: $showsRecordingOptions, arrowEdge: .top) {
-                    CaptureOptionsPanel(title: "录制", hint: "使用当前选区 · 无声录制 · GIF 最长 60 秒") {
+                    CaptureOptionsPanel(title: "录制") {
                         CaptureOptionButton("MP4 视频", detail: "30 帧/秒", symbol: "film") {
                             showsRecordingOptions = false
                             model.record(.video)
@@ -241,20 +239,16 @@ struct AnnotationToolbar: View {
         }
         .buttonStyle(.plain)
         .help(selected ? "当前标注颜色" : "使用此标注颜色")
-        .accessibilityLabel(selected ? "当前标注颜色 \(normalized)" : "标注颜色 \(normalized)")
+        .accessibilityLabel(L(selected ? "当前标注颜色" : "标注颜色") + " \(normalized)")
     }
 
-    private func supportsColor(_ tool: MarkTool) -> Bool {
-        [.rectangle, .ellipse, .line, .arrow, .pen, .highlighter, .number, .text].contains(tool)
-    }
+    private func supportsColor(_ tool: MarkTool) -> Bool { tool.usesColor }
 
     private func supportsShapeFill(_ tool: MarkTool) -> Bool {
         tool == .rectangle || tool == .ellipse
     }
 
-    private func supportsStroke(_ tool: MarkTool) -> Bool {
-        [.rectangle, .ellipse, .line, .arrow, .pen, .highlighter].contains(tool)
-    }
+    private func supportsStroke(_ tool: MarkTool) -> Bool { tool.usesStroke }
 
     private var fillStyleToggle: some View {
         HStack(spacing: 2) {
@@ -271,7 +265,7 @@ struct AnnotationToolbar: View {
         return Button {
             model.fillShapes = filled
         } label: {
-            Text(title)
+            Text(L(title))
                 .font(.system(size: 10.5, weight: .semibold))
                 .foregroundStyle(selected ? .white : .white.opacity(0.62))
                 .frame(height: 24)
@@ -281,7 +275,7 @@ struct AnnotationToolbar: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(title)
+        .accessibilityLabel(L(title))
         .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
@@ -380,7 +374,7 @@ struct AnnotationToolbar: View {
     private func compactChoice(_ title: String, selected: Bool,
                                perform: @escaping () -> Void) -> some View {
         Button(action: perform) {
-            Text(title)
+            Text(L(title))
                 .font(.system(size: 10.5, weight: .semibold))
                 .foregroundStyle(selected ? .white : .white.opacity(0.62))
                 .frame(height: 24)
@@ -390,7 +384,7 @@ struct AnnotationToolbar: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(title)
+        .accessibilityLabel(L(title))
         .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
@@ -416,7 +410,7 @@ struct AnnotationToolbar: View {
     @ViewBuilder private var hoverChip: some View {
         if let hoveredTitle, let frame = hoverFrames[hoveredTitle] {
             GeometryReader { proxy in
-                Text(hoveredTitle)
+                Text(L(hoveredTitle))
                     .font(.system(size: 10.5, weight: .medium))
                     .foregroundStyle(.white)
                     .lineLimit(1)
@@ -511,10 +505,6 @@ struct AnnotationToolbar: View {
                 .disabled(model.zoomFactor >= 8)
             }
             .foregroundStyle(.white)
-
-            Text("鼠标滚轮不再缩放图片。")
-                .font(.system(size: 10))
-                .foregroundStyle(Palette.overlayMuted)
         }
         .padding(13)
         .frame(width: 286)
@@ -559,8 +549,8 @@ struct AnnotationToolbar: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help(help)
-        .accessibilityLabel(help)
+        .help(L(help))
+        .accessibilityLabel(L(help))
     }
 
     private func icon(_ symbol: String, selected: Bool = false) -> some View {
@@ -599,8 +589,8 @@ struct AnnotationToolbar: View {
             .contentShape(RoundedRectangle(cornerRadius: 6))
         }
         .buttonStyle(ToolbarActionStyle())
-        .help(title)
-        .accessibilityLabel(title)
+        .help(L(title))
+        .accessibilityLabel(L(title))
         .onHover { hoveredTitle = $0 ? title : nil }
         .onGeometryChange(for: CGRect.self) { $0.frame(in: .named("annotationToolbar")) } action: { hoverFrames[title] = $0 }
     }
@@ -611,8 +601,8 @@ struct AnnotationToolbar: View {
             icon(symbol, selected: selected)
         }
         .buttonStyle(ToolbarActionStyle())
-        .help(title)
-        .accessibilityLabel(title)
+        .help(L(title))
+        .accessibilityLabel(L(title))
         .onHover { hoveredTitle = $0 ? title : nil }
         .onGeometryChange(for: CGRect.self) { $0.frame(in: .named("annotationToolbar")) } action: { hoverFrames[title] = $0 }
     }
@@ -634,8 +624,8 @@ struct AnnotationToolbar: View {
                 .contentShape(Circle())
         }
         .buttonStyle(ToolbarActionStyle())
-        .help(title)
-        .accessibilityLabel(title)
+        .help(L(title))
+        .accessibilityLabel(L(title))
     }
 }
 
@@ -648,10 +638,15 @@ private struct PointSizeControl: View {
 
     @StoredState private var draft = ""
     @StoredState private var hovering = false
+    /// The value is plain text until clicked. A text field shown up front
+    /// became the popover's first responder as soon as the popover opened,
+    /// so Delete, the arrow keys and tool shortcuts edited the field instead
+    /// of the selected mark.
+    @StoredState private var isEditingValue = false
     @FocusState private var editing: Bool
 
-    private var canDecrease: Bool { editing || points > range.lowerBound }
-    private var canIncrease: Bool { editing || points < range.upperBound }
+    private var canDecrease: Bool { isEditingValue || points > range.lowerBound }
+    private var canIncrease: Bool { isEditingValue || points < range.upperBound }
 
     var body: some View {
         HStack(spacing: 1) {
@@ -663,55 +658,65 @@ private struct PointSizeControl: View {
             )
 
             HStack(spacing: 2) {
-                TextField("", text: $draft)
-                    .font(.system(size: 10.5, weight: .semibold, design: .rounded))
-                    .foregroundStyle(.white)
-                    .multilineTextAlignment(.trailing)
-                    .textFieldStyle(.plain)
-                    .tint(.white)
-                    .frame(width: 23, height: 24)
-                    .focused($editing)
-                    .onSubmit {
-                        commit()
-                        editing = false
-                    }
-                    .onChange(of: editing) { _, isEditing in
-                        if isEditing {
-                            draft = formatted(points)
-                        } else {
-                            commit()
+                if isEditingValue {
+                    TextField("", text: $draft)
+                        .font(.system(size: 10.5, weight: .semibold, design: .rounded))
+                        .foregroundStyle(.white)
+                        .multilineTextAlignment(.trailing)
+                        .textFieldStyle(.plain)
+                        .tint(.white)
+                        .frame(width: 23, height: 24)
+                        .focused($editing)
+                        .onAppear { DispatchQueue.main.async { editing = true } }
+                        .onSubmit { endEditing(commitDraft: true) }
+                        .onExitCommand { endEditing(commitDraft: false) }
+                        .onChange(of: editing) { _, focused in
+                            if !focused { endEditing(commitDraft: true) }
                         }
-                    }
-                    .onChange(of: points) { _, value in
-                        if !editing { draft = formatted(value) }
-                    }
-                    .accessibilityLabel(label)
-                    .accessibilityValue("\(formatted(points)) pt")
+                        // Closing the popover (for example by clicking the
+                        // canvas) keeps what was typed.
+                        .onDisappear { commit() }
+                        .accessibilityLabel(L(label))
+                } else {
+                    Text(formatted(points))
+                        .font(.system(size: 10.5, weight: .semibold, design: .rounded))
+                        .foregroundStyle(.white)
+                        .monospacedDigit()
+                        .frame(width: 23, height: 24, alignment: .trailing)
+                        .accessibilityLabel(L(label))
+                        .accessibilityValue("\(formatted(points)) pt")
+                        .accessibilityAddTraits(.isButton)
+                        .accessibilityAction { beginEditing() }
+                }
 
                 Text("pt")
                     .font(.system(size: 9, weight: .medium, design: .rounded))
                     .foregroundStyle(.white.opacity(0.72))
-                    .onTapGesture { editing = true }
+                    .accessibilityHidden(true)
 
                 Image(systemName: "pencil")
                     .font(.system(size: 7.5, weight: .semibold))
-                    .foregroundStyle(.white.opacity(editing ? 0.95 : 0.54))
+                    .foregroundStyle(.white.opacity(isEditingValue ? 0.95 : 0.54))
                     .frame(width: 8)
-                    .onTapGesture { editing = true }
+                    .accessibilityHidden(true)
             }
             .padding(.horizontal, 4)
             .frame(width: 58, height: 24)
-            .background(.white.opacity(editing ? 0.14 : (hovering ? 0.11 : 0.08)),
+            .background(.white.opacity(isEditingValue ? 0.14 : (hovering ? 0.11 : 0.08)),
                         in: RoundedRectangle(cornerRadius: 6, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .stroke(editing ? Palette.overlayAccent.opacity(0.9) :
+                    .stroke(isEditingValue ? Palette.overlayAccent.opacity(0.9) :
                                 .white.opacity(hovering ? 0.22 : 0.08),
                             lineWidth: 0.8)
             }
             .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+            // The whole box starts editing; while editing, clicks belong to
+            // the text field so the caret can be placed.
+            .gesture(TapGesture().onEnded { beginEditing() },
+                     including: isEditingValue ? .subviews : .all)
             .onHover { hovering = $0 }
-            .help("点击数字或铅笔手动输入\(label)（\(formatted(range.lowerBound))–\(formatted(range.upperBound)) pt）")
+            .help(L(label) + " · \(formatted(range.lowerBound))–\(formatted(range.upperBound)) pt")
 
             stepperButton(
                 symbol: "plus",
@@ -723,15 +728,13 @@ private struct PointSizeControl: View {
         .padding(2)
         .background(.white.opacity(0.07),
                     in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-        .onAppear { draft = formatted(points) }
     }
 
     private func stepperButton(symbol: String, help: String,
                                enabled: Bool, delta: Double) -> some View {
         Button {
-            commit()
+            if isEditingValue { endEditing(commitDraft: true) }
             points = min(range.upperBound, max(range.lowerBound, points + delta))
-            draft = formatted(points)
         } label: {
             Image(systemName: symbol)
                 .font(.system(size: 9.5, weight: .bold))
@@ -741,8 +744,21 @@ private struct PointSizeControl: View {
         }
         .buttonStyle(.plain)
         .disabled(!enabled)
-        .help(help)
-        .accessibilityLabel(help)
+        .help(L(help))
+        .accessibilityLabel(L(help))
+    }
+
+    private func beginEditing() {
+        guard !isEditingValue else { return }
+        draft = formatted(points)
+        isEditingValue = true
+    }
+
+    private func endEditing(commitDraft: Bool) {
+        guard isEditingValue else { return }
+        if commitDraft { commit() } else { draft = formatted(points) }
+        isEditingValue = false
+        editing = false
     }
 
     private func commit() {
@@ -750,7 +766,7 @@ private struct PointSizeControl: View {
             draft = formatted(points)
             return
         }
-        points = value
+        if points != value { points = value }
         draft = formatted(points)
     }
 
@@ -761,15 +777,12 @@ private struct PointSizeControl: View {
 
 private struct CaptureOptionsPanel<Content: View>: View {
     let title: String
-    let hint: String
     @ViewBuilder let content: Content
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text(title).font(.system(size: 12, weight: .semibold)).foregroundStyle(.white)
+            Text(L(title)).font(.system(size: 12, weight: .semibold)).foregroundStyle(.white)
             content
-            Text(hint).font(.system(size: 11)).foregroundStyle(Palette.overlayMuted)
-                .fixedSize(horizontal: false, vertical: true)
         }
         .padding(14).frame(width: 284)
         .background(Palette.overlay)
@@ -797,8 +810,8 @@ private struct CaptureOptionButton: View {
             HStack(spacing: 12) {
                 Image(systemName: symbol).font(.system(size: 18, weight: .medium)).frame(width: 24)
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(title).font(.system(size: 13, weight: .medium))
-                    Text(detail).font(.system(size: 11)).foregroundStyle(Palette.overlayMuted)
+                    Text(L(title)).font(.system(size: 13, weight: .medium))
+                    Text(L(detail)).font(.system(size: 11)).foregroundStyle(Palette.overlayMuted)
                 }
                 Spacer(minLength: 0)
             }
@@ -807,7 +820,7 @@ private struct CaptureOptionButton: View {
             .contentShape(RoundedRectangle(cornerRadius: 8))
         }
         .buttonStyle(CaptureOptionStyle())
-        .accessibilityLabel(title).accessibilityValue(detail)
+        .accessibilityLabel(L(title)).accessibilityValue(L(detail))
     }
 }
 

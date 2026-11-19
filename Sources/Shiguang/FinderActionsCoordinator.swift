@@ -178,11 +178,9 @@ final class FinderActionsCoordinator: NSObject, ObservableObject, NSWindowDelega
     }
 
     private func presentName(format: FinderFileFormat, destination: FinderDestination) {
-        if let window {
-            window.makeKeyAndOrderFront(nil)
-            NSApp.activate(ignoringOtherApps: true)
-            return
-        }
+        // A prompt left from an earlier request is bound to another folder or
+        // format; replace it instead of bringing it back for this one.
+        window?.close()
 
         let panel = NSPanel(
             contentRect: NSRect(x: 0, y: 0, width: 420, height: 190),
@@ -307,6 +305,13 @@ final class FinderActionsCoordinator: NSObject, ObservableObject, NSWindowDelega
         guard let window, window === eventWindow else { return false }
         window.close()
         return true
+    }
+
+    /// Called when PawShot loses focus. The name prompt would only be hidden
+    /// and AppKit would show it again with the next unrelated feature, so the
+    /// request is cancelled, like clicking outside a popover.
+    func dismissPrompts() {
+        window?.close()
     }
 
     func windowWillClose(_ notification: Notification) {

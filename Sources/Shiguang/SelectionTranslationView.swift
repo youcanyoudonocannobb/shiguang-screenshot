@@ -284,16 +284,16 @@ struct SelectionTranslationView: View {
         isEnabled: @escaping (String) -> Bool = { _ in true },
         onSelect: @escaping (String) -> Void
     ) -> some View {
-        let selectedName = choices.first(where: { $0.id == selection })?.name ?? selection
+        let selectedName = choices.first(where: { $0.id == selection })?.displayName ?? selection
         return Menu {
             ForEach(choices) { language in
                 Button {
                     onSelect(language.id)
                 } label: {
                     if language.id == selection {
-                        Label(language.name, systemImage: "checkmark")
+                        Label(language.displayName, systemImage: "checkmark")
                     } else {
-                        Text(language.name)
+                        Text(language.displayName)
                     }
                 }
                 .disabled(!isEnabled(language.id))

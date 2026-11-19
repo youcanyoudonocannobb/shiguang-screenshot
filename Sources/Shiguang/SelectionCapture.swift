@@ -11,7 +11,9 @@ final class SelectionCaptureController: NSObject {
     var onRegionSelected: ((NSScreen, NSRect, NSRect) -> Void)?
     var onScreenSelected: ((NSImage, NSScreen, NSRect) -> Void)?
     var targetApplication: NSRunningApplication?
-    var prompt = "拖动框选，或点击窗口 · Esc 取消"
+    /// Optional instruction badge. Empty by default: like CleanShot X and
+    /// Snipaste, the overlay shows only the selection and its size.
+    var prompt = ""
     private var windows: [NSWindow] = []
     private var startPoint: NSPoint?
     private var currentPoint: NSPoint?
@@ -348,20 +350,22 @@ final class SelectionView: NSView {
         SelectionChrome.mask.setFill()
         mask.fill()
         let prompt = (controller?.prompt ?? "") as NSString
-        let attributes: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: 13.5, weight: .semibold), .foregroundColor: NSColor.white
-        ]
-        let size = prompt.size(withAttributes: attributes)
-        let badge = CGRect(x: (bounds.width - size.width) / 2 - 15, y: bounds.height - 78,
-                           width: size.width + 30, height: 34)
-        NSColor(hex: "172A38").withAlphaComponent(0.88).setFill()
-        NSBezierPath(roundedRect: badge, xRadius: 17, yRadius: 17).fill()
-        NSColor.white.withAlphaComponent(0.12).setStroke()
-        let promptBorder = NSBezierPath(roundedRect: badge, xRadius: 17, yRadius: 17)
-        promptBorder.lineWidth = 0.8
-        promptBorder.stroke()
-        prompt.draw(at: CGPoint(x: badge.minX + 15, y: badge.minY + (badge.height - size.height) / 2),
-                    withAttributes: attributes)
+        if prompt.length > 0 {
+            let attributes: [NSAttributedString.Key: Any] = [
+                .font: NSFont.systemFont(ofSize: 13.5, weight: .semibold), .foregroundColor: NSColor.white
+            ]
+            let size = prompt.size(withAttributes: attributes)
+            let badge = CGRect(x: (bounds.width - size.width) / 2 - 15, y: bounds.height - 78,
+                               width: size.width + 30, height: 34)
+            NSColor(hex: "172A38").withAlphaComponent(0.88).setFill()
+            NSBezierPath(roundedRect: badge, xRadius: 17, yRadius: 17).fill()
+            NSColor.white.withAlphaComponent(0.12).setStroke()
+            let promptBorder = NSBezierPath(roundedRect: badge, xRadius: 17, yRadius: 17)
+            promptBorder.lineWidth = 0.8
+            promptBorder.stroke()
+            prompt.draw(at: CGPoint(x: badge.minX + 15, y: badge.minY + (badge.height - size.height) / 2),
+                        withAttributes: attributes)
+        }
         if let rect = controller?.selection(in: self) {
             if let context = NSGraphicsContext.current?.cgContext {
                 SelectionChrome.draw(in: rect, context: context)

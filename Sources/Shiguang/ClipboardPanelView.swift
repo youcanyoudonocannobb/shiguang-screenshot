@@ -54,11 +54,6 @@ struct ClipboardPanelView: View {
                     .buttonStyle(.plain)
                     .accessibilityLabel("清除搜索")
                 }
-                Text("⌘F")
-                    .font(.system(size: 9, weight: .medium, design: .monospaced))
-                    .foregroundStyle(Palette.muted)
-                    .padding(.horizontal, 5).padding(.vertical, 2)
-                    .background(Palette.ink.opacity(0.05), in: RoundedRectangle(cornerRadius: 4))
             }
             .padding(.horizontal, 11)
             .frame(height: 36)
@@ -107,10 +102,6 @@ struct ClipboardPanelView: View {
                     .foregroundStyle(Palette.muted)
                 Text(history.search.isEmpty ? "复制后，在这里找回内容" : "没有匹配的内容")
                     .font(.system(size: 13, weight: .medium))
-                Text(history.search.isEmpty ? "文字、图片、GIF、视频和文件都会保存在本机" :
-                        "试试其他关键词或切换内容类型")
-                    .font(.system(size: 10.5))
-                    .foregroundStyle(Palette.muted)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Palette.panel.opacity(0.6), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
@@ -140,7 +131,7 @@ struct ClipboardPanelView: View {
             HStack(spacing: 5) {
                 Image(systemName: symbol)
                     .font(.system(size: 9, weight: .semibold))
-                Text(title)
+                Text(L(title))
                     .font(.system(size: 10, weight: .medium))
                 Text("\(entryCount(for: kind))")
                     .font(.system(size: 9, weight: .medium, design: .rounded))
@@ -154,7 +145,9 @@ struct ClipboardPanelView: View {
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("筛选\(title)，\(entryCount(for: kind)) 项")
+        .accessibilityLabel(L(title))
+        .accessibilityValue("\(entryCount(for: kind))")
+        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
     private func row(_ entry: ClipboardEntry) -> some View {
@@ -203,7 +196,7 @@ struct ClipboardPanelView: View {
             }
             .buttonStyle(.plain)
             .help("复制此内容")
-            .accessibilityLabel("复制\(entry.kind.title)")
+            .accessibilityLabel("复制此内容")
         }
         .padding(8)
         .contentShape(RoundedRectangle(cornerRadius: 9))
@@ -214,6 +207,11 @@ struct ClipboardPanelView: View {
                     lineWidth: selected ? 1.2 : 1))
         .onTapGesture(count: 2) { onCopy(entry) }
         .onTapGesture { history.selectedID = entry.id }
+        .contextMenu {
+            Button("复制") { onCopy(entry) }
+            Divider()
+            Button("删除", role: .destructive) { history.remove(entry) }
+        }
     }
 
     private func entryCount(for kind: ClipboardEntry.Kind?) -> Int {

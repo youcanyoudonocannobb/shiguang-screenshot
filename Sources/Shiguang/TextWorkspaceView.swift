@@ -68,7 +68,7 @@ struct TextWorkspaceView: View {
     private func languageControl(accessibilityTitle: String, selection: Binding<String>,
                                  choices: [LanguageChoice]) -> some View {
         Picker(accessibilityTitle, selection: selection) {
-            ForEach(choices) { Text($0.name).tag($0.id) }
+            ForEach(choices) { Text($0.displayName).tag($0.id) }
         }
         .labelsHidden()
         .pickerStyle(.menu)

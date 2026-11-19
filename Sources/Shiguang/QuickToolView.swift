@@ -6,7 +6,9 @@ import Translation
 struct QuickToolView: View {
     @ObservedObject var model: AppModel
     let onCopy: (String) -> String?
-    let onClose: () -> Void
+    /// Closes the launcher. `restoreFocus` is false when the launcher handed
+    /// off to another PawShot window that should keep the focus.
+    let onClose: (_ restoreFocus: Bool) -> Void
     let onHeightChange: (CGFloat) -> Void
 
     @StoredState private var query = ""
@@ -161,7 +163,7 @@ struct QuickToolView: View {
         .foregroundStyle(Palette.ink)
         .tint(Palette.accent)
         .preferredColorScheme(.light)
-        .onExitCommand(perform: onClose)
+        .onExitCommand { onClose(true) }
         .background {
             QuickTranslationBridge(
                 request: requestedChinese,
@@ -526,7 +528,7 @@ struct QuickToolView: View {
             if let error = LauncherAction.open(entry) {
                 errorMessage = error
             } else {
-                onClose()
+                onClose(true)
             }
         case .command(let command):
             if case .variable = command, argument(for: command).isEmpty {
@@ -537,7 +539,7 @@ struct QuickToolView: View {
             copyCommand(command)
         case .toolbox:
             model.showToolbox?()
-            onClose()
+            onClose(false)
         }
     }
 
@@ -549,7 +551,7 @@ struct QuickToolView: View {
             return
         }
         errorMessage = nil
-        onClose()
+        onClose(true)
     }
 
     private func moveSelection(_ delta: Int) {

@@ -83,11 +83,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     private var quickToolPendingHeight: CGFloat?
     private var quickToolResizeScheduled = false
     private var quickToolReturnApplication: NSRunningApplication?
+    private weak var quickToolReturnWindow: NSWindow?
     private var toolboxWindow: NSPanel?
     private var selectionTranslationPanel: SelectionTranslationPanel?
     private var selectionTranslationReturnApplication: NSRunningApplication?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Read this first: the open-application event is only current while
+        // launching.
+        let launchedAtLogin = Self.launchedAsLoginItem
         let ownPID = ProcessInfo.processInfo.processIdentifier
         if let front = NSWorkspace.shared.frontmostApplication, front.processIdentifier != ownPID {
             lastExternalApplication = front
@@ -132,7 +136,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         model.beginSelection = { [weak self] translate in self?.beginSelection(translate: translate) }
         model.showCaptureOverlay = { [weak self] image, rect in self?.showCaptureOverlay(image: image, rect: rect) }
         model.closeCaptureOverlay = { [weak self] in self?.overlayWindow?.orderOut(nil) }
-        model.pinImage = { [weak self] image in self?.pin(image) }
+        model.pinImage = { [weak self] image, rect in self?.pin(image, at: rect) }
         model.restartApp = { [weak self] in self?.restart() }
         model.beginRecording = { [weak self] format, region in self?.beginRecording(format, region: region) }
         model.saveRecording = { [weak self] in self?.copyLastRecording() }
@@ -178,6 +182,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
                 case 125: self.clipboard.moveSelection(1); return nil
                 case 126: self.clipboard.moveSelection(-1); return nil
                 case 36, 76: self.copySelectedClipboardEntry(); return nil
+                case 51 where event.modifierFlags.contains(.command) && self.clipboard.search.isEmpty:
+                    // With text in the search field, Cmd-Delete keeps its
+                    // usual meaning and clears the query first.
+                    if let id = self.clipboard.selectedID,
+                       let entry = self.clipboard.entries.first(where: { $0.id == id }) {
+                        self.clipboard.remove(entry)
+                    }
+                    return nil
                 default: return event
                 }
             }
@@ -218,7 +230,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         if let request = pendingFinderRequest {
             pendingFinderRequest = nil
             handleFinderRequest(request)
-        } else if !FinderActionRequest.isFinderLaunch(ProcessInfo.processInfo.arguments) {
+        } else if !FinderActionRequest.isFinderLaunch(ProcessInfo.processInfo.arguments), !launchedAtLogin {
             window.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
         }
@@ -228,6 +240,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
+
+    /// macOS opens login items with an open-application event flagged as a
+    /// login launch. Like other menu bar utilities, PawShot then starts
+    /// quietly instead of opening Preferences on every login.
+    private static var launchedAsLoginItem: Bool {
+        guard let event = NSAppleEventManager.shared().currentAppleEvent,
+              event.eventID == AEEventID(kAEOpenApplication) else { return false }
+        return event.paramDescriptor(forKeyword: AEKeyword(keyAEPropData))?.enumCodeValue ==
+            OSType(keyAELaunchedAsLogInItem)
+    }
 
     func application(_ application: NSApplication, open urls: [URL]) {
         guard let request = urls.lazy.compactMap(FinderActionRequest.init(url:)).first,
@@ -304,6 +326,66 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         model.refreshPermissionStatus()
         model.refreshLaunchAtLoginState()
         finderActions.refreshExtensionStatus()
+    }
+
+    func applicationWillResignActive(_ notification: Notification) {
+        // hidesOnDeactivate only hides these panels, and AppKit orders them back
+        // in on the next activation. For a menu bar app that is any feature
+        // (capture, clipboard, translation...), so a launcher left by clicking
+        // another app reappeared over every later feature. Leaving PawShot
+        // dismisses them instead; the panels keep their state for next time.
+        for panel in [quickToolWindow, clipboardWindow, quickActionsWindow, toolboxWindow] {
+            panel?.orderOut(nil)
+        }
+        // The user chose where focus goes; don't send it back anywhere later.
+        quickToolReturnApplication = nil
+        quickToolReturnWindow = nil
+        clipboardReturnApplication = nil
+        clipboardReturnWindow = nil
+        finderActions.dismissPrompts()
+    }
+
+    func windowDidResignKey(_ notification: Notification) {
+        guard let launcher = quickToolWindow, notification.object as? NSWindow === launcher else { return }
+        // Like Spotlight, the launcher only lives while it has focus: once
+        // another PawShot window takes over (capture, clipboard, toolbox...),
+        // close it rather than leave it floating over that feature. Switching
+        // apps is handled in applicationWillResignActive.
+        DispatchQueue.main.async { [weak self] in
+            guard let self, let launcher = self.quickToolWindow, launcher.isVisible,
+                  let key = NSApp.keyWindow, !Self.window(key, belongsTo: launcher) else { return }
+            launcher.orderOut(nil)
+            self.quickToolReturnApplication = nil
+            self.quickToolReturnWindow = nil
+        }
+    }
+
+    /// Sheets, popovers and other child windows keep their owner focused.
+    private static func window(_ candidate: NSWindow, belongsTo owner: NSWindow) -> Bool {
+        var current: NSWindow? = candidate
+        while let window = current {
+            if window === owner { return true }
+            current = window.sheetParent ?? window.parent
+        }
+        return false
+    }
+
+    /// The PawShot window a transient panel hands focus back to: the one the
+    /// user was working in when they opened it. Nil when they came from another
+    /// app, so focus returns to that app instead.
+    private func focusReturnWindow(frontmost: NSRunningApplication?) -> NSWindow? {
+        guard frontmost?.processIdentifier == ProcessInfo.processInfo.processIdentifier,
+              let key = NSApp.keyWindow, key.isVisible else { return nil }
+        let transient: [NSWindow?] = [window, quickToolWindow, clipboardWindow, quickActionsWindow]
+        return transient.contains { $0 === key } ? nil : key
+    }
+
+    private func restoreFocus(to returnWindow: NSWindow?, or application: NSRunningApplication?) {
+        if let returnWindow, returnWindow.isVisible {
+            returnWindow.makeKeyAndOrderFront(nil)
+        } else if let application, application.processIdentifier != ProcessInfo.processInfo.processIdentifier {
+            application.activate(options: [])
+        }
     }
 
     @objc func showWorkspace() {
@@ -423,6 +505,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         let ownPID = ProcessInfo.processInfo.processIdentifier
         let front = NSWorkspace.shared.frontmostApplication
         quickToolReturnApplication = front?.processIdentifier == ownPID ? lastExternalApplication : front
+        quickToolReturnWindow = focusReturnWindow(frontmost: front)
         window?.orderOut(nil)
         NSApp.activate(ignoringOtherApps: true)
 
@@ -438,7 +521,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
                 backing: .buffered,
                 defer: false
             )
-            created.title = "PawShot · 启动台"
+            created.title = "PawShot · \(L("启动台"))"
             created.titleVisibility = .hidden
             created.titlebarAppearsTransparent = true
             created.isReleasedWhenClosed = false
@@ -449,6 +532,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             created.isOpaque = false
             created.backgroundColor = .clear
             created.hasShadow = false
+            created.delegate = self
             quickToolWindow = created
             panel = created
         }
@@ -473,7 +557,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
                     return error.localizedDescription
                 }
             },
-            onClose: { [weak self] in self?.closeQuickToolWindow() },
+            onClose: { [weak self] restoreFocus in self?.closeQuickToolWindow(restoringFocus: restoreFocus) },
             onHeightChange: { [weak self] height in
                 Task { @MainActor in
                     self?.resizeQuickToolWindow(to: height)
@@ -569,14 +653,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         panel.setFrame(targetFrame, display: true)
     }
 
-    private func closeQuickToolWindow() {
+    private func closeQuickToolWindow(restoringFocus: Bool = true) {
         quickToolWindow?.orderOut(nil)
         window?.orderOut(nil)
-        if let app = quickToolReturnApplication,
-           app.processIdentifier != ProcessInfo.processInfo.processIdentifier {
-            app.activate(options: [])
-        }
+        if restoringFocus { restoreFocus(to: quickToolReturnWindow, or: quickToolReturnApplication) }
         quickToolReturnApplication = nil
+        quickToolReturnWindow = nil
     }
 
     private func requestSelectionAccess(for feature: String) {
@@ -623,8 +705,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         let ownPID = ProcessInfo.processInfo.processIdentifier
         let front = NSWorkspace.shared.frontmostApplication
         clipboardReturnApplication = front?.processIdentifier == ownPID ? lastExternalApplication : front
-        let keyWindow = NSApp.keyWindow
-        clipboardReturnWindow = keyWindow === window ? nil : keyWindow
+        clipboardReturnWindow = focusReturnWindow(frontmost: front)
         window?.orderOut(nil)
         NSApp.activate(ignoringOtherApps: true)
         if section == .tools { clipboard.prepareForTools() }
@@ -712,9 +793,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     private func closeClipboardWindow() {
         clipboardWindow?.orderOut(nil)
         window?.orderOut(nil)
-        if let app = clipboardReturnApplication, app.processIdentifier != ProcessInfo.processInfo.processIdentifier {
-            app.activate(options: [])
-        } else { clipboardReturnWindow?.makeKeyAndOrderFront(nil) }
+        // Opened from a PawShot window (toolbox, editor...): go back there so a
+        // paste lands where the user was working, not in the last other app.
+        restoreFocus(to: clipboardReturnWindow, or: clipboardReturnApplication)
         clipboardReturnApplication = nil
         clipboardReturnWindow = nil
     }
@@ -863,20 +944,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         applyStatusItemPreferences()
     }
 
+    /// Shows a global hotkey as the item's native, right-aligned key
+    /// equivalent. The registered hotkey still handles the key press.
+    private func applyHotkey(_ hotkey: HotkeySettings, to item: NSMenuItem?) {
+        guard let item else { return }
+        let key = hotkey.carbonModifiers == 0 ? "" : hotkey.menuKeyEquivalent
+        item.keyEquivalent = key
+        item.keyEquivalentModifierMask = key.isEmpty ? [] : hotkey.cocoaModifiers
+    }
+
+    private func hotkeyMenuItem(_ title: String, action: Selector, symbol: String,
+                                hotkey: HotkeySettings) -> NSMenuItem {
+        let item = menuItem(title, action: action, symbol: symbol)
+        applyHotkey(hotkey, to: item)
+        return item
+    }
+
     private func makeStatusMenu() -> NSMenu {
         let menu = NSMenu()
-        menu.addItem(menuItem("\(L("区域截图"))                  \(model.captureHotkey.symbol)",
-                              action: #selector(capture), symbol: "viewfinder"))
-        menu.addItem(menuItem("\(L("截图并翻译"))              \(model.translateHotkey.symbol)",
-                              action: #selector(translateCapture), symbol: "character.bubble"))
-        menu.addItem(menuItem("\(L("剪贴板历史"))              \(model.clipboardHotkey.symbol)",
-                              action: #selector(showClipboardWindow), symbol: "doc.on.clipboard"))
-        menu.addItem(menuItem("\(L("翻译剪贴板"))              \(model.clipboardTranslateHotkey.symbol)",
-                              action: #selector(translateClipboard), symbol: "character.book.closed"))
-        menu.addItem(menuItem("\(L("划词翻译"))                  \(model.selectionTranslateHotkey.symbol)",
-                              action: #selector(translateSelection), symbol: "text.cursor"))
-        menu.addItem(menuItem("\(L("启动台"))                  \(model.variableNamingHotkey.symbol)",
-                              action: #selector(showQuickToolWindow), symbol: "textformat.abc"))
+        menu.addItem(hotkeyMenuItem("区域截图", action: #selector(capture), symbol: "viewfinder",
+                                    hotkey: model.captureHotkey))
+        menu.addItem(hotkeyMenuItem("截图并翻译", action: #selector(translateCapture), symbol: "character.bubble",
+                                    hotkey: model.translateHotkey))
+        menu.addItem(hotkeyMenuItem("剪贴板历史", action: #selector(showClipboardWindow), symbol: "doc.on.clipboard",
+                                    hotkey: model.clipboardHotkey))
+        menu.addItem(hotkeyMenuItem("翻译剪贴板", action: #selector(translateClipboard),
+                                    symbol: "character.book.closed", hotkey: model.clipboardTranslateHotkey))
+        menu.addItem(hotkeyMenuItem("划词翻译", action: #selector(translateSelection), symbol: "text.cursor",
+                                    hotkey: model.selectionTranslateHotkey))
+        menu.addItem(hotkeyMenuItem("启动台", action: #selector(showQuickToolWindow), symbol: "textformat.abc",
+                                    hotkey: model.variableNamingHotkey))
         menu.addItem(menuItem("快捷操作", action: #selector(showQuickActionsWindow), symbol: "bolt"))
         menu.addItem(.separator())
         menu.addItem(menuItem("录制 MP4 视频…", action: #selector(recordVideo), symbol: "record.circle"))
@@ -1014,24 +1111,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     }
 
     private func updateStatusMenuHotkeys() {
-        guard let menu = statusMenu, menu.items.count >= 6 else { return }
-        menu.items[0].title = "区域截图                  \(model.captureHotkey.symbol)"
-        menu.items[1].title = "截图并翻译              \(model.translateHotkey.symbol)"
-        menu.items[2].title = "剪贴板历史              \(model.clipboardHotkey.symbol)"
-        menu.items[3].title = "翻译剪贴板              \(model.clipboardTranslateHotkey.symbol)"
-        menu.items[4].title = "划词翻译                  \(model.selectionTranslateHotkey.symbol)"
-        menu.items[5].title = "快捷输入工具            \(model.variableNamingHotkey.symbol)"
-        clipboardMenuItem?.keyEquivalent = model.clipboardHotkey.carbonModifiers == 0 ? "" : model.clipboardHotkey.key.lowercased()
-        clipboardMenuItem?.keyEquivalentModifierMask = model.clipboardHotkey.cocoaModifiers
-        clipboardTranslateMenuItem?.keyEquivalent =
-            model.clipboardTranslateHotkey.carbonModifiers == 0 ? "" : model.clipboardTranslateHotkey.key.lowercased()
-        clipboardTranslateMenuItem?.keyEquivalentModifierMask = model.clipboardTranslateHotkey.cocoaModifiers
-        selectionTranslateMenuItem?.keyEquivalent =
-            model.selectionTranslateHotkey.carbonModifiers == 0 ? "" : model.selectionTranslateHotkey.key.lowercased()
-        selectionTranslateMenuItem?.keyEquivalentModifierMask = model.selectionTranslateHotkey.cocoaModifiers
-        variableNameMenuItem?.keyEquivalent =
-            model.variableNamingHotkey.carbonModifiers == 0 ? "" : model.variableNamingHotkey.key.lowercased()
-        variableNameMenuItem?.keyEquivalentModifierMask = model.variableNamingHotkey.cocoaModifiers
+        // Rebuild instead of rewriting titles, so the language and the
+        // current shortcuts both stay correct.
+        if statusItem != nil { statusMenu = makeStatusMenu() }
+        applyHotkey(model.clipboardHotkey, to: clipboardMenuItem)
+        applyHotkey(model.clipboardTranslateHotkey, to: clipboardTranslateMenuItem)
+        applyHotkey(model.selectionTranslateHotkey, to: selectionTranslateMenuItem)
+        applyHotkey(model.variableNamingHotkey, to: variableNameMenuItem)
     }
 
     private func rebindHotkeys() {
@@ -1237,7 +1323,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             self?.model.captureFailed(error)
             restore()
         })
-        controller.prompt = "拖动选择\(format.title)区域 · 无声录制 · Esc 取消"
         controller.onRegionSelected = { [weak self] screen, local, global in
             self?.startRecording(screen: screen, local: local, global: global, format: format)
         }
@@ -1293,7 +1378,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             restore()
             self?.model.captureFailed(error)
         })
-        selection.prompt = "\(mode.title)：框选可滚动内容，避开工具栏 · Esc 取消"
         selection.onRegionSelected = { [weak self] screen, local, global in
             self?.startScrollCapture(mode, screen: screen, local: local, global: global, restore: restore)
         }
@@ -1603,15 +1687,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         }
     }
 
-    private func pin(_ image: NSImage) {
+    /// Pins an image. With a capture rect (global points) the pin lands exactly
+    /// where the region was taken, at 100%, as Snipaste and PixPin do.
+    private func pin(_ image: NSImage, at captureRect: CGRect?) {
         guard image.size.width > 0, image.size.height > 0 else { return }
         let ratio = image.size.height / image.size.width
-        let maxSize = NSScreen.main?.visibleFrame.size ?? NSSize(width: 1000, height: 750)
-        let width = min(460, maxSize.width * 0.6)
-        let height = min(width * ratio, maxSize.height * 0.7)
-        let panel = PinnedPanel(contentRect: NSRect(x: 0, y: 0, width: width, height: height),
+        let screen = captureRect.flatMap { rect in
+            NSScreen.screens.first { $0.frame.contains(CGPoint(x: rect.midX, y: rect.midY)) } ??
+                NSScreen.screens.first { $0.frame.intersects(rect) }
+        } ?? NSScreen.main
+        let frame: CGRect
+        let baseWidth: CGFloat
+        if let captureRect, let screen {
+            frame = CaptureSelectionGeometry.clamped(captureRect, to: screen.frame)
+            baseWidth = captureRect.width
+        } else {
+            // Rendered images are measured in pixels; show them at their
+            // actual size, capped to fit the screen.
+            let visible = screen?.visibleFrame ?? CGRect(x: 0, y: 0, width: 1000, height: 750)
+            let scale = max(1, screen?.backingScaleFactor ?? 2)
+            let natural = CGSize(width: image.size.width / scale, height: image.size.height / scale)
+            let fit = min(1, visible.width * 0.6 / natural.width, visible.height * 0.6 / natural.height)
+            let size = CGSize(width: max(40, natural.width * fit), height: max(40, natural.width * fit) * ratio)
+            frame = CGRect(x: visible.midX - size.width / 2, y: visible.midY - size.height / 2,
+                           width: size.width, height: size.height)
+            baseWidth = natural.width
+        }
+        let panel = PinnedPanel(contentRect: frame,
                                 styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
-        panel.title = "PawShot 贴图 · 100%"
+        func title(for width: CGFloat) -> String {
+            "PawShot · \(L("贴图")) · \(Int((width / max(1, baseWidth) * 100).rounded()))%"
+        }
+        panel.title = title(for: frame.width)
         panel.isOpaque = false
         panel.backgroundColor = .clear
         panel.hasShadow = true
@@ -1627,12 +1734,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         view.onZoom = { [weak panel] scale, anchor in
             guard let panel else { return }
             Self.resizePinnedWindow(panel, imageAspectRatio: ratio, scale: scale, anchor: anchor)
-            let zoom = panel.contentRect(forFrameRect: panel.frame).width / width * 100
-            panel.title = "PawShot 贴图 · \(Int(zoom.rounded()))%"
+            panel.title = title(for: panel.contentRect(forFrameRect: panel.frame).width)
         }
+        view.onCopy = { [weak self] in _ = try? self?.clipboard.copyImage(image) }
         panel.contentView = view
         panel.contentAspectRatio = NSSize(width: image.size.width, height: image.size.height)
-        panel.center()
+        panel.setFrame(frame, display: false)
         pinnedWindows.append(panel)
         NSApp.activate(ignoringOtherApps: true)
         panel.makeKeyAndOrderFront(nil)
@@ -1698,13 +1805,15 @@ private final class PinnedImageView: NSView {
     private var imageAlpha: CGFloat = 1
     private var isHovering = false
     private var trackingAreaReference: NSTrackingArea?
+    private var drag = ManualWindowDrag()
     var onZoom: ((CGFloat, CGPoint) -> Void)?
+    var onCopy: (() -> Void)?
 
     private lazy var closeButton: NSButton = controlButton(
-        symbol: "xmark", label: "关闭贴图", action: #selector(closePinnedImage)
+        symbol: "xmark", label: L("关闭贴图"), action: #selector(closePinnedImage)
     )
     private lazy var opacityButton: NSButton = controlButton(
-        symbol: "circle.lefthalf.filled", label: "设置贴图透明度", action: #selector(toggleOpacityControls)
+        symbol: "circle.lefthalf.filled", label: L("设置贴图透明度"), action: #selector(toggleOpacityControls)
     )
     private lazy var opacityLabel: NSTextField = {
         let label = NSTextField(labelWithString: "100%")
@@ -1722,7 +1831,7 @@ private final class PinnedImageView: NSView {
         slider.isContinuous = true
         slider.translatesAutoresizingMaskIntoConstraints = false
         slider.widthAnchor.constraint(equalToConstant: 72).isActive = true
-        slider.setAccessibilityLabel("贴图透明度")
+        slider.setAccessibilityLabel(L("贴图透明度"))
         return slider
     }()
     private lazy var opacityPanel: NSView = {
@@ -1755,7 +1864,7 @@ private final class PinnedImageView: NSView {
         super.init(frame: .zero)
         setAccessibilityElement(true)
         setAccessibilityRole(.group)
-        setAccessibilityLabel("PawShot 贴图")
+        setAccessibilityLabel("PawShot · \(L("贴图"))")
         addSubview(closeButton)
         addSubview(opacityButton)
         addSubview(opacityPanel)
@@ -1779,6 +1888,10 @@ private final class PinnedImageView: NSView {
 
     override var isOpaque: Bool { false }
     override var acceptsFirstResponder: Bool { true }
+    override var mouseDownCanMoveWindow: Bool { false }
+    /// The first click on a pin behind another app's window must start a
+    /// drag instead of only activating PawShot.
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
     override func keyDown(with event: NSEvent) {
         if event.keyCode == 53 {
@@ -1794,7 +1907,8 @@ private final class PinnedImageView: NSView {
 
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
-        let path = NSBezierPath(roundedRect: bounds, xRadius: 10, yRadius: 10)
+        // A small radius keeps the captured corners visible.
+        let path = NSBezierPath(roundedRect: bounds, xRadius: 6, yRadius: 6)
         NSGraphicsContext.saveGraphicsState()
         path.addClip()
         NSGraphicsContext.current?.imageInterpolation = .high
@@ -1829,8 +1943,29 @@ private final class PinnedImageView: NSView {
     override func mouseDown(with event: NSEvent) {
         NSApp.activate(ignoringOtherApps: true)
         window?.makeKey()
-        window?.performDrag(with: event)
+        if let window { drag.begin(event, window: window) }
     }
+
+    override func mouseDragged(with event: NSEvent) {
+        if let window { drag.drag(event, window: window) }
+    }
+
+    override func mouseUp(with event: NSEvent) { drag.end() }
+
+    override func menu(for event: NSEvent) -> NSMenu? {
+        let menu = NSMenu()
+        let copy = NSMenuItem(title: L("复制图片"), action: #selector(copy(_:)), keyEquivalent: "c")
+        copy.target = self
+        menu.addItem(copy)
+        menu.addItem(.separator())
+        let close = NSMenuItem(title: L("关闭贴图"), action: #selector(closePinnedImage), keyEquivalent: "")
+        close.target = self
+        menu.addItem(close)
+        return menu
+    }
+
+    /// ⌘C copies the pinned image (sent through Edit > Copy).
+    @objc func copy(_ sender: Any?) { onCopy?() }
 
     override func scrollWheel(with event: NSEvent) {
         guard abs(event.scrollingDeltaY) > 0.001 else { return }

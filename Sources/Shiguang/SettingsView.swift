@@ -343,7 +343,6 @@ private struct SettingsDetailView: View {
     let page: ShiguangSettingsPage
     @StoredState private var revealsAIKey = false
     @StoredState private var confirmsClearHistory = false
-    @StoredState private var hasLegacyAIKey = false
 
     var body: some View {
         ScrollView {
@@ -369,25 +368,13 @@ private struct SettingsDetailView: View {
         // every detail view (and all of its controls) is the expensive part.
         .animation(nil, value: page)
         .background(Palette.background)
-        .onChange(of: page) { _, newValue in
-            revealsAIKey = false
-            refreshLegacyKeyHint(for: newValue)
-        }
-        .onAppear { refreshLegacyKeyHint(for: page) }
+        .onChange(of: page) { _, _ in revealsAIKey = false }
         .alert("清空全部截图历史？", isPresented: $confirmsClearHistory) {
             Button("取消", role: .cancel) {}
             Button("全部清除", role: .destructive) { model.clearHistory() }
         } message: {
             Text("这会删除本机保存的全部截图、标注、识别文字和译文。")
         }
-    }
-
-    private func refreshLegacyKeyHint(for page: ShiguangSettingsPage) {
-        guard page == .translation, model.aiAPIKey.isEmpty else {
-            hasLegacyAIKey = false
-            return
-        }
-        hasLegacyAIKey = !AITranslationKeychain.hasStoredKeyFile
     }
 
     @ViewBuilder private var pageContent: some View {
@@ -419,7 +406,8 @@ private struct SettingsDetailView: View {
                     .frame(width: 120, alignment: .trailing)
                 }
             }
-            SettingsSection("启动与菜单栏", footer: model.launchAtLoginMessage) {
+            SettingsSection("启动与菜单栏",
+                            status: model.launchAtLoginRequiresApproval ? nil : model.launchAtLoginMessage) {
                 SettingsToggle(
                     "登录时自动启动",
                     detail: model.launchAtLoginRequiresApproval
@@ -446,14 +434,12 @@ private struct SettingsDetailView: View {
                                       language: model.appLanguage)
                 }
             }
-            SettingsFootnote("截图、视频与 GIF 在点击 ✓ 后复制到剪贴板。按 Esc 取消本次操作。",
-                             symbol: "checkmark.circle")
         }
     }
 
     private var screenshotContent: some View {
         Group {
-            SettingsSection("图片处理", footer: "自动处理仅用于导入图片。屏幕截图始终先进入编辑。") {
+            SettingsSection("图片处理") {
                 SettingsToggle("自动识别文字", detail: "导入图片后，提取其中的文字", isOn: $model.autoOCR)
                 SettingsSeparator()
                 SettingsToggle("识别后自动翻译", detail: "使用当前选择的翻译引擎", isOn: $model.autoTranslate)
@@ -465,15 +451,12 @@ private struct SettingsDetailView: View {
                 SettingsSeparator()
                 SettingsActionRow(title: "导入图片", symbol: "photo.badge.plus") { model.importImage() }
             }
-            SettingsFootnote("点击 ✓ 才复制并写入历史；点击 × 或按 Esc 丢弃本次草稿。", symbol: "cursorarrow.click")
         }
     }
 
     private var translationContent: some View {
         Group {
-            SettingsSection("翻译方式", footer: model.translationProvider == .apple
-                            ? "使用 Apple 系统翻译；首次使用某个语言对时，可能需要下载语言包。"
-                            : "翻译内容会发送到你配置的 AI 服务。") {
+            SettingsSection("翻译方式") {
                 SettingsRow("翻译引擎") {
                     Picker("翻译引擎", selection: $model.translationProvider) {
                         ForEach(TranslationProvider.allCases) { provider in
@@ -488,10 +471,7 @@ private struct SettingsDetailView: View {
             }
 
             if model.translationProvider == .ai {
-                SettingsSection(
-                    "AI 服务",
-                    footer: "\(model.aiAPI.detail)。点击“获取模型”会读取该服务的可用模型；测试连接会发送一次 Hello 翻译请求。API Key 仅加密保存在本机。"
-                ) {
+                SettingsSection("AI 服务") {
                     SettingsRow("协议") {
                         Picker("AI 协议", selection: Binding(
                             get: { model.aiAPI },
@@ -548,19 +528,6 @@ private struct SettingsDetailView: View {
                         }
                     }
                     SettingsSeparator()
-                    if hasLegacyAIKey && model.aiAPIKey.isEmpty {
-                        HStack(spacing: 6) {
-                            Image(systemName: "key.horizontal")
-                            Text("旧版本把 Key 存在钥匙串里，请重新填写一次；现在只保存在本机加密文件中。")
-                                .fixedSize(horizontal: false, vertical: true)
-                            Spacer(minLength: 0)
-                        }
-                        .font(.system(size: 10.5))
-                        .foregroundStyle(Palette.muted)
-                        .padding(.horizontal, 16)
-                        .padding(.bottom, 8)
-                    }
-                    SettingsSeparator()
                     SettingsFieldRow("附加要求") {
                         TextField("可选：术语、语气或专有名词", text: $model.aiInstructions)
                             .accessibilityLabel("AI 翻译附加要求")
@@ -579,7 +546,7 @@ private struct SettingsDetailView: View {
                 }
             }
 
-            SettingsSection("语言", footer: "自动识别原文：中文默认译英语，其他语言默认译简体中文。") {
+            SettingsSection("语言") {
                 SettingsRow("默认目标语言") {
                     Picker("目标语言", selection: Binding(get: { model.targetLanguage },
                                                         set: { model.languageEdited(target: $0) })) {
@@ -665,7 +632,7 @@ private struct SettingsDetailView: View {
     }
 
     private var clipboardContent: some View {
-        SettingsSection("系统剪贴板", footer: "历史仅保存在本机，标记为保密或临时的内容不会被记录。") {
+        SettingsSection("系统剪贴板") {
             SettingsToggle("记录剪贴板历史", detail: "支持文字、图片、GIF、视频和文件", isOn: $clipboard.monitorsSystem)
             SettingsSeparator()
             SettingsRow("保留时间", detail: "超过所选日期的记录会自动删除") {
@@ -688,12 +655,12 @@ private struct SettingsDetailView: View {
 
     private var quickInputContent: some View {
         Group {
-            SettingsSection("全局快捷键", footer: "点击输入框后直接按下组合键，也可以手动输入组合键。按 Esc 取消录入。") {
+            SettingsSection("全局快捷键", status: model.hotkeyAvailable ? nil : "部分快捷键已被占用，请更换组合键。") {
                 HotkeyRow(title: "启动台", settings: $model.variableNamingHotkey,
                           onRecordingChanged: model.setHotkeyCaptureActive)
             }
 
-            SettingsSection("使用方法", footer: "↑ / ↓ 选择结果，Return 打开应用/文件或复制结果，Esc 关闭面板。") {
+            SettingsSection("使用方法") {
                 QuickInputGuideRow(
                     symbol: "magnifyingglass",
                     title: "搜索应用与文件",
@@ -723,8 +690,9 @@ private struct SettingsDetailView: View {
                 )
             }
 
-            SettingsSection("工具箱", footer: "JSON 格式化、字段排序、转义；Base64 / URL / Unicode / Hex 编解码。") {
-                SettingsActionRow(title: "打开工具箱", symbol: "wrench.and.screwdriver") {
+            SettingsSection("工具箱") {
+                SettingsActionRow(title: "打开工具箱", detail: "JSON、Base64、URL 与编码转换",
+                                  symbol: "wrench.and.screwdriver") {
                     model.showToolbox?()
                 }
             }
@@ -801,7 +769,7 @@ private struct SettingsDetailView: View {
 
     private var shortcutsContent: some View {
         Group {
-            SettingsSection("全局快捷键", footer: "点击输入框后直接按下组合键，也可以手动输入 option+shift+s。按 Esc 取消录入。") {
+            SettingsSection("全局快捷键", status: model.hotkeyAvailable ? nil : "部分快捷键已被占用，请更换组合键。") {
                 VStack(spacing: 0) {
                     HotkeyRow(title: "区域截图", settings: $model.captureHotkey,
                               onRecordingChanged: model.setHotkeyCaptureActive)
@@ -822,9 +790,6 @@ private struct SettingsDetailView: View {
                               onRecordingChanged: model.setHotkeyCaptureActive)
                 }
             }
-            SettingsFootnote(model.hotkeyAvailable ? "所有快捷键已就绪，可在其他应用中使用。" : "部分快捷键已被占用，请更换组合键。",
-                             symbol: model.hotkeyAvailable ? "checkmark.circle" : "exclamationmark.triangle",
-                             tint: model.hotkeyAvailable ? Palette.success : Palette.warning)
         }
     }
 
@@ -881,10 +846,10 @@ private struct SettingsDetailView: View {
 
     private var privacyContent: some View {
         Group {
-            SettingsSection("屏幕访问", footer: "只在你主动截图、识别或录制时读取所选区域。") {
+            SettingsSection("屏幕访问") {
                 PermissionActionRow(model: model)
             }
-            SettingsSection("划词翻译", footer: "PawShot 只读取当前选区，不会保存其他输入内容。") {
+            SettingsSection("划词翻译") {
                 SettingsRow("辅助功能访问",
                             detail: SelectedTextReader.isTrusted ? "已授权，可读取其他应用的选中文字" : "需要在系统设置中允许 PawShot 读取选中文字") {
                     HStack(spacing: 10) {
@@ -952,8 +917,6 @@ private struct SettingsDetailView: View {
                         .foregroundStyle(Palette.muted)
                 }
             }
-            SettingsFootnote("文字识别在本机处理。Apple 与 AI 翻译可在翻译设置中选择；使用 AI 时，文字会发送到你配置的服务。",
-                             symbol: "hand.raised")
         }
     }
 
@@ -1195,12 +1158,14 @@ private struct MenuBarIconPicker: View {
 
 private struct SettingsSection<Content: View>: View {
     let title: String
-    var footer: String?
+    /// A problem the user must act on, such as a hotkey conflict. Sections
+    /// carry no explanatory footers.
+    var status: String?
     @ViewBuilder var content: Content
 
-    init(_ title: String, footer: String? = nil, @ViewBuilder content: () -> Content) {
+    init(_ title: String, status: String? = nil, @ViewBuilder content: () -> Content) {
         self.title = title
-        self.footer = footer
+        self.status = status
         self.content = content()
     }
 
@@ -1211,6 +1176,16 @@ private struct SettingsSection<Content: View>: View {
                 .frame(maxWidth: .infinity)
                 .background(Palette.panel, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                 .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(Palette.line, lineWidth: 1))
+            if let status {
+                Label {
+                    Text(L(status)).fixedSize(horizontal: false, vertical: true)
+                } icon: {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                }
+                .font(.system(size: 11))
+                .foregroundStyle(Palette.warning)
+                .padding(.horizontal, 4)
+            }
         }
     }
 }
@@ -1366,20 +1341,6 @@ private struct SettingsKeycap: View {
             .background(Palette.background, in: RoundedRectangle(cornerRadius: 5))
             .overlay(RoundedRectangle(cornerRadius: 5).stroke(Palette.line))
     }
-}
-
-private struct SettingsFootnote: View {
-    let text: String
-    let symbol: String
-    var tint: Color = Palette.muted
-
-    init(_ text: String, symbol: String, tint: Color = Palette.muted) {
-        self.text = text
-        self.symbol = symbol
-        self.tint = tint
-    }
-
-    var body: some View { EmptyView() }
 }
 
 private struct PermissionActionRow: View {

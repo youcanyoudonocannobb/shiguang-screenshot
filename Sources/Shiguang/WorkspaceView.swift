@@ -230,7 +230,7 @@ struct CaptureEditorView: View {
             if model.editorMode == .annotation {
                 VStack(spacing: 2) {
                     if let image = model.image {
-                        ImageCanvas(image: image, marks: model.marks, tool: model.tool,
+                        ImageCanvas(model: model, image: image, marks: model.marks, tool: model.tool,
                                     colorHex: model.markColor, zoom: $model.zoomFactor,
                                     resetID: model.viewportResetID, movesWindow: floating, enabled: !model.isBusy,
                                     filledShapes: model.fillShapes,
@@ -242,11 +242,6 @@ struct CaptureEditorView: View {
                                     maskStyle: model.maskStyle,
                                     maskSizePoints: model.maskSizePoints,
                                     spotlightStrength: model.spotlightStrength,
-                                    onColorPick: { model.markColor = $0; model.tool = .pointer },
-                                    onMark: model.addMark,
-                                    onBeginMarkEdit: model.beginEditingMark,
-                                    onUpdateMark: model.updateMark,
-                                    onFinishMarkEdit: model.finishEditingMark,
                                     onEscape: model.closeEditor)
                             .frame(minHeight: 130, maxHeight: .infinity).layoutPriority(1)
                         AnnotationToolbar(model: model)

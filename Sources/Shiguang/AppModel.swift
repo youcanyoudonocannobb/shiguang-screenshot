@@ -106,7 +106,10 @@ final class AppModel: ObservableObject {
     @Published var aiTesting = false
     @Published var aiTestMessage: String?
     @Published var marks: [Mark] = []
-    @Published var tool: MarkTool = .pointer
+    @Published var tool: MarkTool = .pointer {
+        didSet { if tool == .picker, oldValue != .picker { toolBeforePicker = oldValue } }
+    }
+    private var toolBeforePicker: MarkTool = .pointer
     @Published var markColor = "E45F3C"
     @Published var markLineWidthPoints = AnnotationSizeMetrics.defaultLineWidthPoints
     @Published var numberSizePoints = AnnotationSizeMetrics.defaultNumberSizePoints
@@ -200,7 +203,9 @@ final class AppModel: ObservableObject {
     var showCaptureOverlay: ((NSImage, NSRect) -> Void)?
     var beginSelection: ((Bool) -> Void)?
     var closeCaptureOverlay: (() -> Void)?
-    var pinImage: ((NSImage) -> Void)?
+    /// Pins the rendered image; the rect is the on-screen capture area in
+    /// global points so the pin can appear exactly where it was taken.
+    var pinImage: ((NSImage, CGRect?) -> Void)?
     var hotkeysChanged: (() -> Void)?
     var hotkeyCaptureChanged: ((Bool) -> Void)?
     var languageChanged: (() -> Void)?
@@ -1220,6 +1225,69 @@ final class AppModel: ObservableObject {
         persistCurrent()
     }
 
+    func deleteMark(_ id: UUID) {
+        guard let index = marks.firstIndex(where: { $0.id == id }) else { return }
+        undoMarks.append(marks)
+        marks.remove(at: index)
+        redoMarks = []
+        persistCurrent()
+    }
+
+    /// Mirrors a selected mark's style in the toolbar so its controls show, and
+    /// then edit, that mark. While drawing, the active tool follows the
+    /// selection the way CleanShot X and Snipaste do.
+    func adoptStyle(of mark: Mark, imagePointSize size: CGSize) {
+        let shortestSide = min(size.width, size.height)
+        if mark.tool.usesColor, markColor.uppercased() != mark.colorHex.uppercased() {
+            markColor = mark.colorHex
+        }
+        if mark.tool == .rectangle || mark.tool == .ellipse, fillShapes != (mark.filled == true) {
+            fillShapes = mark.filled == true
+        }
+        if mark.tool.usesStroke, let width = mark.lineWidth {
+            let points = AnnotationSizeMetrics.points(fromFraction: width, base: shortestSide,
+                                                      within: AnnotationSizeMetrics.lineWidthRange)
+            if markLineWidthPoints != points { markLineWidthPoints = points }
+        }
+        if mark.tool == .number, let numberSize = mark.numberSize {
+            let points = AnnotationSizeMetrics.points(fromFraction: numberSize, base: shortestSide,
+                                                      within: AnnotationSizeMetrics.numberSizeRange)
+            if numberSizePoints != points { numberSizePoints = points }
+        }
+        if mark.tool == .arrow, arrowDoubleHeaded != (mark.arrowDoubleHeaded == true) {
+            arrowDoubleHeaded = mark.arrowDoubleHeaded == true
+        }
+        if mark.tool == .text {
+            if let fontSize = mark.fontSize {
+                let points = AnnotationSizeMetrics.points(fromFraction: fontSize, base: size.height,
+                                                          within: AnnotationSizeMetrics.textSizeRange)
+                if textFontSize != points { textFontSize = points }
+            }
+            let presentation = mark.textPresentation ?? .plain
+            if textPresentation != presentation { textPresentation = presentation }
+        }
+        if mark.tool == .mosaic {
+            let style = mark.maskStyle ?? .pixel
+            if maskStyle != style { maskStyle = style }
+            if let maskSize = mark.maskSize {
+                let points = AnnotationSizeMetrics.points(fromFraction: maskSize, base: shortestSide,
+                                                          within: AnnotationSizeMetrics.maskSizeRange)
+                if maskSizePoints != points { maskSizePoints = points }
+            }
+        }
+        if tool != .pointer, tool != .picker, tool != mark.tool,
+           ![.pointer, .picker, .spotlight].contains(mark.tool) {
+            tool = mark.tool
+        }
+    }
+
+    /// The eyedropper returns to the tool it was opened from, so the picked
+    /// color can be used (or applied to the selected mark) without re-choosing it.
+    func applyPickedColor(_ hex: String) {
+        markColor = hex
+        tool = toolBeforePicker == .picker ? .pointer : toolBeforePicker
+    }
+
     func undo() {
         guard !isBusy, let previous = undoMarks.popLast() else { return }
         redoMarks.append(marks)
@@ -1294,11 +1362,13 @@ final class AppModel: ObservableObject {
     func requestPin() {
         finishPendingAnnotation?()
         guard let output = renderedImage(), let pinImage else { return }
+        // Read the on-screen area before discarding the draft clears it.
+        let pinRect = draftImage != nil ? captureRect : nil
         let wasDraft = draftImage != nil
         if wasDraft { discardDraft() }
         // Create the pinned panel after dismissing the editor so the panel
         // receives key focus and can handle Esc immediately.
-        pinImage(output)
+        pinImage(output, pinRect)
         if wasDraft { notice = "已钉住到桌面" }
     }
 

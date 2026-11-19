@@ -53,6 +53,24 @@ private func requestBodyData(_ request: URLRequest) -> Data {
     return data
 }
 
+/// A mouse event at a point in a flipped view that is not in a window.
+@MainActor
+private func mouseEvent(_ type: NSEvent.EventType, at viewPoint: CGPoint, in view: NSView,
+                        clickCount: Int = 1) -> NSEvent {
+    NSEvent.mouseEvent(with: type,
+                       location: CGPoint(x: viewPoint.x, y: view.bounds.height - viewPoint.y),
+                       modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                       windowNumber: 0, context: nil, eventNumber: 0,
+                       clickCount: clickCount, pressure: 1)!
+}
+
+private func keyEvent(_ keyCode: UInt16, modifiers: NSEvent.ModifierFlags = [],
+                      isRepeat: Bool = false) -> NSEvent {
+    NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: modifiers, timestamp: 0,
+                     windowNumber: 0, context: nil, characters: "", charactersIgnoringModifiers: "",
+                     isARepeat: isRepeat, keyCode: keyCode)!
+}
+
 @main
 @MainActor
 struct EditorFeatureChecks {
@@ -257,6 +275,304 @@ struct EditorFeatureChecks {
                     "Moving text must preserve its content")
         try require(beganEditing && finishedEditing,
                     "Moving text must register one undoable edit")
+    }
+
+    /// Selected marks can be deleted, nudged, restyled and re-edited, as in
+    /// CleanShot X, Snipaste and PixPin. The canvas is the 320x240 fixture
+    /// whose 200x100 image is drawn at (12, 46, 296, 148).
+    static func selectedAnnotationEditing() async throws {
+        let canvas = NativeImageCanvas(frame: NSRect(x: 0, y: 0, width: 320, height: 240))
+        // Reuse one image: a new image counts as a new capture and clears the selection.
+        let image = sample()
+        let resetID = UUID()
+        let rectangle = Mark(tool: .rectangle,
+                             points: [UnitPoint(x: 0.2, y: 0.2), UnitPoint(x: 0.5, y: 0.6)],
+                             colorHex: "E45F3C",
+                             lineWidth: AnnotationSizeMetrics.fraction(points: 4, imageSize: image.size))
+        var marks = [rectangle]
+        var began: [UUID] = []
+        var finished = 0
+        var updates: [Mark] = []
+        var deleted: [UUID] = []
+        var created: [Mark] = []
+        var selected: [(Mark, CGSize)] = []
+        canvas.onBeginMarkEdit = { began.append($0) }
+        canvas.onUpdateMark = { mark in
+            updates.append(mark)
+            if let index = marks.firstIndex(where: { $0.id == mark.id }) { marks[index] = mark }
+        }
+        canvas.onFinishMarkEdit = { finished += 1 }
+        canvas.onDeleteMark = { id in deleted.append(id); marks.removeAll { $0.id == id } }
+        canvas.onMark = { created.append($0); marks.append($0) }
+        canvas.onSelectMark = { selected.append(($0, $1)) }
+        func configure(tool: MarkTool = .pointer, color: String = "E45F3C", lineWidth: Double = 4,
+                       numberSize: Double = AnnotationSizeMetrics.defaultNumberSizePoints) {
+            canvas.configure(image: image, marks: marks, tool: tool, color: color, zoom: 1,
+                             resetID: resetID, movesWindow: false, enabled: true,
+                             lineWidthPoints: lineWidth, numberSizePoints: numberSize)
+        }
+        func click(_ point: CGPoint, count: Int = 1) {
+            canvas.mouseDown(with: mouseEvent(.leftMouseDown, at: point, in: canvas, clickCount: count))
+            canvas.mouseUp(with: mouseEvent(.leftMouseUp, at: point, in: canvas, clickCount: count))
+        }
+
+        configure()
+        click(CGPoint(x: 115, y: 105))
+        try require(selected.count == 1 && selected[0].0.id == rectangle.id &&
+                    selected[0].1 == image.size && updates.isEmpty,
+                    "Clicking a mark must select it and report its image size without editing it")
+
+        canvas.keyDown(with: keyEvent(124))
+        canvas.keyDown(with: keyEvent(124, isRepeat: true))
+        var moved = try requireValue(updates.last, "The arrow keys must move the selected mark")
+        try require(abs(moved.points[0].x - 0.21) < 0.0001 && abs(moved.points[1].x - 0.51) < 0.0001 &&
+                    moved.points[0].y == 0.2 && moved.id == rectangle.id,
+                    "Each arrow press must move the selected mark by one image point")
+        try require(began == [rectangle.id] && finished == 2,
+                    "Holding an arrow key must register a single undo step")
+        canvas.keyDown(with: keyEvent(125, modifiers: .shift))
+        moved = try requireValue(updates.last, "Shift-arrow must move the selected mark")
+        try require(abs(moved.points[0].y - 0.3) < 0.0001 && abs(moved.points[0].x - 0.21) < 0.0001,
+                    "Shift-arrow must move the selected mark by ten image points, and down must move down")
+        try require(began.count == 2, "A new arrow press must register another undo step")
+
+        configure(color: "3F7EE0")
+        try await Task.sleep(for: .milliseconds(50))
+        let recolored = try requireValue(updates.last, "Changing the color must restyle the selected mark")
+        try require(recolored.colorHex == "3F7EE0" && recolored.lineWidth == rectangle.lineWidth &&
+                    recolored.points == moved.points,
+                    "Changing the color must restyle only the color of the selected mark")
+        configure(color: "3F7EE0", lineWidth: 10)
+        try await Task.sleep(for: .milliseconds(50))
+        let thicker = try requireValue(updates.last, "Changing the line width must restyle the selected mark")
+        try require(thicker.colorHex == "3F7EE0" &&
+                    thicker.lineWidth == AnnotationSizeMetrics.fraction(points: 10, imageSize: image.size),
+                    "Changing the line width must keep the newly chosen color")
+        let restyleCount = updates.count
+        configure(color: "3F7EE0", lineWidth: 10)
+        try await Task.sleep(for: .milliseconds(50))
+        try require(updates.count == restyleCount, "Reconfiguring with the same style must not rewrite the mark")
+
+        canvas.keyDown(with: keyEvent(51))
+        try require(deleted == [rectangle.id] && marks.isEmpty,
+                    "Delete must remove the selected mark")
+        let afterDelete = updates.count
+        canvas.keyDown(with: keyEvent(124))
+        try require(updates.count == afterDelete, "The arrow keys must not move a deleted mark")
+
+        let text = Mark(tool: .text, points: [UnitPoint(x: 0.2, y: 0.3)], colorHex: "111111",
+                        text: "Before", fontSize: 0.2)
+        marks = [text]
+        configure()
+        click(CGPoint(x: 105, y: 103))
+        canvas.mouseDown(with: mouseEvent(.leftMouseDown, at: CGPoint(x: 105, y: 103), in: canvas, clickCount: 2))
+        let field = try requireValue(canvas.subviews.compactMap { $0 as? NSTextField }.first,
+                                     "Double-clicking text must reopen it for editing")
+        try require(field.stringValue == "Before", "The edit field must start with the current text")
+        field.stringValue = "After"
+        canvas.commitPendingText()
+        let edited = try requireValue(updates.last, "Committing edited text must update the mark")
+        try require(edited.id == text.id && edited.text == "After" && edited.fontSize == text.fontSize &&
+                    marks.count == 1 && created.isEmpty,
+                    "Editing text must keep the same mark instead of adding another one")
+
+        let one = Mark(tool: .number, points: [UnitPoint(x: 0.1, y: 0.5)], colorHex: "E45F3C", text: "1")
+        let three = Mark(tool: .number, points: [UnitPoint(x: 0.3, y: 0.5)], colorHex: "E45F3C", text: "3")
+        marks = [one, three]
+        configure(tool: .number)
+        click(CGPoint(x: 249, y: 164))
+        try require(created.last?.text == "4",
+                    "A new number must follow the highest number, so a deletion never causes duplicates")
+    }
+
+    /// Selecting a mark copies its style into the toolbar so its controls
+    /// show, and then change, that mark.
+    static func selectingMarkAdoptsItsStyle() async throws {
+        let suite = "Shiguang.AdoptStyleChecks.\(UUID())"
+        let defaults = UserDefaults(suiteName: suite)!
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { defaults.removePersistentDomain(forName: suite); try? FileManager.default.removeItem(at: folder) }
+        defaults.set(false, forKey: "autoOCR.v2")
+        let model = AppModel(historyDirectory: folder, preferences: defaults)
+        let image = sample()
+        model.acceptImage(image, title: "Adopt", inlineRect: CGRect(x: 0, y: 0, width: 200, height: 100))
+        let arrow = Mark(tool: .arrow, points: [UnitPoint(x: 0.2, y: 0.2), UnitPoint(x: 0.7, y: 0.6)],
+                         colorHex: "3F7EE0",
+                         lineWidth: AnnotationSizeMetrics.fraction(points: 9, imageSize: image.size),
+                         arrowDoubleHeaded: true)
+        model.addMark(arrow)
+        model.tool = .rectangle
+        let canvas = NativeImageCanvas(frame: NSRect(x: 0, y: 0, width: 320, height: 240))
+        canvas.bindAnnotationEditing(to: model)
+        let resetID = UUID()
+        func configure() {
+            canvas.configure(image: image, marks: model.marks, tool: model.tool, color: model.markColor,
+                             zoom: 1, resetID: resetID, movesWindow: false, enabled: true,
+                             filledShapes: model.fillShapes, lineWidthPoints: model.markLineWidthPoints,
+                             numberSizePoints: model.numberSizePoints,
+                             arrowDoubleHeaded: model.arrowDoubleHeaded)
+        }
+        configure()
+        let point = CGPoint(x: 145, y: 105)
+        canvas.mouseDown(with: mouseEvent(.leftMouseDown, at: point, in: canvas))
+        canvas.mouseUp(with: mouseEvent(.leftMouseUp, at: point, in: canvas))
+        try require(model.markColor == "3F7EE0" && model.markLineWidthPoints == 9 &&
+                    model.arrowDoubleHeaded && model.tool == .arrow,
+                    "Selecting a mark must show its color, size and tool in the toolbar")
+        configure()
+        try await Task.sleep(for: .milliseconds(50))
+        try require(model.marks == [arrow],
+                    "Showing a selected mark's style must not rewrite the mark")
+        model.markColor = "58B75B"
+        configure()
+        try await Task.sleep(for: .milliseconds(50))
+        try require(model.marks.first?.colorHex == "58B75B" && model.marks.first?.lineWidth == arrow.lineWidth,
+                    "Choosing a color while a mark is selected must recolor it")
+        model.undo()
+        try require(model.marks == [arrow], "Restyling a selected mark must be undoable")
+
+        model.tool = .picker
+        model.applyPickedColor("111111")
+        try require(model.markColor == "111111" && model.tool == .arrow,
+                    "The eyedropper must return to the tool it was opened from")
+    }
+
+    /// The eyedropper must sample the pixel under the pointer.
+    static func eyedropperSamplesClickedPixel() async throws {
+        let context = CGContext(data: nil, width: 200, height: 100, bitsPerComponent: 8, bytesPerRow: 0,
+                                space: CGColorSpaceCreateDeviceRGB(),
+                                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        // Core Graphics puts y = 0 at the bottom: red fills the top half.
+        context.setFillColor(CGColor(red: 1, green: 0, blue: 0, alpha: 1))
+        context.fill(CGRect(x: 0, y: 50, width: 200, height: 50))
+        context.setFillColor(CGColor(red: 0, green: 0, blue: 1, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: 200, height: 50))
+        let image = NSImage(cgImage: context.makeImage()!, size: CGSize(width: 200, height: 100))
+        let canvas = NativeImageCanvas(frame: NSRect(x: 0, y: 0, width: 320, height: 240))
+        var picked: [String] = []
+        canvas.onColorPick = { picked.append($0) }
+        canvas.configure(image: image, marks: [], tool: .picker, color: "E45F3C", zoom: 1,
+                         resetID: UUID(), movesWindow: false, enabled: true)
+        for point in [CGPoint(x: 160, y: 60), CGPoint(x: 160, y: 180)] {
+            canvas.mouseDown(with: mouseEvent(.leftMouseDown, at: point, in: canvas))
+            canvas.mouseUp(with: mouseEvent(.leftMouseUp, at: point, in: canvas))
+        }
+        func channels(_ hex: String) -> (red: Int, blue: Int) {
+            (Int(hex.prefix(2), radix: 16) ?? -1, Int(hex.suffix(2), radix: 16) ?? -1)
+        }
+        try require(picked.count == 2, "Each eyedropper click must report a color")
+        let top = channels(picked[0]), bottom = channels(picked[1])
+        try require(top.red > 200 && top.blue < 60 && bottom.blue > 200 && bottom.red < 60,
+                    "The eyedropper must sample the pixel under the pointer, not its mirror image (got \(picked))")
+    }
+
+    /// Text size is stored against the image height, which is what the
+    /// renderer uses; portrait captures used to draw text twice too large.
+    static func textSizeMatchesPointsInPortraitImages() async throws {
+        let context = CGContext(data: nil, width: 100, height: 200, bitsPerComponent: 8, bytesPerRow: 0,
+                                space: CGColorSpaceCreateDeviceRGB(),
+                                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        context.setFillColor(CGColor(gray: 1, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: 100, height: 200))
+        let portrait = NSImage(cgImage: context.makeImage()!, size: CGSize(width: 100, height: 200))
+        let canvas = NativeImageCanvas(frame: NSRect(x: 0, y: 0, width: 240, height: 320))
+        var created: Mark?
+        canvas.onMark = { created = $0 }
+        canvas.configure(image: portrait, marks: [], tool: .text, color: "111111", zoom: 1,
+                         resetID: UUID(), movesWindow: false, enabled: true, textFontSize: 20)
+        let point = CGPoint(x: 100, y: 120)
+        canvas.mouseDown(with: mouseEvent(.leftMouseDown, at: point, in: canvas))
+        canvas.mouseUp(with: mouseEvent(.leftMouseUp, at: point, in: canvas))
+        let field = try requireValue(canvas.subviews.compactMap { $0 as? NSTextField }.first,
+                                     "The text tool must open a text field")
+        field.stringValue = "Size"
+        canvas.commitPendingText()
+        let mark = try requireValue(created, "Committing text must add a text mark")
+        let fraction = try requireValue(mark.fontSize, "Text marks must store their size")
+        try require(abs(fraction * 200 - 20) < 0.0001,
+                    "20 pt text in a portrait image must render 20 pt tall, not scale with the width")
+        try require(AnnotationSizeMetrics.points(fromFraction: fraction, base: 200,
+                                                 within: AnnotationSizeMetrics.textSizeRange) == 20,
+                    "A stored text size must convert back to the same toolbar value")
+    }
+
+    /// Status-menu items show the registered global shortcuts natively.
+    static func menuKeyEquivalents() async throws {
+        func equivalent(_ key: String) -> String { HotkeySettings(key: key).menuKeyEquivalent }
+        func scalar(_ value: Int) -> String { String(Character(UnicodeScalar(UInt32(value))!)) }
+        try require(equivalent("S") == "s" && equivalent("1") == "1" && equivalent("/") == "/",
+                    "Character keys must use their lowercase character")
+        try require(equivalent("Space") == " " && equivalent("↩") == "\r" && equivalent("Esc") == "\u{1b}",
+                    "Named keys must use the characters NSMenuItem expects")
+        try require(equivalent("F5") == scalar(NSF5FunctionKey) && equivalent("F19") == scalar(NSF19FunctionKey) &&
+                    equivalent("←") == scalar(NSLeftArrowFunctionKey) &&
+                    equivalent("⌦") == scalar(NSDeleteFunctionKey),
+                    "Function and arrow keys must use their function-key code points")
+    }
+
+    /// Toolbar style popovers become the key window as soon as they open.
+    /// Editing keys must still reach the canvas, and letters typed while a
+    /// text mark is open must never trigger the tool shortcuts.
+    static func toolbarPopoverKeysReachCanvas() async throws {
+        func route(_ key: UInt16, _ flags: NSEvent.ModifierFlags = [], field: Bool = false,
+                   text: Bool = false) -> NativeImageCanvas.PopoverKeyRoute {
+            NativeImageCanvas.popoverKeyRoute(keyCode: key, modifiers: flags,
+                                              popoverIsEditingText: field, canvasIsEditingText: text)
+        }
+        // Delete, Forward Delete, arrows, Return, Enter, "1" and "o".
+        for key: UInt16 in [51, 117, 123, 124, 125, 126, 36, 76, 18, 31] {
+            try require(route(key) == .canvas, "Key \(key) in a style popover must reach the canvas")
+        }
+        try require(route(124, .shift) == .canvas, "Shift-arrow must still nudge the selected mark")
+        try require(route(53) == .popover && route(48) == .popover && route(49) == .popover,
+                    "Esc must close the popover; Tab and Space keep keyboard navigation")
+        try require(route(51, .command) == .popover && route(18, .option) == .popover &&
+                    route(18, .control) == .popover,
+                    "Modified keys are not canvas editing keys")
+        try require(route(51, field: true) == .popover && route(123, field: true) == .popover &&
+                    route(36, field: true) == .popover,
+                    "Typing a pt value must keep every key in the popover")
+        try require(route(17, text: true) == .openText && route(49, text: true) == .openText &&
+                    route(51, text: true) == .openText && route(19, .option, text: true) == .openText,
+                    "Typing must continue in an open text mark, never trigger tool shortcuts")
+        try require(route(9, .command, text: true) == .popover && route(53, text: true) == .popover,
+                    "Command shortcuts and Esc are not typed into the text mark")
+    }
+
+    /// Number keys follow the toolbar, so the n-th button is key n.
+    static func toolShortcutsFollowToolbarOrder() async throws {
+        let picked = (1...9).map { MarkTool.forShortcut(String($0)) }
+        try require(picked == MarkTool.toolbarOrder.map { Optional($0) },
+                    "Keys 1–9 must pick the toolbar tools in order (got \(picked))")
+        try require(MarkTool.forShortcut("0") == nil &&
+                    MarkTool.forShortcut("10") == nil &&
+                    MarkTool.forShortcut("a") == nil,
+                    "Other keys must not pick a tool")
+        try require(!picked.contains(.highlighter),
+                    "No number key may select a tool that is not shown in the toolbar")
+    }
+
+    /// The text box starts at its placeholder's width and grows while
+    /// typing, instead of opening as a fixed 360 pt box.
+    static func textFieldGrowsWithContent() async throws {
+        // A 224 x 124 canvas shows the 200 x 100 sample at 1:1 (12 pt inset).
+        let canvas = NativeImageCanvas(frame: NSRect(x: 0, y: 0, width: 224, height: 124))
+        canvas.configure(image: sample(), marks: [], tool: .text, color: "111111", zoom: 1,
+                         resetID: UUID(), movesWindow: false, enabled: true)
+        let point = CGPoint(x: 20, y: 20)
+        canvas.mouseDown(with: mouseEvent(.leftMouseDown, at: point, in: canvas))
+        canvas.mouseUp(with: mouseEvent(.leftMouseUp, at: point, in: canvas))
+        let field = try requireValue(canvas.subviews.compactMap { $0 as? NSTextField }.first,
+                                     "Clicking with the text tool must open a text field")
+        let empty = field.frame.width
+        let available = canvas.bounds.maxX - field.frame.minX
+        try require(empty > 40 && empty < available - 40,
+                    "An empty text box must fit its placeholder, not fill the canvas (\(empty) of \(available))")
+        field.stringValue = String(repeating: "Wide label ", count: 4)
+        canvas.controlTextDidChange(Notification(name: NSControl.textDidChangeNotification, object: field))
+        try require(field.frame.width > empty && field.frame.width <= available,
+                    "The text box must grow with its text up to the canvas edge")
+        canvas.commitPendingText()
     }
 
     static func textPixels() async throws {
@@ -1098,11 +1414,13 @@ struct EditorFeatureChecks {
         var pinned = 0
         var copiedImage: NSImage?
         var pinnedImage: NSImage?
+        var pinnedRect: CGRect?
         var pinSawActiveDraft = false
         model.publishImage = { copied += 1; copiedImage = $0 }
-        model.pinImage = {
+        model.pinImage = { image, rect in
             pinned += 1
-            pinnedImage = $0
+            pinnedImage = image
+            pinnedRect = rect
             pinSawActiveDraft = model.draftImage != nil
         }
         model.acceptImage(sample(), title: "Existing")
@@ -1118,7 +1436,7 @@ struct EditorFeatureChecks {
                     "Draft recognition and marks must not mutate the previously selected history record")
         model.exportImage()
         model.requestPin()
-        try require(copied == 1 && pinned == 1 && model.draftImage == nil && !pinSawActiveDraft &&
+        try require(copied == 1 && pinned == 1 && model.draftImage == nil && !pinSawActiveDraft && pinnedRect == nil &&
                     pinnedImage?.pngData == ImageRenderer.render(sample(), marks: [mark]).pngData,
                     "Pin must dismiss the draft first, then immediately publish the annotated image without copying it")
         let pinnedHistory = try model.store!.load()
@@ -1147,7 +1465,8 @@ struct EditorFeatureChecks {
                     copiedImage?.pngData == ImageRenderer.render(sample(), marks: [mark]).pngData,
                     "Checkmark must copy the fully annotated image by default")
         model.requestPin()
-        try require(pinned == 2, "Pin must be available immediately for an already confirmed image")
+        try require(pinned == 2 && pinnedRect == nil,
+                    "Pin must be available immediately for an already confirmed image")
         model.confirmDraft()
         try require(model.records.count == 2 && copied == 2, "Repeated confirmation must not duplicate history or clipboard writes")
         model.keepHistory = false
@@ -1156,6 +1475,10 @@ struct EditorFeatureChecks {
         try require(copied == 3 && model.draftImage == nil && model.records.count == 2,
                     "History disabled must still copy immediately without a save dialog")
         let region = CGRect(x: 100, y: 150, width: 300, height: 200)
+        model.acceptImage(sample(), title: "Pinned region", inlineRect: region)
+        model.requestPin()
+        try require(pinned == 3 && pinnedRect == region && model.draftImage == nil && copied == 3,
+                    "Pinning a screen selection must place the pin over the captured area without copying it")
         var recordingRegion: CGRect?
         model.beginRecording = { _, selected in recordingRegion = selected }
         model.acceptImage(sample(), title: "Selected region", inlineRect: region)
@@ -1513,6 +1836,14 @@ struct EditorFeatureChecks {
             ("legacy_history_and_text_roundtrip", legacyMarks),
             ("annotation_sizes_use_points", annotationPointSizes),
             ("annotation_marks_can_be_moved", annotationMarksCanBeMoved),
+            ("selected_marks_delete_nudge_restyle_and_reedit", selectedAnnotationEditing),
+            ("selecting_a_mark_adopts_its_style", selectingMarkAdoptsItsStyle),
+            ("eyedropper_samples_clicked_pixel", eyedropperSamplesClickedPixel),
+            ("portrait_text_size_matches_points", textSizeMatchesPointsInPortraitImages),
+            ("status_menu_key_equivalents", menuKeyEquivalents),
+            ("toolbar_popover_keys_reach_canvas", toolbarPopoverKeysReachCanvas),
+            ("tool_shortcuts_follow_toolbar_order", toolShortcutsFollowToolbarOrder),
+            ("text_field_grows_with_content", textFieldGrowsWithContent),
             ("text_annotation_export_pixels", textPixels),
             ("mosaic_changes_only_selected_pixels", mosaicPixels),
             ("advanced_annotation_styles", advancedAnnotationStyles),
