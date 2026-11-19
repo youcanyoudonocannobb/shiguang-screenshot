@@ -156,6 +156,9 @@ final class NativeImageCanvas: NSView, NSTextFieldDelegate {
     private var hasConfiguredStyle = false
     private var isConfiguring = false
     private var nudgeRegisteredUndo = false
+    private var pointerTrackingArea: NSTrackingArea?
+    /// The pointer target the cursor rect was last rebuilt for.
+    private var shownPointerTarget: PointerTarget?
 
     override var isFlipped: Bool { true }
     override var acceptsFirstResponder: Bool { true }
@@ -381,7 +384,174 @@ final class NativeImageCanvas: NSView, NSTextFieldDelegate {
     }
 
     override func resetCursorRects() {
-        addCursorRect(bounds, cursor: tool == .pointer ? .openHand : (tool == .text ? .iBeam : .crosshair))
+        addCursorRect(bounds, cursor: cursor(for: pointerTargetUnderMouse()))
+    }
+
+    // MARK: Pointer feedback
+
+    /// What a click at a point would act on. Existing marks take precedence
+    /// over drawing (see mouseDown), so the pointer changes over a mark that
+    /// can be picked up and edited instead of keeping the tool's pointer.
+    enum PointerTarget: Equatable {
+        /// Empty canvas: the current tool draws, types or moves the capture.
+        case tool
+        /// The body of a mark: dragging moves it, double-clicking text edits it.
+        case mark
+        /// An endpoint or corner of a mark: dragging reshapes it.
+        case handle(NSCursor.FrameResizePosition)
+    }
+
+    func pointerTarget(at point: CGPoint) -> PointerTarget {
+        guard enabled, tool != .picker, let mark = hitMark(at: point) else { return .tool }
+        return pointerTarget(on: mark, handle: handleIndex(for: mark, at: point, in: imageRect))
+    }
+
+    private func pointerTarget(on mark: Mark, handle index: Int?) -> PointerTarget {
+        guard let index, let last = mark.points.indices.last, mark.points.indices.contains(index)
+        else { return .mark }
+        let rect = imageRect
+        return .handle(Self.resizePosition(
+            from: imagePoint(mark.points[index == 0 ? last : 0], in: rect),
+            to: imagePoint(mark.points[index], in: rect),
+            corner: mark.tool != .line && mark.tool != .arrow
+        ))
+    }
+
+    /// The resize pointer for dragging a point away from its opposite point.
+    /// Boxes use their corner; lines follow their angle in 45° steps. View
+    /// coordinates are flipped, so up is -y.
+    nonisolated static func resizePosition(from opposite: CGPoint, to point: CGPoint,
+                                           corner: Bool) -> NSCursor.FrameResizePosition {
+        let dx = point.x - opposite.x
+        let up = opposite.y - point.y
+        if corner {
+            switch (dx < 0, up > 0) {
+            case (true, true): return .topLeft
+            case (false, true): return .topRight
+            case (true, false): return .bottomLeft
+            case (false, false): return .bottomRight
+            }
+        }
+        switch Int((atan2(up, dx) / (.pi / 4)).rounded()) {
+        case 0: return .right
+        case 1: return .topRight
+        case 2: return .top
+        case 3: return .topLeft
+        case -1: return .bottomRight
+        case -2: return .bottom
+        case -3: return .bottomLeft
+        default: return .left
+        }
+    }
+
+    func cursor(for target: PointerTarget) -> NSCursor {
+        switch target {
+        case .tool: return tool == .pointer ? .openHand : (tool == .text ? .iBeam : .crosshair)
+        case .mark: return Self.moveCursor
+        case .handle(let position): return .frameResize(position: position, directions: .all)
+        }
+    }
+
+    /// A four-way move pointer for marks that can be edited. macOS has no
+    /// public one, and the open hand already means "move the capture" here.
+    /// Drawn like the system pointers, black with a white outline and a soft
+    /// shadow, so it reads on any screenshot.
+    static let moveCursor: NSCursor = {
+        let side: CGFloat = 28
+        let image = NSImage(size: NSSize(width: side, height: side), flipped: false) { _ in
+            guard let context = NSGraphicsContext.current?.cgContext else { return false }
+            let center = side / 2
+            let reach: CGFloat = 10.5
+            let headLength: CGFloat = 4.2
+            let headHalfWidth: CGFloat = 3.3
+            let shaftWidth: CGFloat = 1.5
+            let outline: CGFloat = 1.25
+            let shafts = NSBezierPath()
+            let heads = NSBezierPath()
+            for (dx, dy) in [(1, 0), (-1, 0), (0, 1), (0, -1)] as [(CGFloat, CGFloat)] {
+                let tip = CGPoint(x: center + dx * reach, y: center + dy * reach)
+                let base = CGPoint(x: center + dx * (reach - headLength),
+                                   y: center + dy * (reach - headLength))
+                shafts.move(to: CGPoint(x: center, y: center))
+                shafts.line(to: base)
+                heads.move(to: tip)
+                heads.line(to: CGPoint(x: base.x - dy * headHalfWidth, y: base.y + dx * headHalfWidth))
+                heads.line(to: CGPoint(x: base.x + dy * headHalfWidth, y: base.y - dx * headHalfWidth))
+                heads.close()
+            }
+            // One shadow for the whole outline, not one per stroke.
+            context.saveGState()
+            let shadow = NSShadow()
+            shadow.shadowColor = NSColor.black.withAlphaComponent(0.35)
+            shadow.shadowBlurRadius = 2
+            shadow.shadowOffset = NSSize(width: 0, height: -1)
+            shadow.set()
+            context.beginTransparencyLayer(auxiliaryInfo: nil)
+            NSColor.white.set()
+            shafts.lineWidth = shaftWidth + outline * 2
+            shafts.lineCapStyle = .round
+            shafts.stroke()
+            heads.lineWidth = outline * 2
+            heads.lineJoinStyle = .round
+            heads.stroke()
+            heads.fill()
+            context.endTransparencyLayer()
+            context.restoreGState()
+            NSColor.black.set()
+            shafts.lineWidth = shaftWidth
+            shafts.lineCapStyle = .butt
+            shafts.stroke()
+            heads.fill()
+            return true
+        }
+        return NSCursor(image: image, hotSpot: NSPoint(x: side / 2, y: side / 2))
+    }()
+
+    /// Whether a click here reaches the canvas itself, rather than the
+    /// selection's resize band, the toolbar or an open text field.
+    private func receivesClicks(at point: CGPoint) -> Bool {
+        guard let window, let content = window.contentView else { return false }
+        let location = convert(point, to: nil)
+        return content.hitTest(content.superview?.convert(location, from: nil) ?? location) === self
+    }
+
+    private func pointerTargetUnderMouse() -> PointerTarget {
+        guard let window else { return .tool }
+        let point = convert(window.mouseLocationOutsideOfEventStream, from: nil)
+        guard bounds.contains(point), receivesClicks(at: point) else { return .tool }
+        return pointerTarget(at: point)
+    }
+
+    /// Shows the pointer for what a click at this point would do. Points that
+    /// another view receives keep that view's pointer.
+    private func updatePointer(at point: CGPoint) {
+        guard receivesClicks(at: point) else { return }
+        let target = pointerTarget(at: point)
+        // Set it directly as well: cursor rects only work in the key window,
+        // and a toolbar style popover is often key while editing.
+        cursor(for: target).set()
+        guard target != shownPointerTarget else { return }
+        shownPointerTarget = target
+        window?.invalidateCursorRects(for: self)
+    }
+
+    /// Keeps the pointer of the mark being dragged; it follows a line's new angle.
+    private func showEditPointer(for mark: Mark) {
+        guard window != nil else { return }
+        cursor(for: pointerTarget(on: mark, handle: editingPointIndex)).set()
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        updatePointer(at: convert(event.locationInWindow, from: nil))
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        updatePointer(at: convert(event.locationInWindow, from: nil))
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        shownPointerTarget = nil
+        window?.invalidateCursorRects(for: self)
     }
 
     override func draw(_ dirtyRect: NSRect) {
@@ -681,6 +851,7 @@ final class NativeImageCanvas: NSView, NSTextFieldDelegate {
             selectedMarkID = hit.id
             editingMark = hit
             editingPointIndex = handleIndex(for: hit, at: point, in: imageRect)
+            showEditPointer(for: hit)
             onSelectMark?(hit, imagePointSize)
             needsDisplay = true
             return
@@ -752,6 +923,7 @@ final class NativeImageCanvas: NSView, NSTextFieldDelegate {
             }
             replaceLocally(updated)
             onUpdateMark?(updated)
+            showEditPointer(for: updated)
             return
         }
         if isMovingSelection { onSelectionDrag?(event, .changed); return }
@@ -769,12 +941,14 @@ final class NativeImageCanvas: NSView, NSTextFieldDelegate {
     }
 
     override func mouseUp(with event: NSEvent) {
+        let point = convert(event.locationInWindow, from: nil)
         if editingMark != nil {
             if didBeginMarkEdit { onFinishMarkEdit?() }
             editingMark = nil
             editingPointIndex = nil
             didBeginMarkEdit = false
             window?.invalidateCursorRects(for: self)
+            updatePointer(at: point)
             needsDisplay = true
             return
         }
@@ -782,6 +956,7 @@ final class NativeImageCanvas: NSView, NSTextFieldDelegate {
             onSelectionDrag?(event, .ended)
             isMovingSelection = false
             window?.invalidateCursorRects(for: self)
+            updatePointer(at: point)
             return
         }
         isPanning = false
@@ -791,6 +966,7 @@ final class NativeImageCanvas: NSView, NSTextFieldDelegate {
             onMark?(mark)
         }
         draft = nil
+        updatePointer(at: point)
         needsDisplay = true
     }
 
@@ -891,6 +1067,16 @@ final class NativeImageCanvas: NSView, NSTextFieldDelegate {
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         guard window != nil else { return }
+        if pointerTrackingArea == nil {
+            // Follows the pointer over marks; it tracks the visible rect, so
+            // it never needs rebuilding when the canvas moves or resizes.
+            let area = NSTrackingArea(rect: .zero,
+                                      options: [.mouseMoved, .mouseEnteredAndExited,
+                                                .activeInActiveApp, .inVisibleRect],
+                                      owner: self, userInfo: nil)
+            addTrackingArea(area)
+            pointerTrackingArea = area
+        }
         Self.popoverKeyTargets.add(self)
         guard Self.popoverKeyMonitor == nil else { return }
         Self.popoverKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
@@ -966,6 +1152,8 @@ final class NativeImageCanvas: NSView, NSTextFieldDelegate {
         fieldPresentation = mark.textPresentation ?? .plain
         rerender()
         openTextField(anchor: anchor, text: mark.text ?? "")
+        // The text is now being typed into, so the pointer says so at once.
+        if window != nil { NSCursor.iBeam.set() }
         needsDisplay = true
     }
 

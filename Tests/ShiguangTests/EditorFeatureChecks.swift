@@ -437,6 +437,113 @@ struct EditorFeatureChecks {
                     "The eyedropper must return to the tool it was opened from")
     }
 
+    /// Hovering a mark that a click would pick up shows an edit pointer, so
+    /// it is clear the mark can be edited. The canvas is the 320x240 fixture
+    /// whose 200x100 image is drawn at (12, 46, 296, 148).
+    static func hoveringMarksShowsEditPointer() async throws {
+        let canvas = NativeImageCanvas(frame: NSRect(x: 0, y: 0, width: 320, height: 240))
+        let image = sample()
+        let resetID = UUID()
+        let arrow = Mark(tool: .arrow, points: [UnitPoint(x: 0.2, y: 0.2), UnitPoint(x: 0.7, y: 0.6)],
+                         colorHex: "E45F3C")
+        let box = Mark(tool: .rectangle, points: [UnitPoint(x: 0.8, y: 0.7), UnitPoint(x: 0.95, y: 0.9)],
+                       colorHex: "E45F3C")
+        let label = Mark(tool: .text, points: [UnitPoint(x: 0.05, y: 0.75)], colorHex: "111111",
+                         text: "Hi", fontSize: 0.2)
+        var selections = 0
+        var updates: [Mark] = []
+        canvas.onSelectMark = { _, _ in selections += 1 }
+        canvas.onUpdateMark = { updates.append($0) }
+        func configure(_ tool: MarkTool, enabled: Bool = true) {
+            canvas.configure(image: image, marks: [arrow, box, label], tool: tool, color: "E45F3C",
+                             zoom: 1, resetID: resetID, movesWindow: false, enabled: enabled)
+        }
+
+        configure(.pointer)
+        let expected: [(CGPoint, NativeImageCanvas.PointerTarget, String)] = [
+            (CGPoint(x: 290, y: 60), .tool, "empty canvas"),
+            (CGPoint(x: 145, y: 105), .mark, "the middle of an arrow"),
+            (CGPoint(x: 219, y: 135), .handle(.right), "an arrow's tip"),
+            (CGPoint(x: 71, y: 76), .handle(.left), "an arrow's tail"),
+            (CGPoint(x: 249, y: 150), .handle(.topLeft), "a rectangle's top-left corner"),
+            (CGPoint(x: 293, y: 179), .handle(.bottomRight), "a rectangle's bottom-right corner"),
+            (CGPoint(x: 271, y: 164), .mark, "inside a rectangle"),
+            (CGPoint(x: 40, y: 170), .mark, "text")
+        ]
+        for (point, target, place) in expected {
+            let shown = canvas.pointerTarget(at: point)
+            try require(shown == target, "Hovering \(place) must show \(target), not \(shown)")
+        }
+        try require(canvas.cursor(for: .mark) === NativeImageCanvas.moveCursor,
+                    "Editable marks must show the move pointer")
+
+        // Lines follow their angle in 45° steps; view coordinates are flipped.
+        let compass: [(CGPoint, NSCursor.FrameResizePosition)] = [
+            (CGPoint(x: 10, y: 0), .right), (CGPoint(x: 10, y: -10), .topRight),
+            (CGPoint(x: 0, y: -10), .top), (CGPoint(x: -10, y: -10), .topLeft),
+            (CGPoint(x: -10, y: 0), .left), (CGPoint(x: -10, y: 10), .bottomLeft),
+            (CGPoint(x: 0, y: 10), .bottom), (CGPoint(x: 10, y: 10), .bottomRight)
+        ]
+        for (end, position) in compass {
+            let shown = NativeImageCanvas.resizePosition(from: .zero, to: end, corner: false)
+            try require(shown == position, "A line end toward \(end) must show \(position), not \(shown)")
+        }
+
+        // The pointer must tell the truth: it changes exactly where a click
+        // picks up a mark instead of starting a new one.
+        configure(.arrow)
+        for x in stride(from: 4.0, through: 316.0, by: 6.0) {
+            for y in stride(from: 4.0, through: 236.0, by: 6.0) {
+                let point = CGPoint(x: x, y: y)
+                let target = canvas.pointerTarget(at: point)
+                let before = selections
+                canvas.mouseDown(with: mouseEvent(.leftMouseDown, at: point, in: canvas))
+                canvas.mouseUp(with: mouseEvent(.leftMouseUp, at: point, in: canvas))
+                try require((target != .tool) == (selections > before),
+                            "The pointer at \(point) shows \(target), but a click there does otherwise")
+            }
+        }
+        canvas.mouseDown(with: mouseEvent(.leftMouseDown, at: CGPoint(x: 219, y: 135), in: canvas))
+        canvas.mouseDragged(with: mouseEvent(.leftMouseDragged, at: CGPoint(x: 239, y: 175), in: canvas))
+        canvas.mouseUp(with: mouseEvent(.leftMouseUp, at: CGPoint(x: 239, y: 175), in: canvas))
+        let reshaped = try requireValue(updates.last, "Dragging an arrow's tip must reshape it")
+        try require(reshaped.points.first == arrow.points.first && reshaped.points.last != arrow.points.last,
+                    "Where the resize pointer shows, dragging must move only that end")
+
+        configure(.picker)
+        try require(canvas.pointerTarget(at: CGPoint(x: 145, y: 105)) == .tool,
+                    "The eyedropper samples colors, so marks must keep its pointer")
+        configure(.arrow, enabled: false)
+        try require(canvas.pointerTarget(at: CGPoint(x: 145, y: 105)) == .tool,
+                    "A busy canvas must not offer to edit marks")
+
+        // The custom pointer must actually draw: black arrows, white outline.
+        let cursor = NativeImageCanvas.moveCursor
+        try require(cursor.image.size == NSSize(width: 28, height: 28) &&
+                    cursor.hotSpot == NSPoint(x: 14, y: 14),
+                    "The move pointer's hot spot must be its center")
+        let bitmap = try requireValue(
+            NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 56, pixelsHigh: 56, bitsPerSample: 8,
+                             samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+                             colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0),
+            "A bitmap for the move pointer")
+        bitmap.size = cursor.image.size
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: bitmap)
+        cursor.image.draw(in: NSRect(origin: .zero, size: cursor.image.size))
+        NSGraphicsContext.restoreGraphicsState()
+        func pixel(_ x: Int, _ y: Int) -> (white: CGFloat, alpha: CGFloat) {
+            let color = bitmap.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB) ?? .clear
+            return (color.redComponent, color.alphaComponent)
+        }
+        // 2x pixels: the shafts cross at the center, and the right shaft's
+        // white outline runs 0.75-2 pt above its middle.
+        let middle = pixel(28, 28), outline = pixel(34, 25), outside = pixel(2, 2)
+        try require(middle.alpha > 0.9 && middle.white < 0.2 && outline.alpha > 0.9 && outline.white > 0.8 &&
+                    outside.alpha < 0.05,
+                    "The move pointer must draw black arrows with a white outline (got \(middle), \(outline), \(outside))")
+    }
+
     /// The eyedropper must sample the pixel under the pointer.
     static func eyedropperSamplesClickedPixel() async throws {
         let context = CGContext(data: nil, width: 200, height: 100, bitsPerComponent: 8, bytesPerRow: 0,
@@ -1838,6 +1945,7 @@ struct EditorFeatureChecks {
             ("annotation_marks_can_be_moved", annotationMarksCanBeMoved),
             ("selected_marks_delete_nudge_restyle_and_reedit", selectedAnnotationEditing),
             ("selecting_a_mark_adopts_its_style", selectingMarkAdoptsItsStyle),
+            ("hovering_marks_shows_edit_pointer", hoveringMarksShowsEditPointer),
             ("eyedropper_samples_clicked_pixel", eyedropperSamplesClickedPixel),
             ("portrait_text_size_matches_points", textSizeMatchesPointsInPortraitImages),
             ("status_menu_key_equivalents", menuKeyEquivalents),
