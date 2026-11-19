@@ -172,45 +172,11 @@ struct SelectionTranslationView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 8) {
-                Image(systemName: "character.bubble.fill")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(Palette.accent)
-                    .frame(width: 28, height: 28)
-                    .background(Palette.accentSoft, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
-                Text("划词翻译")
-                    .font(.system(size: 13, weight: .semibold))
-                Spacer()
-                Button(action: close) {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(Palette.muted)
-                        .frame(width: 24, height: 24)
-                        .background(Palette.ink.opacity(0.045), in: Circle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("关闭划词翻译")
-            }
-
-            HStack(spacing: 6) {
-                languageMenu(
-                    accessibilityTitle: "原文语言",
-                    selection: controller.sourceLanguage,
-                    choices: LanguageChoice.sources
-                ) { controller.changeLanguages(source: $0) }
-
-                Image(systemName: "arrow.right")
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(Palette.muted.opacity(0.75))
-
-                languageMenu(
-                    accessibilityTitle: "目标语言",
-                    selection: controller.targetLanguage,
-                    choices: LanguageChoice.targets,
-                    isEnabled: controller.canSelect(target:)
-                ) { controller.changeLanguages(target: $0) }
-
-                Spacer(minLength: 0)
+            // Longer interface languages drop the title rather than squeeze the
+            // language menus out of the header.
+            ViewThatFits(in: .horizontal) {
+                header(showsTitle: true)
+                header(showsTitle: false)
             }
 
             Text(text)
@@ -277,44 +243,74 @@ struct SelectionTranslationView: View {
         }
     }
 
-    private func languageMenu(
-        accessibilityTitle: String,
+    private func header(showsTitle: Bool) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: "character.bubble.fill")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(Palette.accent)
+                .frame(width: 28, height: 28)
+                .background(Palette.accentSoft, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                .accessibilityLabel(Text("划词翻译"))
+                .accessibilityHidden(showsTitle)
+            if showsTitle {
+                Text("划词翻译")
+                    .font(.system(size: 13, weight: .semibold))
+                    .lineLimit(1)
+                    .fixedSize()
+                    .padding(.trailing, 4)
+            }
+            HStack(spacing: 4) {
+                languagePicker(
+                    "原文语言",
+                    selection: controller.sourceLanguage,
+                    choices: LanguageChoice.sources
+                ) { controller.changeLanguages(source: $0) }
+
+                Image(systemName: "arrow.right")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(Palette.muted.opacity(0.75))
+                    .accessibilityHidden(true)
+
+                languagePicker(
+                    "目标语言",
+                    selection: controller.targetLanguage,
+                    choices: LanguageChoice.targets,
+                    isEnabled: controller.canSelect(target:)
+                ) { controller.changeLanguages(target: $0) }
+            }
+            Spacer(minLength: 8)
+            Button(action: close) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(Palette.muted)
+                    .frame(width: 24, height: 24)
+                    .background(Palette.ink.opacity(0.045), in: Circle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(Text("关闭划词翻译"))
+        }
+    }
+
+    /// The same native pop-up the translation window uses, so the menu keeps
+    /// one indicator and the system font instead of a restyled label.
+    private func languagePicker(
+        _ title: String,
         selection: String,
         choices: [LanguageChoice],
         isEnabled: @escaping (String) -> Bool = { _ in true },
         onSelect: @escaping (String) -> Void
     ) -> some View {
-        let selectedName = choices.first(where: { $0.id == selection })?.displayName ?? selection
-        return Menu {
+        Picker(LocalizedStringKey(title), selection: Binding(get: { selection }, set: onSelect)) {
             ForEach(choices) { language in
-                Button {
-                    onSelect(language.id)
-                } label: {
-                    if language.id == selection {
-                        Label(language.displayName, systemImage: "checkmark")
-                    } else {
-                        Text(language.displayName)
-                    }
-                }
-                .disabled(!isEnabled(language.id))
+                Text(language.displayName)
+                    .tag(language.id)
+                    .disabled(!isEnabled(language.id))
             }
-        } label: {
-            HStack(spacing: 4) {
-                Text(selectedName)
-                    .lineLimit(1)
-                Image(systemName: "chevron.down")
-                    .font(.system(size: 7, weight: .semibold))
-                    .foregroundStyle(Palette.muted)
-            }
-            .font(.system(size: 10.5, weight: .medium))
-            .foregroundStyle(Palette.ink)
-            .padding(.horizontal, 8)
-            .frame(height: 24)
-            .background(Palette.ink.opacity(0.045), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
         }
-        .menuStyle(.borderlessButton)
+        .labelsHidden()
+        .pickerStyle(.menu)
+        .controlSize(.small)
         .fixedSize()
-        .accessibilityLabel(accessibilityTitle)
     }
 
     private func close() {
