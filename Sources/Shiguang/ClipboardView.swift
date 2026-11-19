@@ -69,7 +69,7 @@ struct ClipboardView: View {
                 }
                 Text(history.section == .tools
                      ? "变量命名与测试数据 · 一键复制"
-                     : (history.monitorsSystem ? "正在记录本机剪贴板 · 最近 100 项" : "系统记录已暂停"))
+                     : (history.monitorsSystem ? "正在记录本机剪贴板" : "系统记录已暂停"))
                     .font(.system(size: 10.5))
                     .foregroundStyle(history.section == .history && !history.monitorsSystem
                                      ? Palette.warning : Palette.muted)
@@ -122,6 +122,7 @@ struct ClipboardView: View {
                     .frame(height: 28)
                     .background(selected ? Palette.ink : Color.clear,
                                 in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                    .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
             }
@@ -449,6 +450,7 @@ struct ClipboardView: View {
             .frame(height: 27)
             .background(selected ? Palette.ink : Palette.panel, in: Capsule())
             .overlay(Capsule().stroke(selected ? Palette.ink : Palette.line))
+            .contentShape(Capsule())
         }
         .buttonStyle(.plain)
         .accessibilityLabel("筛选\(title)，\(entryCount(for: kind)) 项")

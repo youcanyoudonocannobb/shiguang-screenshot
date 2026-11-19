@@ -35,17 +35,18 @@ enum BrandArtwork {
     }
 
     static func menuBarImage(styleID: String,
-                             customImageData: Data? = nil) -> NSImage {
+                             customImageData: Data? = nil,
+                             size: NSSize = NSSize(width: 20, height: 18)) -> NSImage {
         var style = MenuBarArtworkStyle(rawValue: styleID) ?? .system
         if style == .custom {
             if let customImageData,
-               let customImage = customMenuBarImage(data: customImageData) {
+               let customImage = customMenuBarImage(data: customImageData, size: size) {
                 return customImage
             }
             style = .system
         }
 
-        let image = NSImage(size: NSSize(width: 20, height: 18), flipped: false) { rect in
+        let image = NSImage(size: size, flipped: false) { rect in
             NSGraphicsContext.saveGraphicsState()
             let transform = AffineTransform(scaleByX: rect.width / 100, byY: rect.height / 100)
             (transform as NSAffineTransform).concat()
@@ -97,10 +98,10 @@ enum BrandArtwork {
         return representation.representation(using: .png, properties: [:])
     }
 
-    private static func customMenuBarImage(data: Data) -> NSImage? {
+    private static func customMenuBarImage(data: Data, size: NSSize) -> NSImage? {
         guard let source = NSImage(data: data), source.isValid,
               source.size.width > 0, source.size.height > 0 else { return nil }
-        let image = NSImage(size: NSSize(width: 20, height: 18), flipped: false) { rect in
+        let image = NSImage(size: size, flipped: false) { rect in
             let available = rect.insetBy(dx: 1, dy: 1)
             let scale = min(available.width / source.size.width,
                             available.height / source.size.height)

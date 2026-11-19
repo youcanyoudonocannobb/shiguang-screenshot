@@ -59,6 +59,7 @@ struct ToolboxView: View {
                         .frame(height: 28)
                         .background(tab == item ? Palette.accent : Color.clear,
                                     in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                        .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                 }
@@ -314,6 +315,7 @@ private struct ToolboxChipStyle: ButtonStyle {
             .background(configuration.isPressed ? Palette.line : hovered ? Palette.accentSoft : Palette.panel,
                         in: RoundedRectangle(cornerRadius: 6, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: 6).stroke(Palette.line))
+            .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
             .opacity(isEnabled ? 1 : 0.4)
             .onHover { hovered = $0 }
     }
@@ -328,6 +330,7 @@ private struct ToolboxAccentStyle: ButtonStyle {
             .frame(height: 28)
             .background(configuration.isPressed ? Palette.accentDeep : Palette.accent,
                         in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
     }
 }
 

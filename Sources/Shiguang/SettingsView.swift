@@ -7,6 +7,7 @@ enum ShiguangSettingsPage: String, CaseIterable, Identifiable {
     case translation
     case clipboard
     case quickInput
+    case finderActions = "finderMarkdown"
     case shortcuts
     case history
     case privacy
@@ -16,7 +17,7 @@ enum ShiguangSettingsPage: String, CaseIterable, Identifiable {
 
     static let groups: [SettingsSidebarGroup] = [
         SettingsSidebarGroup(title: nil, pages: [.general]),
-        SettingsSidebarGroup(title: "功能", pages: [.screenshot, .translation, .clipboard, .quickInput]),
+        SettingsSidebarGroup(title: "功能", pages: [.screenshot, .translation, .clipboard, .quickInput, .finderActions]),
         SettingsSidebarGroup(title: "偏好", pages: [.shortcuts, .history, .privacy]),
         SettingsSidebarGroup(title: "应用", pages: [.about])
     ]
@@ -28,6 +29,7 @@ enum ShiguangSettingsPage: String, CaseIterable, Identifiable {
         case .translation: return "翻译"
         case .clipboard: return "剪贴板"
         case .quickInput: return "启动台"
+        case .finderActions: return "超级右键"
         case .shortcuts: return "快捷键"
         case .history: return "历史记录"
         case .privacy: return "隐私与存储"
@@ -42,6 +44,7 @@ enum ShiguangSettingsPage: String, CaseIterable, Identifiable {
         case .translation: return "翻译引擎、默认语言和 AI 接口"
         case .clipboard: return "系统剪贴板历史、快捷键和本机保存"
         case .quickInput: return "搜索应用与文件，快捷生成变量名和测试数据"
+        case .finderActions: return "访达菜单、压缩和常用目录"
         case .shortcuts: return "区域截图、截图翻译和剪贴板快捷键"
         case .history: return "查看最近截图、识别文字和译文"
         case .privacy: return "屏幕访问、本机处理和本地数据"
@@ -56,6 +59,7 @@ enum ShiguangSettingsPage: String, CaseIterable, Identifiable {
         case .translation: return "character.bubble"
         case .clipboard: return "list.clipboard"
         case .quickInput: return "bolt.horizontal.circle"
+        case .finderActions: return "cursorarrow.click"
         case .shortcuts: return "keyboard"
         case .history: return "clock.arrow.circlepath"
         case .privacy: return "lock.shield"
@@ -76,9 +80,12 @@ enum ShiguangSettingsPage: String, CaseIterable, Identifiable {
                     "Anthropic", "Gemini", "文字翻译", "翻译剪贴板", "划词翻译", "选区"]
         case .clipboard:
             return ["历史", "系统剪贴板", "复制", "监听", "记录", "图片", "GIF", "视频", "文件",
-                    "100", "变量名", "驼峰", "随机", "姓名", "邮箱", "地址", "IP", "身份证"]
+                    "保留", "日期", "天数", "清除", "变量名", "驼峰", "随机", "姓名", "邮箱",
+                    "地址", "IP", "身份证"]
         case .quickInput:
             return ["启动台", "启动器", "快捷输入", "搜索", "应用", "文件", "快捷键", "热键"]
+        case .finderActions:
+            return ["Finder", "访达", "右键", "Markdown", "新建", "文件夹", "路径", "终端", "移动", "压缩", "解压", "目录", "层数", "扩展", "授权", "完整磁盘访问"]
         case .shortcuts:
             return ["快捷键", "热键", "按键", "区域截图", "截图并翻译", "剪贴板历史",
                     "翻译剪贴板", "划词翻译", "变量名"]
@@ -110,6 +117,7 @@ struct SettingsSidebarGroup: Identifiable {
 struct SettingsView: View {
     @ObservedObject var model: AppModel
     @ObservedObject var clipboard: ClipboardHistory
+    @ObservedObject var finderActions: FinderActionsCoordinator
     @AppStorage("settings.selectedPage") private var storedPageRaw = ShiguangSettingsPage.general.rawValue
     @StoredState private var selectedPage = ShiguangSettingsPage(
         rawValue: UserDefaults.standard.string(forKey: "settings.selectedPage") ?? ""
@@ -124,12 +132,14 @@ struct SettingsView: View {
         HStack(spacing: 0) {
             sidebar.frame(width: 206)
             Rectangle().fill(Palette.line).frame(width: 1)
-            SettingsDetailView(model: model, clipboard: clipboard, page: selection)
+            SettingsDetailView(model: model, clipboard: clipboard, finderActions: finderActions, page: selection)
         }
-        .navigationTitle(selection.title)
+        .id(model.appLanguage)
+        .navigationTitle(L(selection.title))
         .tint(Palette.accent)
         .foregroundStyle(Palette.ink)
         .preferredColorScheme(.light)
+        .environment(\.locale, model.appLanguage.locale)
         .frame(minWidth: 780, minHeight: 560)
         .sheet(isPresented: $model.showsPermissionHelp) { permissionHelp }
         .alert("需要留意", isPresented: Binding(
@@ -167,8 +177,10 @@ struct SettingsView: View {
     private var sidebar: some View {
         VStack(spacing: 0) {
             HStack(spacing: 10) {
-                Image(nsImage: NSApp.applicationIconImage)
-                    .resizable().scaledToFit().frame(width: 36, height: 36)
+                MenuBarBrandMark(style: model.menuBarDogStyle,
+                                 customImageData: model.customMenuBarIconData,
+                                 size: 38,
+                                 language: model.appLanguage)
                 VStack(alignment: .leading, spacing: 2) {
                     Text("PawShot").font(.system(size: 13.5, weight: .semibold))
                     Text("偏好设置").font(.system(size: 11)).foregroundStyle(Palette.muted)
@@ -202,7 +214,7 @@ struct SettingsView: View {
                         if !pages.isEmpty {
                             VStack(alignment: .leading, spacing: 3) {
                                 if let title = group.title {
-                                    Text(title)
+                                    Text(LocalizedStringKey(title))
                                         .font(.system(size: 10.5, weight: .semibold))
                                         .foregroundStyle(Palette.muted)
                                         .padding(.horizontal, 10)
@@ -271,7 +283,7 @@ private struct SettingsSidebarRow: View {
         Button(action: action) {
             HStack(spacing: 10) {
                 SettingsSymbolTile(symbol: page.symbol, selected: isSelected, size: 24)
-                Text(page.title)
+                Text(LocalizedStringKey(page.title))
                     .font(.system(size: 12.5, weight: isSelected ? .semibold : .medium))
                     .foregroundStyle(Palette.ink)
                 Spacer(minLength: 0)
@@ -296,7 +308,7 @@ private struct SettingsSidebarRow: View {
         }
         .buttonStyle(.plain)
         .onHover { hovered = $0 }
-        .accessibilityLabel(page.title)
+        .accessibilityLabel(Text(LocalizedStringKey(page.title)))
     }
 }
 
@@ -327,8 +339,11 @@ private struct SettingsSymbolTile: View {
 private struct SettingsDetailView: View {
     @ObservedObject var model: AppModel
     @ObservedObject var clipboard: ClipboardHistory
+    @ObservedObject var finderActions: FinderActionsCoordinator
     let page: ShiguangSettingsPage
     @StoredState private var revealsAIKey = false
+    @StoredState private var confirmsClearHistory = false
+    @StoredState private var hasLegacyAIKey = false
 
     var body: some View {
         ScrollView {
@@ -337,8 +352,8 @@ private struct SettingsDetailView: View {
                     HStack(alignment: .center, spacing: 13) {
                         SettingsSymbolTile(symbol: page.symbol, accented: true, size: 36)
                         VStack(alignment: .leading, spacing: 3) {
-                            Text(page.title).font(.system(size: 20, weight: .semibold))
-                            Text(page.summary).font(.system(size: 12)).foregroundStyle(Palette.muted)
+                            Text(LocalizedStringKey(page.title)).font(.system(size: 20, weight: .semibold))
+                            Text(LocalizedStringKey(page.summary)).font(.system(size: 12)).foregroundStyle(Palette.muted)
                         }
                         Spacer(minLength: 0)
                     }
@@ -354,7 +369,25 @@ private struct SettingsDetailView: View {
         // every detail view (and all of its controls) is the expensive part.
         .animation(nil, value: page)
         .background(Palette.background)
-        .onChange(of: page) { _, _ in revealsAIKey = false }
+        .onChange(of: page) { _, newValue in
+            revealsAIKey = false
+            refreshLegacyKeyHint(for: newValue)
+        }
+        .onAppear { refreshLegacyKeyHint(for: page) }
+        .alert("清空全部截图历史？", isPresented: $confirmsClearHistory) {
+            Button("取消", role: .cancel) {}
+            Button("全部清除", role: .destructive) { model.clearHistory() }
+        } message: {
+            Text("这会删除本机保存的全部截图、标注、识别文字和译文。")
+        }
+    }
+
+    private func refreshLegacyKeyHint(for page: ShiguangSettingsPage) {
+        guard page == .translation, model.aiAPIKey.isEmpty else {
+            hasLegacyAIKey = false
+            return
+        }
+        hasLegacyAIKey = !AITranslationKeychain.hasStoredKeyFile
     }
 
     @ViewBuilder private var pageContent: some View {
@@ -364,6 +397,7 @@ private struct SettingsDetailView: View {
         case .translation: translationContent
         case .clipboard: clipboardContent
         case .quickInput: quickInputContent
+        case .finderActions: finderActionsContent
         case .shortcuts: shortcutsContent
         case .history: historyContent
         case .privacy: privacyContent
@@ -373,6 +407,18 @@ private struct SettingsDetailView: View {
 
     private var generalContent: some View {
         Group {
+            SettingsSection("语言") {
+                SettingsRow("界面语言", detail: "切换后菜单、窗口和设置会立即更新") {
+                    Picker("界面语言", selection: $model.appLanguage) {
+                        ForEach(AppLanguage.allCases) { language in
+                            Text(language.nativeTitle).tag(language)
+                        }
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.menu)
+                    .frame(width: 120, alignment: .trailing)
+                }
+            }
             SettingsSection("启动与菜单栏", footer: model.launchAtLoginMessage) {
                 SettingsToggle(
                     "登录时自动启动",
@@ -396,7 +442,8 @@ private struct SettingsDetailView: View {
                 SettingsSeparator()
                 SettingsRow("菜单栏图标", detail: "选择小动物，或上传图片作为自定义图标") {
                     MenuBarIconPicker(selection: $model.menuBarDogStyle,
-                                      customImageData: $model.customMenuBarIconData)
+                                      customImageData: $model.customMenuBarIconData,
+                                      language: model.appLanguage)
                 }
             }
             SettingsFootnote("截图、视频与 GIF 在点击 ✓ 后复制到剪贴板。按 Esc 取消本次操作。",
@@ -411,7 +458,7 @@ private struct SettingsDetailView: View {
                 SettingsSeparator()
                 SettingsToggle("识别后自动翻译", detail: "使用当前选择的翻译引擎", isOn: $model.autoTranslate)
                 SettingsSeparator()
-                SettingsToggle("保留截图历史", detail: "本机保留最近 30 张截图、标注与译文", isOn: $model.keepHistory)
+                SettingsToggle("保留截图历史", detail: "本机保存截图、标注与译文，默认保留 30 天", isOn: $model.keepHistory)
             }
             SettingsSection("开始截图") {
                 SettingsActionRow(title: "截取屏幕区域", symbol: "viewfinder") { model.capture() }
@@ -443,7 +490,7 @@ private struct SettingsDetailView: View {
             if model.translationProvider == .ai {
                 SettingsSection(
                     "AI 服务",
-                    footer: "\(model.aiAPI.detail)。每个协议分别保存 API Key，且仅写入 macOS 钥匙串；本机地址可省略 Key。测试连接会发送一次 Hello 翻译请求。"
+                    footer: "\(model.aiAPI.detail)。点击“获取模型”会读取该服务的可用模型；测试连接会发送一次 Hello 翻译请求。API Key 仅加密保存在本机。"
                 ) {
                     SettingsRow("协议") {
                         Picker("AI 协议", selection: Binding(
@@ -465,8 +512,23 @@ private struct SettingsDetailView: View {
                     }
                     SettingsSeparator()
                     SettingsFieldRow("模型") {
-                        TextField(model.aiAPI.defaultModel, text: $model.aiModel)
-                            .accessibilityLabel("AI 模型")
+                        aiModelField
+                    }
+                    if let message = model.aiModelFetchMessage {
+                        HStack(spacing: 6) {
+                            Image(systemName: message.hasPrefix("已获取")
+                                  ? "checkmark.circle"
+                                  : message.hasPrefix("正在") ? "arrow.clockwise" : "exclamationmark.circle")
+                            Text(message)
+                                .fixedSize(horizontal: false, vertical: true)
+                            Spacer(minLength: 0)
+                        }
+                        .font(.system(size: 10.5))
+                        .foregroundStyle(message.hasPrefix("已获取")
+                                         ? Palette.success
+                                         : message.hasPrefix("正在") ? Palette.muted : Palette.danger)
+                        .padding(.horizontal, 16)
+                        .padding(.bottom, 8)
                     }
                     SettingsSeparator()
                     SettingsFieldRow("API Key") {
@@ -484,6 +546,19 @@ private struct SettingsDetailView: View {
                             .help(revealsAIKey ? "隐藏 API Key" : "显示 API Key")
                             .accessibilityLabel(revealsAIKey ? "隐藏 API Key" : "显示 API Key")
                         }
+                    }
+                    SettingsSeparator()
+                    if hasLegacyAIKey && model.aiAPIKey.isEmpty {
+                        HStack(spacing: 6) {
+                            Image(systemName: "key.horizontal")
+                            Text("旧版本把 Key 存在钥匙串里，请重新填写一次；现在只保存在本机加密文件中。")
+                                .fixedSize(horizontal: false, vertical: true)
+                            Spacer(minLength: 0)
+                        }
+                        .font(.system(size: 10.5))
+                        .foregroundStyle(Palette.muted)
+                        .padding(.horizontal, 16)
+                        .padding(.bottom, 8)
                     }
                     SettingsSeparator()
                     SettingsFieldRow("附加要求") {
@@ -529,16 +604,84 @@ private struct SettingsDetailView: View {
         }
     }
 
+    private var aiModelField: some View {
+        HStack(spacing: 7) {
+            TextField(model.aiAPI.defaultModel, text: $model.aiModel)
+                .accessibilityLabel("AI 模型")
+                .layoutPriority(1)
+
+            if !model.aiModels.isEmpty {
+                Menu {
+                    ForEach(model.aiModels) { option in
+                        Button {
+                            model.aiModel = option.id
+                        } label: {
+                            if option.title == option.id {
+                                Text(option.id)
+                            } else {
+                                Text("\(option.title) · \(option.id)")
+                            }
+                        }
+                    }
+                } label: {
+                    Image(systemName: "chevron.up.chevron.down")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(Palette.muted)
+                        .frame(width: 24, height: 24)
+                        .background(Palette.panel, in: RoundedRectangle(cornerRadius: 6))
+                        .overlay(RoundedRectangle(cornerRadius: 6).stroke(Palette.line))
+                        .contentShape(Rectangle())
+                }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize()
+                .help("选择已获取的模型")
+                .accessibilityLabel("选择已获取的模型")
+            }
+
+            Button { model.fetchAIModels() } label: {
+                HStack(spacing: 5) {
+                    if model.aiModelFetching {
+                        ProgressView().controlSize(.mini)
+                    } else {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.system(size: 9.5, weight: .semibold))
+                    }
+                    Text(model.aiModelFetching ? "获取中" : "获取模型")
+                        .font(.system(size: 10.5, weight: .medium))
+                }
+                .foregroundStyle(.white)
+                .padding(.horizontal, 8)
+                .frame(height: 24)
+                .background(Palette.accent, in: RoundedRectangle(cornerRadius: 6))
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .fixedSize(horizontal: true, vertical: false)
+            .disabled(model.aiModelFetching)
+            .help("从当前接口获取可用模型")
+            .accessibilityLabel("获取 AI 模型列表")
+        }
+    }
+
     private var clipboardContent: some View {
         SettingsSection("系统剪贴板", footer: "历史仅保存在本机，标记为保密或临时的内容不会被记录。") {
             SettingsToggle("记录剪贴板历史", detail: "支持文字、图片、GIF、视频和文件", isOn: $clipboard.monitorsSystem)
             SettingsSeparator()
-            SettingsRow("保留数量", detail: "相同内容自动去重") {
-                Text("最近 100 项").foregroundStyle(Palette.muted)
+            SettingsRow("保留时间", detail: "超过所选日期的记录会自动删除") {
+                Picker("保留时间", selection: $clipboard.retentionDays) {
+                    ForEach(ClipboardHistory.retentionOptions, id: \.self) { days in
+                            Text(L("\(days) 天")).tag(days)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.menu)
+                .frame(width: 94, alignment: .trailing)
             }
             SettingsSeparator()
-            SettingsRow("当前记录") {
-                Text("\(clipboard.entries.count) 项").foregroundStyle(Palette.muted)
+            SettingsRow("清除记录", detail: "删除本机保存的全部剪贴板历史") {
+                Button("清除记录", role: .destructive) { clipboard.clear() }
+                    .disabled(clipboard.entries.isEmpty)
             }
         }
     }
@@ -588,6 +731,74 @@ private struct SettingsDetailView: View {
         }
     }
 
+    private var finderActionsContent: some View {
+        Group {
+            SettingsSection("访达扩展") {
+                SettingsRow("超级右键", detail: finderActions.extensionEnabled ? "已启用" : "未启用") {
+                    Button("系统设置") { finderActions.manageExtension() }
+                }
+                SettingsSeparator()
+                SettingsRow("菜单层数", detail: finderActions.menuDepth == .two ? "新建文件与常用目录按类展开" : "操作直接显示在右键菜单") {
+                    Picker("菜单层数", selection: $finderActions.menuDepth) {
+                        ForEach(FinderMenuDepth.allCases, id: \.rawValue) { depth in
+                            Text(LocalizedStringKey(depth.title)).tag(depth)
+                        }
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.menu)
+                }
+                SettingsSeparator()
+                SettingsRow("操作范围") {
+                    Picker("操作范围", selection: Binding(
+                        get: { finderActions.coverage },
+                        set: { finderActions.setCoverage($0) }
+                    )) {
+                        ForEach(FinderCoverage.allCases, id: \.rawValue) { coverage in
+                            Text(LocalizedStringKey(coverage.title)).tag(coverage)
+                        }
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.menu)
+                }
+                SettingsSeparator()
+                if finderActions.coverage == .allFolders {
+                    SettingsRow("完整磁盘访问", detail: "使用系统保护的目录时，为 PawShot 授权一次") {
+                        Button("打开系统设置") { finderActions.openDiskAccessSettings() }
+                    }
+                } else {
+                    SettingsRow("操作文件夹", detail: finderActions.selectedFolder?.path ?? "尚未选择文件夹") {
+                        HStack(spacing: 8) {
+                            if finderActions.selectedFolder != nil {
+                                Button("取消选择") { finderActions.clearFolder() }
+                            }
+                            Button("选择文件夹…") { finderActions.selectFolder() }
+                        }
+                    }
+                }
+            }
+            SettingsSection("常用目录") {
+                ForEach(finderActions.favorites) { favorite in
+                    SettingsRow(favorite.title, detail: favorite.directory.path) {
+                        Button {
+                            finderActions.removeFavorite(favorite.id)
+                        } label: {
+                            Image(systemName: "minus.circle")
+                        }
+                        .accessibilityLabel(Text("移除常用目录"))
+                    }
+                    SettingsSeparator()
+                }
+                SettingsActionRow(title: "添加目录", symbol: "folder.badge.plus") {
+                    finderActions.addFavorite()
+                }
+            }
+            if let error = finderActions.settingsError {
+                Text(error).font(.system(size: 11)).foregroundStyle(Palette.danger)
+            }
+        }
+        .onAppear { finderActions.refreshExtensionStatus() }
+    }
+
     private var shortcutsContent: some View {
         Group {
             SettingsSection("全局快捷键", footer: "点击输入框后直接按下组合键，也可以手动输入 option+shift+s。按 Esc 取消录入。") {
@@ -628,6 +839,15 @@ private struct SettingsDetailView: View {
                         Button { model.search = "" } label: { Image(systemName: "xmark.circle.fill") }
                             .buttonStyle(.plain).accessibilityLabel("清除历史搜索")
                     }
+                    if !model.records.isEmpty {
+                        Divider().frame(height: 14)
+                        Button { confirmsClearHistory = true } label: {
+                            Label("全部清除", systemImage: "trash")
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(Palette.danger)
+                        .accessibilityLabel("全部清除")
+                    }
                 }
                 .font(.system(size: 12)).padding(16)
                 SettingsSeparator()
@@ -645,12 +865,15 @@ private struct SettingsDetailView: View {
                 }
             }
             SettingsSection("管理记录") {
+                SettingsToggle("30 天自动清理", detail: "自动删除超过 30 天的截图、标注、识别文字和译文", isOn: $model.autoCleanHistory)
+                SettingsSeparator()
                 SettingsRow("本地存储") {
                     Button("在访达中打开") { openDataDirectory() }
                 }
                 SettingsSeparator()
                 SettingsRow("清空截图历史", detail: "移除已保存的截图、识别文字和译文") {
-                    Button("清空…", role: .destructive) { model.clearHistory() }.disabled(model.records.isEmpty)
+                    Button("全部清除", role: .destructive) { confirmsClearHistory = true }
+                        .disabled(model.records.isEmpty)
                 }
             }
         }
@@ -689,7 +912,8 @@ private struct SettingsDetailView: View {
                 SettingsRow("应用数据目录") { Button("在访达中打开") { openDataDirectory() } }
                 SettingsSeparator()
                 SettingsRow("截图历史") {
-                    Button("清空…", role: .destructive) { model.clearHistory() }.disabled(model.records.isEmpty)
+                    Button("全部清除", role: .destructive) { confirmsClearHistory = true }
+                        .disabled(model.records.isEmpty)
                 }
             }
         }
@@ -698,11 +922,14 @@ private struct SettingsDetailView: View {
     private var aboutContent: some View {
         Group {
             HStack(spacing: 18) {
-                Image(nsImage: NSApp.applicationIconImage).resizable().scaledToFit().frame(width: 72, height: 72)
+                MenuBarBrandMark(style: model.menuBarDogStyle,
+                                 customImageData: model.customMenuBarIconData,
+                                 size: 72,
+                                 language: model.appLanguage)
                 VStack(alignment: .leading, spacing: 5) {
                     Text("PawShot").font(.system(size: 20, weight: .semibold))
                     Text("截取片刻，读懂世界。").font(.system(size: 12)).foregroundStyle(Palette.muted)
-                    Text("版本 \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "-") (\(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "-"))")
+                    (Text("版本") + Text(verbatim: " \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "-") (\(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "-"))"))
                         .font(.system(size: 11)).foregroundStyle(Palette.muted)
                 }
                 Spacer()
@@ -721,7 +948,7 @@ private struct SettingsDetailView: View {
             }
             SettingsSection("运行方式") {
                 SettingsRow("菜单栏常驻", detail: "关闭窗口后继续运行，Dock 中不显示图标") {
-                    Text(model.showsMenuBarIcon ? model.menuBarDogStyle.title : "已隐藏")
+                    Text(LocalizedStringKey(model.showsMenuBarIcon ? model.menuBarDogStyle.titleKey : "已隐藏"))
                         .foregroundStyle(Palette.muted)
                 }
             }
@@ -735,9 +962,59 @@ private struct SettingsDetailView: View {
     }
 }
 
+private struct MenuBarBrandMark: View {
+    let style: MenuBarDogStyle
+    let customImageData: Data?
+    let size: CGFloat
+    let language: AppLanguage
+
+    private var accent: Color {
+        style.colorHex.map(Color.init(hex:)) ?? Palette.ink
+    }
+
+    private var image: NSImage {
+        BrandArtwork.menuBarImage(
+            styleID: style.rawValue,
+            customImageData: customImageData,
+            size: NSSize(width: size * 0.74, height: size * 0.67)
+        )
+    }
+
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: size * 0.27, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [accent.opacity(0.16), Palette.panel],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+            Image(nsImage: image)
+                .resizable()
+                .renderingMode(image.isTemplate ? .template : .original)
+                .scaledToFit()
+                .foregroundStyle(style == .system ? Palette.ink : Color.clear)
+                .padding(size * 0.16)
+        }
+        .frame(width: size, height: size)
+        .overlay {
+            RoundedRectangle(cornerRadius: size * 0.27, style: .continuous)
+                .stroke(accent.opacity(0.2), lineWidth: 1)
+        }
+        .shadow(color: accent.opacity(0.08), radius: 3, y: 1)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(
+            Text(AppLocalization.text("当前菜单栏图标：", language: language))
+                + Text(verbatim: AppLocalization.text(style.titleKey, language: language))
+        )
+    }
+}
+
 private struct MenuBarIconPicker: View {
     @Binding var selection: MenuBarDogStyle
     @Binding var customImageData: Data?
+    let language: AppLanguage
     @StoredState private var showsPicker = false
     @StoredState private var showsImporter = false
     @StoredState private var errorMessage: String?
@@ -750,7 +1027,7 @@ private struct MenuBarIconPicker: View {
                     .frame(width: 26, height: 26)
                     .background(Palette.background, in: RoundedRectangle(cornerRadius: 6))
                     .overlay(RoundedRectangle(cornerRadius: 6).stroke(Palette.line))
-                Text(selection.title)
+                Text(AppLocalization.text(selection.titleKey, language: language))
                     .font(.system(size: 11.5, weight: .medium))
                     .lineLimit(1)
                 Image(systemName: "chevron.down")
@@ -761,10 +1038,14 @@ private struct MenuBarIconPicker: View {
             .frame(height: 32)
             .background(Palette.background, in: RoundedRectangle(cornerRadius: 8))
             .overlay(RoundedRectangle(cornerRadius: 8).stroke(Palette.line))
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .help("选择菜单栏图标")
-        .accessibilityLabel("菜单栏图标：\(selection.title)")
+        .accessibilityLabel(
+            Text(AppLocalization.text("菜单栏图标：", language: language))
+                + Text(verbatim: AppLocalization.text(selection.titleKey, language: language))
+        )
         .popover(isPresented: $showsPicker, arrowEdge: .bottom) {
             pickerPanel
         }
@@ -849,7 +1130,7 @@ private struct MenuBarIconPicker: View {
             VStack(spacing: 5) {
                 iconPreview(style)
                     .frame(width: 20, height: 18)
-                Text(style.title)
+                Text(AppLocalization.text(style.titleKey, language: language))
                     .font(.system(size: 9.5, weight: .medium))
                     .foregroundStyle(selection == style ? Palette.accent : Palette.ink)
                     .lineLimit(1)
@@ -865,10 +1146,11 @@ private struct MenuBarIconPicker: View {
                     .stroke(selection == style ? Palette.accent : Palette.line,
                             lineWidth: selection == style ? 1.5 : 1)
             }
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help(style.title)
-        .accessibilityLabel("菜单栏图标：\(style.title)")
+        .help(Text(AppLocalization.text(style.titleKey, language: language)))
+        .accessibilityLabel(Text(AppLocalization.text(style.titleKey, language: language)))
         .accessibilityAddTraits(selection == style ? .isSelected : [])
     }
 
@@ -924,15 +1206,11 @@ private struct SettingsSection<Content: View>: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text(title).font(.system(size: 11.5, weight: .semibold)).foregroundStyle(Palette.muted)
+            Text(LocalizedStringKey(title)).font(.system(size: 11.5, weight: .semibold)).foregroundStyle(Palette.muted)
             VStack(spacing: 0) { content }
                 .frame(maxWidth: .infinity)
                 .background(Palette.panel, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                 .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(Palette.line, lineWidth: 1))
-            if let footer {
-                Text(footer).font(.system(size: 11)).foregroundStyle(Palette.muted)
-                    .lineSpacing(3).fixedSize(horizontal: false, vertical: true)
-            }
         }
     }
 }
@@ -980,7 +1258,7 @@ private struct SettingsToggle: View {
     var body: some View {
         SettingsRow(title, detail: detail) {
             Toggle(title, isOn: $isOn).labelsHidden().toggleStyle(.switch)
-                .accessibilityLabel(title)
+                .accessibilityLabel(Text(LocalizedStringKey(title)))
         }
     }
 }
@@ -996,7 +1274,7 @@ private struct SettingsFieldRow<Content: View>: View {
 
     var body: some View {
         HStack(spacing: 16) {
-            Text(title).font(.system(size: 12.5, weight: .medium)).frame(width: 72, alignment: .leading)
+            Text(LocalizedStringKey(title)).font(.system(size: 12.5, weight: .medium)).frame(width: 72, alignment: .leading)
             content.textFieldStyle(.plain).font(.system(size: 12)).multilineTextAlignment(.leading)
                 .padding(.horizontal, 10).frame(maxWidth: .infinity, minHeight: 30, alignment: .leading)
                 .background(Palette.background, in: RoundedRectangle(cornerRadius: 7))
@@ -1012,9 +1290,9 @@ private struct SettingsRowLabel: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(title).font(.system(size: 12.5, weight: .medium))
+            Text(LocalizedStringKey(title)).font(.system(size: 12.5, weight: .medium))
             if let detail {
-                Text(detail).font(.system(size: 11)).foregroundStyle(Palette.muted)
+                Text(LocalizedStringKey(detail)).font(.system(size: 11)).foregroundStyle(Palette.muted)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
@@ -1047,7 +1325,7 @@ private struct SettingsActionRow: View {
         }
         .buttonStyle(.plain)
         .onHover { hovered = $0 }
-        .accessibilityLabel(title)
+        .accessibilityLabel(Text(LocalizedStringKey(title)))
     }
 }
 
@@ -1061,13 +1339,13 @@ private struct QuickInputGuideRow: View {
         HStack(alignment: .top, spacing: 12) {
             SettingsSymbolTile(symbol: symbol, accented: true, size: 30)
             VStack(alignment: .leading, spacing: 5) {
-                Text(title)
+                Text(LocalizedStringKey(title))
                     .font(.system(size: 12.5, weight: .medium))
-                Text(detail)
+                Text(LocalizedStringKey(detail))
                     .font(.system(size: 11))
                     .foregroundStyle(Palette.muted)
                     .fixedSize(horizontal: false, vertical: true)
-                Text(example)
+                Text(LocalizedStringKey(example))
                     .font(.system(size: 10.5, weight: .medium, design: .monospaced))
                     .foregroundStyle(Palette.accent)
                     .fixedSize(horizontal: false, vertical: true)
@@ -1101,14 +1379,7 @@ private struct SettingsFootnote: View {
         self.tint = tint
     }
 
-    var body: some View {
-        HStack(alignment: .top, spacing: 8) {
-            Image(systemName: symbol).foregroundStyle(tint).frame(width: 14)
-            Text(text).foregroundStyle(Palette.muted).lineSpacing(3)
-        }
-        .font(.system(size: 11))
-        .fixedSize(horizontal: false, vertical: true)
-    }
+    var body: some View { EmptyView() }
 }
 
 private struct PermissionActionRow: View {
@@ -1129,6 +1400,15 @@ private struct PermissionActionRow: View {
 private struct SettingsHistoryRow: View {
     @ObservedObject var model: AppModel
     let record: CaptureRecord
+    @Environment(\.locale) private var locale
+
+    private var localizedTitle: String {
+        for prefix in ["长截图", "截图"] where record.title.hasPrefix(prefix) {
+            return L(prefix) + String(record.title.dropFirst(prefix.count))
+        }
+        return record.title
+    }
+
     var body: some View {
         HStack(spacing: 12) {
             if let image = model.store?.image(for: record) {
@@ -1138,8 +1418,10 @@ private struct SettingsHistoryRow: View {
                 SettingsSymbolTile(symbol: "photo", size: 38)
             }
             VStack(alignment: .leading, spacing: 4) {
-                Text(record.title).font(.system(size: 12, weight: .medium)).lineLimit(1)
-                Text(record.createdAt.formatted(.dateTime.month().day().hour().minute()))
+                Text(localizedTitle).font(.system(size: 12, weight: .medium)).lineLimit(1)
+                Text(record.createdAt.formatted(
+                    .dateTime.month().day().hour().minute().locale(locale)
+                ))
                     .font(.system(size: 10.5)).foregroundStyle(Palette.muted)
             }
             Spacer(minLength: 8)

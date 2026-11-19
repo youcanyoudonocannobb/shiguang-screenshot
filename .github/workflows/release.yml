@@ -28,6 +28,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Test Finder Actions
+        run: bash scripts/test-finder-actions.sh
+
       - name: Resolve release tag
         id: meta
         run: |
@@ -115,7 +118,8 @@ jobs:
           hdiutil attach "$DMG" -mountpoint "$MOUNT_POINT" -nobrowse -readonly >/dev/null
           test -d "$MOUNT_POINT/PawShot.app"
           test -L "$MOUNT_POINT/Applications"
-          codesign --verify --strict "$MOUNT_POINT/PawShot.app"
+          test -d "$MOUNT_POINT/PawShot.app/Contents/PlugIns/PawShotFinder.appex"
+          codesign --verify --deep --strict "$MOUNT_POINT/PawShot.app"
           hdiutil detach "$MOUNT_POINT" >/dev/null
           rm -rf "$MOUNT_POINT"
           cd "$OUTPUT_DIR"

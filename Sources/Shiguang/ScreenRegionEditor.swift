@@ -45,14 +45,17 @@ private final class ScreenRegionEditorView: NSView {
     private var refreshScheduled = false
     private var cachedToolbarSize = CGSize.zero
     private let decoration = SelectionDecorationView()
-    private let toolbar: NSHostingView<ScreenCaptureToolbar>
+    private let toolbar: NSHostingView<AnyView>
 
     init(snapshot: NSImage, screen: NSScreen, selection: CGRect, model: AppModel) {
         self.snapshot = snapshot
         self.screen = screen
         self.selection = selection
         self.model = model
-        toolbar = NSHostingView(rootView: ScreenCaptureToolbar(model: model))
+        toolbar = NSHostingView(rootView: AnyView(
+            ScreenCaptureToolbar(model: model)
+                .environment(\.locale, model.appLanguage.locale)
+        ))
         super.init(frame: CGRect(origin: .zero, size: screen.frame.size))
         addSubview(canvas)
         addSubview(decoration)

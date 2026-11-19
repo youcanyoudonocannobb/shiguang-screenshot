@@ -64,6 +64,7 @@ struct OCRWorkspaceView: View {
                     .frame(height: 30)
                     .background(mode == item ? Palette.accent : Color.clear,
                                 in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .disabled(model.isBusy && mode != item)
@@ -290,6 +291,7 @@ private struct OCRChipButtonStyle: ButtonStyle {
             .background(configuration.isPressed ? Palette.line : hovered ? Palette.accentSoft : Palette.panel,
                         in: RoundedRectangle(cornerRadius: 7, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: 7).stroke(Palette.line))
+            .contentShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
             .opacity(isEnabled ? 1 : 0.4)
             .onHover { hovered = $0 }
     }

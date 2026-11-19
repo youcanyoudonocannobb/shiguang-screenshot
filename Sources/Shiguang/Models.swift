@@ -6,13 +6,13 @@ import Vision
 
 enum RecordingFormat: String, CaseIterable {
     case video, gif
-    var title: String { self == .video ? "MP4 视频" : "GIF 动图" }
+    var title: String { L(self == .video ? "MP4 视频" : "GIF 动图") }
     var fileExtension: String { self == .video ? "mp4" : "gif" }
 }
 
 enum ScrollCaptureMode: String, CaseIterable {
     case automatic, manual
-    var title: String { self == .automatic ? "自动长截图" : "手动长截图" }
+    var title: String { L(self == .automatic ? "自动长截图" : "手动长截图") }
 }
 
 enum MenuBarDogStyle: String, Codable, CaseIterable, Identifiable {
@@ -29,7 +29,7 @@ enum MenuBarDogStyle: String, Codable, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
-    var title: String {
+    var titleKey: String {
         switch self {
         case .system: return "系统单色"
         case .lake: return "湖蓝小狗"
@@ -43,6 +43,8 @@ enum MenuBarDogStyle: String, Codable, CaseIterable, Identifiable {
         case .custom: return "自定义图标"
         }
     }
+
+    var title: String { L(titleKey) }
 
     var colorHex: String? {
         switch self {
@@ -82,19 +84,19 @@ enum MarkTool: String, Codable, CaseIterable {
 
     var title: String {
         switch self {
-        case .pointer: return "浏览"
-        case .rectangle: return "矩形"
-        case .ellipse: return "椭圆"
-        case .line: return "直线"
-        case .arrow: return "箭头"
-        case .pen: return "画笔"
-        case .highlighter: return "荧光笔"
-        case .number: return "编号"
-        case .text: return "文字"
-        case .mosaic: return "马赛克"
-        case .spotlight: return "聚光灯"
-        case .redact: return "遮盖"
-        case .picker: return "取色"
+        case .pointer: return L("浏览")
+        case .rectangle: return L("矩形")
+        case .ellipse: return L("椭圆")
+        case .line: return L("直线")
+        case .arrow: return L("箭头")
+        case .pen: return L("画笔")
+        case .highlighter: return L("荧光笔")
+        case .number: return L("编号")
+        case .text: return L("文字")
+        case .mosaic: return L("马赛克")
+        case .spotlight: return L("聚光灯")
+        case .redact: return L("遮盖")
+        case .picker: return L("取色")
         }
     }
 }
@@ -109,6 +111,20 @@ enum AnnotationSizeMetrics {
     static let maskSizeRange = 2.0...80.0
     static let stepPoints = 1.0
 
+    /// Parses the compact point-size field and normalizes manual input to a
+    /// whole point inside the setting's supported range.
+    static func clampedPoints(from text: String,
+                              within range: ClosedRange<Double>) -> Double? {
+        var numeric = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if numeric.lowercased().hasSuffix("pt") {
+            numeric.removeLast(2)
+            numeric = numeric.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        numeric = numeric.replacingOccurrences(of: ",", with: ".")
+        guard let value = Double(numeric), value.isFinite else { return nil }
+        return min(range.upperBound, max(range.lowerBound, value.rounded()))
+    }
+
     /// Marks store sizes as a fraction of the image's shortest side so they
     /// survive cropping and history reloads. The input and output use points.
     static func fraction(points: Double, imageSize: CGSize) -> Double {
@@ -122,9 +138,9 @@ enum TextPresentation: String, CaseIterable, Codable {
 
     var title: String {
         switch self {
-        case .plain: return "无底"
-        case .outlined: return "描边"
-        case .highlighted: return "底色"
+        case .plain: return L("无底")
+        case .outlined: return L("描边")
+        case .highlighted: return L("底色")
         }
     }
 }
@@ -133,7 +149,7 @@ enum MaskStyle: String, CaseIterable, Codable {
     case blur, pixel
 
     var title: String {
-        self == .blur ? "模糊" : "像素"
+        L(self == .blur ? "模糊" : "像素")
     }
 }
 
@@ -142,9 +158,9 @@ enum MaskStrength: String, CaseIterable, Codable {
 
     var title: String {
         switch self {
-        case .weak: return "弱"
-        case .medium: return "中"
-        case .strong: return "强"
+        case .weak: return L("弱")
+        case .medium: return L("中")
+        case .strong: return L("强")
         }
     }
 
@@ -160,7 +176,7 @@ enum MaskStrength: String, CaseIterable, Codable {
 enum SpotlightStrength: String, CaseIterable, Codable {
     case light, deep
 
-    var title: String { self == .light ? "浅" : "深" }
+    var title: String { L(self == .light ? "浅" : "深") }
     var alpha: Double { self == .light ? 0.36 : 0.58 }
 }
 
@@ -171,7 +187,7 @@ enum CaptureAspectRatio: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .free: return "自由"
+        case .free: return L("自由")
         case .square: return "1:1"
         case .fourThree: return "4:3"
         case .threeTwo: return "3:2"

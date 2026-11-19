@@ -58,12 +58,18 @@ struct ImageCanvas: NSViewRepresentable {
     var spotlightStrength: SpotlightStrength = .light
     var onColorPick: ((String) -> Void)?
     let onMark: (Mark) -> Void
+    var onBeginMarkEdit: ((UUID) -> Void)?
+    var onUpdateMark: ((Mark) -> Void)?
+    var onFinishMarkEdit: (() -> Void)?
     let onEscape: () -> Void
 
     func makeNSView(context: Context) -> NativeImageCanvas { NativeImageCanvas() }
 
     func updateNSView(_ view: NativeImageCanvas, context: Context) {
         view.onMark = onMark
+        view.onBeginMarkEdit = onBeginMarkEdit
+        view.onUpdateMark = onUpdateMark
+        view.onFinishMarkEdit = onFinishMarkEdit
         view.onEscape = onEscape
         view.onColorPick = onColorPick
         view.onZoom = { zoom = $0 }
@@ -81,6 +87,9 @@ final class NativeImageCanvas: NSView, NSTextFieldDelegate {
     enum SelectionDrag { case began, changed, ended }
     var onSelectionDrag: ((NSEvent, SelectionDrag) -> Void)?
     var onMark: ((Mark) -> Void)?
+    var onBeginMarkEdit: ((UUID) -> Void)?
+    var onUpdateMark: ((Mark) -> Void)?
+    var onFinishMarkEdit: (() -> Void)?
     var onEscape: (() -> Void)?
     var onColorPick: ((String) -> Void)?
     var onZoom: ((CGFloat) -> Void)?
@@ -112,6 +121,10 @@ final class NativeImageCanvas: NSView, NSTextFieldDelegate {
     private var isPanning = false
     private var inPlace = false
     private var isMovingSelection = false
+    private var selectedMarkID: UUID?
+    private var editingMark: Mark?
+    private var editingPointIndex: Int?
+    private var didBeginMarkEdit = false
 
     override var isFlipped: Bool { true }
     override var acceptsFirstResponder: Bool { true }
@@ -137,11 +150,15 @@ final class NativeImageCanvas: NSView, NSTextFieldDelegate {
             finishText(commit: false)
             viewport = CanvasViewport()
             draft = nil
+            selectedMarkID = nil
         }
         if changedImage || self.marks != marks {
             self.image = image
             self.marks = marks
             rendered = ImageRenderer.render(image, marks: marks)
+            if let selectedMarkID, !marks.contains(where: { $0.id == selectedMarkID }) {
+                self.selectedMarkID = nil
+            }
         }
         if self.tool != tool { finishText(commit: true); draft = nil }
         self.tool = tool
@@ -200,6 +217,10 @@ final class NativeImageCanvas: NSView, NSTextFieldDelegate {
                       hints: [.interpolation: NSImageInterpolation.high])
         NSBezierPath(rect: rect).addClip()
         if let draft { drawDraft(draft, rect: rect) }
+        if let selectedMarkID,
+           let selectedMark = marks.first(where: { $0.id == selectedMarkID }) {
+            drawSelection(for: selectedMark, in: rect)
+        }
         NSGraphicsContext.restoreGraphicsState()
     }
 
@@ -284,6 +305,161 @@ final class NativeImageCanvas: NSView, NSTextFieldDelegate {
         }
     }
 
+    private func drawSelection(for mark: Mark, in rect: CGRect) {
+        guard let firstPoint = mark.points.first, rect.width > 0, rect.height > 0 else { return }
+        let first = imagePoint(firstPoint, in: rect)
+        let last = mark.points.last.map { imagePoint($0, in: rect) } ?? first
+        let accent = NSColor.controlAccentColor
+        let selectionPath = NSBezierPath()
+        var handlePoints: [CGPoint] = []
+
+        switch mark.tool {
+        case .text:
+            selectionPath.appendRoundedRect(textBounds(for: mark, in: rect), xRadius: 4, yRadius: 4)
+        case .number:
+            let radius = numberRadius(for: mark, in: rect) + 2
+            selectionPath.appendOval(in: CGRect(x: first.x - radius, y: first.y - radius,
+                                                width: radius * 2, height: radius * 2))
+        case .line, .arrow:
+            selectionPath.move(to: first)
+            selectionPath.line(to: last)
+            handlePoints = [first, last]
+        case .pen, .highlighter:
+            selectionPath.move(to: first)
+            for point in mark.points.dropFirst() {
+                selectionPath.line(to: imagePoint(point, in: rect))
+            }
+        case .rectangle, .ellipse, .redact, .mosaic, .spotlight:
+            let box = markBounds(mark, in: rect)
+            if mark.tool == .ellipse {
+                selectionPath.appendOval(in: box)
+            } else {
+                selectionPath.appendRoundedRect(box, xRadius: 3, yRadius: 3)
+            }
+            handlePoints = [first, last]
+        case .pointer, .picker:
+            return
+        }
+
+        NSGraphicsContext.saveGraphicsState()
+        accent.setStroke()
+        selectionPath.lineWidth = 1.4
+        selectionPath.setLineDash([4, 3], count: 2, phase: 0)
+        selectionPath.stroke()
+        NSGraphicsContext.restoreGraphicsState()
+
+        for point in handlePoints {
+            let handle = CGRect(x: point.x - 4, y: point.y - 4, width: 8, height: 8)
+            NSColor.white.setFill()
+            accent.setStroke()
+            let path = NSBezierPath(ovalIn: handle)
+            path.lineWidth = 1.5
+            path.fill()
+            path.stroke()
+        }
+    }
+
+    private func imagePoint(_ point: UnitPoint, in rect: CGRect) -> CGPoint {
+        CGPoint(x: rect.minX + point.x * rect.width,
+                y: rect.minY + point.y * rect.height)
+    }
+
+    private func markBounds(_ mark: Mark, in rect: CGRect) -> CGRect {
+        guard let first = mark.points.first else { return .zero }
+        let firstPoint = imagePoint(first, in: rect)
+        let lastPoint = imagePoint(mark.points.last ?? first, in: rect)
+        return CGRect(x: min(firstPoint.x, lastPoint.x),
+                      y: min(firstPoint.y, lastPoint.y),
+                      width: abs(lastPoint.x - firstPoint.x),
+                      height: abs(lastPoint.y - firstPoint.y))
+    }
+
+    private func textBounds(for mark: Mark, in rect: CGRect) -> CGRect {
+        guard let text = mark.text, let first = mark.points.first else { return .zero }
+        let origin = imagePoint(first, in: rect)
+        let displayScale = rect.height / max(1, imageSize.height)
+        let font = NSFont.systemFont(
+            ofSize: max(8, (mark.fontSize ?? 0.035) * imageSize.height) * displayScale,
+            weight: .semibold
+        )
+        let measured = (text as NSString).size(withAttributes: [.font: font])
+        let padding = max(3, font.pointSize * 0.2)
+        return CGRect(x: origin.x - padding,
+                      y: origin.y - padding * 0.55,
+                      width: measured.width + padding * 2,
+                      height: measured.height + padding * 1.1)
+    }
+
+    private func numberRadius(for mark: Mark, in rect: CGRect) -> CGFloat {
+        let shortestSide = min(rect.width, rect.height)
+        if let sizeFraction = mark.numberSize {
+            return max(2, min(shortestSide * 0.45, shortestSide * max(0.002, sizeFraction)))
+        }
+        return max(9, min(46, shortestSide * 0.022))
+    }
+
+    private func hitMark(at point: CGPoint) -> Mark? {
+        let rect = imageRect
+        guard rect.contains(point) else { return nil }
+        return marks.reversed().first { markContains($0, point: point, in: rect) }
+    }
+
+    private func markContains(_ mark: Mark, point: CGPoint, in rect: CGRect) -> Bool {
+        let tolerance: CGFloat = 16
+        switch mark.tool {
+        case .text:
+            return textBounds(for: mark, in: rect).insetBy(dx: -tolerance, dy: -tolerance).contains(point)
+        case .number:
+            guard let first = mark.points.first else { return false }
+            let center = imagePoint(first, in: rect)
+            return hypot(point.x - center.x, point.y - center.y) <= numberRadius(for: mark, in: rect) + tolerance
+        case .rectangle, .ellipse, .redact, .mosaic, .spotlight:
+            return markBounds(mark, in: rect).insetBy(dx: -tolerance, dy: -tolerance).contains(point)
+        case .line, .arrow, .pen, .highlighter:
+            guard let first = mark.points.first else { return false }
+            let path = mark.points.map { imagePoint($0, in: rect) }
+            let points = mark.tool == .line || mark.tool == .arrow
+                ? [imagePoint(first, in: rect), imagePoint(mark.points.last ?? first, in: rect)]
+                : path
+            let width = max(2, min(imageSize.width, imageSize.height) *
+                            (mark.lineWidth ?? 0.005) * (rect.width / max(1, imageSize.width)))
+            let hitWidth = max(tolerance, width * (mark.tool == .highlighter ? 2 : 0.75))
+            guard points.count > 1 else { return false }
+            for index in 1..<points.count {
+                if distance(from: point, toSegment: points[index - 1], points[index]) <= hitWidth {
+                    return true
+                }
+            }
+            return false
+        case .pointer, .picker:
+            return false
+        }
+    }
+
+    private func handleIndex(for mark: Mark, at point: CGPoint, in rect: CGRect) -> Int? {
+        guard mark.points.count >= 2 else { return nil }
+        switch mark.tool {
+        case .line, .arrow, .rectangle, .ellipse, .redact, .mosaic, .spotlight:
+            let first = imagePoint(mark.points[0], in: rect)
+            let last = imagePoint(mark.points[mark.points.count - 1], in: rect)
+            if hypot(point.x - first.x, point.y - first.y) <= 11 { return 0 }
+            if hypot(point.x - last.x, point.y - last.y) <= 11 { return mark.points.count - 1 }
+            return nil
+        default:
+            return nil
+        }
+    }
+
+    private func distance(from point: CGPoint, toSegment start: CGPoint, _ end: CGPoint) -> CGFloat {
+        let dx = end.x - start.x
+        let dy = end.y - start.y
+        let lengthSquared = dx * dx + dy * dy
+        guard lengthSquared > 0 else { return hypot(point.x - start.x, point.y - start.y) }
+        let projection = min(1, max(0, ((point.x - start.x) * dx + (point.y - start.y) * dy) / lengthSquared))
+        let nearest = CGPoint(x: start.x + projection * dx, y: start.y + projection * dy)
+        return hypot(point.x - nearest.x, point.y - nearest.y)
+    }
+
     private func normalized(_ point: CGPoint) -> UnitPoint {
         let rect = imageRect
         return UnitPoint(x: (point.x - rect.minX) / max(1, rect.width),
@@ -297,7 +473,25 @@ final class NativeImageCanvas: NSView, NSTextFieldDelegate {
         dragStart = point
         offsetStart = viewport.offset
         isPanning = false
+        editingMark = nil
+        editingPointIndex = nil
+        didBeginMarkEdit = false
         guard imageRect.contains(point) else { return }
+
+        if enabled, tool != .picker, let hit = hitMark(at: point) {
+            // Existing annotations take precedence over creating another mark.
+            // This lets users drag immediately after drawing, even while the
+            // drawing tool is still selected.
+            selectedMarkID = hit.id
+            editingMark = hit
+            editingPointIndex = handleIndex(for: hit, at: point, in: imageRect)
+            needsDisplay = true
+            return
+        } else {
+            selectedMarkID = nil
+            needsDisplay = true
+        }
+
         if tool == .pointer || event.modifierFlags.contains(.option) {
             if inPlace && viewport.zoom <= 1.001 && enabled {
                 isMovingSelection = true
@@ -319,12 +513,14 @@ final class NativeImageCanvas: NSView, NSTextFieldDelegate {
         }
         if tool == .number {
             let next = marks.filter { $0.tool == .number }.count + 1
-            onMark?(Mark(tool: .number, points: [normalized(point)], colorHex: color,
-                         filled: nil, text: String(next), fontSize: nil,
-                         lineWidth: AnnotationSizeMetrics.fraction(
-                            points: numberSizePoints, imageSize: imagePointSize),
-                         numberSize: AnnotationSizeMetrics.fraction(
-                            points: numberSizePoints, imageSize: imagePointSize)))
+            let mark = Mark(tool: .number, points: [normalized(point)], colorHex: color,
+                            filled: nil, text: String(next), fontSize: nil,
+                            lineWidth: AnnotationSizeMetrics.fraction(
+                                points: numberSizePoints, imageSize: imagePointSize),
+                            numberSize: AnnotationSizeMetrics.fraction(
+                                points: numberSizePoints, imageSize: imagePointSize))
+            selectedMarkID = mark.id
+            onMark?(mark)
             return
         }
         if tool != .pointer {
@@ -343,6 +539,33 @@ final class NativeImageCanvas: NSView, NSTextFieldDelegate {
     }
 
     override func mouseDragged(with event: NSEvent) {
+        if let original = editingMark {
+            if !didBeginMarkEdit {
+                didBeginMarkEdit = true
+                onBeginMarkEdit?(original.id)
+            }
+            let point = convert(event.locationInWindow, from: nil)
+            let rect = imageRect
+            var updated = original
+            if let editingPointIndex {
+                updated.points[editingPointIndex] = normalized(point)
+            } else {
+                let deltaX = Double((point.x - dragStart.x) / max(1, rect.width))
+                let deltaY = Double((point.y - dragStart.y) / max(1, rect.height))
+                let minX = original.points.map(\.x).min() ?? 0
+                let maxX = original.points.map(\.x).max() ?? 1
+                let minY = original.points.map(\.y).min() ?? 0
+                let maxY = original.points.map(\.y).max() ?? 1
+                let clampedX = min(1 - maxX, max(-minX, deltaX))
+                let clampedY = min(1 - maxY, max(-minY, deltaY))
+                updated.points = original.points.map {
+                    UnitPoint(x: $0.x + clampedX, y: $0.y + clampedY)
+                }
+            }
+            onUpdateMark?(updated)
+            needsDisplay = true
+            return
+        }
         if isMovingSelection { onSelectionDrag?(event, .changed); return }
         let point = convert(event.locationInWindow, from: nil)
         if isPanning {
@@ -358,6 +581,15 @@ final class NativeImageCanvas: NSView, NSTextFieldDelegate {
     }
 
     override func mouseUp(with event: NSEvent) {
+        if editingMark != nil {
+            if didBeginMarkEdit { onFinishMarkEdit?() }
+            editingMark = nil
+            editingPointIndex = nil
+            didBeginMarkEdit = false
+            window?.invalidateCursorRects(for: self)
+            needsDisplay = true
+            return
+        }
         if isMovingSelection {
             onSelectionDrag?(event, .ended)
             isMovingSelection = false
@@ -366,7 +598,10 @@ final class NativeImageCanvas: NSView, NSTextFieldDelegate {
         }
         isPanning = false
         window?.invalidateCursorRects(for: self)
-        if let mark = draft, mark.points.count > 1 { onMark?(mark) }
+        if let mark = draft, mark.points.count > 1 {
+            selectedMarkID = mark.id
+            onMark?(mark)
+        }
         draft = nil
         needsDisplay = true
     }
@@ -443,9 +678,11 @@ final class NativeImageCanvas: NSView, NSTextFieldDelegate {
         field.delegate = nil
         field.removeFromSuperview()
         if commit, !value.isEmpty, let anchor = textAnchor {
-            onMark?(Mark(tool: .text, points: [anchor], colorHex: textColor, text: value,
-                         fontSize: textFraction, lineWidth: nil,
-                         textPresentation: textPresentation))
+            let mark = Mark(tool: .text, points: [anchor], colorHex: textColor, text: value,
+                            fontSize: textFraction, lineWidth: nil,
+                            textPresentation: textPresentation)
+            selectedMarkID = mark.id
+            onMark?(mark)
         }
         textAnchor = nil
     }

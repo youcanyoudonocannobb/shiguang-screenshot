@@ -1,4 +1,4 @@
-import AVKit
+import AppKit
 import SwiftUI
 
 struct RecordingStatusView: View {
@@ -9,14 +9,9 @@ struct RecordingStatusView: View {
     var onPause: () -> Void
     var onConfirm: () -> Void
     var onCancel: () -> Void
-    @StoredState private var player: AVPlayer?
 
     var body: some View {
         VStack(spacing: 2) {
-            if session.phase == .review || session.phase == .copying, let player {
-                NativeRecordingPlayer(player: player).frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
-            }
             HStack(spacing: 9) {
                 Circle().fill(session.phase == .paused ? Palette.warning : Color(hex: "D46A66")).frame(width: 7, height: 7)
                 Text(session.format == .gif ? "GIF" : "MP4").font(.system(size: 11, weight: .semibold))
@@ -37,7 +32,7 @@ struct RecordingStatusView: View {
                         .help(session.phase == .paused ? "继续录制" : "暂停录制")
                         .accessibilityLabel(session.phase == .paused ? "继续录制" : "暂停录制")
                     Button(action: onStop) { Image(systemName: "stop.fill") }
-                        .help("停止并预览").accessibilityLabel("停止并预览")
+                        .help("停止并复制").accessibilityLabel("停止并复制")
                 }
                 Rectangle().fill(.white.opacity(0.2)).frame(width: 1, height: 18)
                 Button(action: onCancel) { Image(systemName: "xmark").foregroundStyle(Color(hex: "E28B86")) }
@@ -45,38 +40,40 @@ struct RecordingStatusView: View {
                 Button(action: onConfirm) { Image(systemName: "checkmark").foregroundStyle(Color(hex: "82C9A6")) }
                     .disabled(![.recording, .paused, .review].contains(session.phase))
                     .help("复制到剪贴板并完成").accessibilityLabel("复制录制到剪贴板")
-                Image(systemName: "line.3.horizontal").font(.system(size: 10)).foregroundStyle(.white.opacity(0.5))
-                    .help("拖动控制条").allowsHitTesting(false)
+                ZStack {
+                    WindowDragHandle()
+                    Image(systemName: "line.3.horizontal")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.white.opacity(0.55))
+                        .allowsHitTesting(false)
+                }
+                .frame(width: 28, height: 28)
+                .help("拖动控制条")
             }
             .buttonStyle(RecordingControlStyle()).font(.system(size: 14, weight: .medium))
             .padding(.horizontal, 12).frame(height: 42)
             .background(Palette.overlay, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-            if session.phase == .review || session.phase == .copying {
-                Text(subtitle).font(.system(size: 11)).foregroundStyle(.white.opacity(0.85)).lineLimit(2)
+            if let error = session.copyError {
+                Text(error).font(.system(size: 11)).foregroundStyle(.white.opacity(0.85)).lineLimit(2)
                     .padding(8).frame(maxWidth: .infinity)
                     .background(Palette.overlay, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
             }
         }
         .foregroundStyle(.white).preferredColorScheme(.dark)
-        .onChange(of: session.movieURL, initial: true) { _, url in
-            player?.pause()
-            player = url.map { AVPlayer(url: $0) }
-        }
-        .onDisappear { player?.pause(); player = nil }
+    }
+}
+private struct WindowDragHandle: NSViewRepresentable {
+    func makeNSView(context: Context) -> DraggableView { DraggableView() }
+    func updateNSView(_ nsView: DraggableView, context: Context) {}
+}
+
+private final class DraggableView: NSView {
+    override func mouseDown(with event: NSEvent) {
+        window?.performDrag(with: event)
     }
 
-    private var subtitle: String {
-        if let error = session.copyError { return error }
-        switch session.phase {
-        case .ready: return "点击开始录制 · 草稿"
-        case .starting: return "正在启动…"
-        case .pausing: return "正在暂停…"
-        case .paused: return "已暂停"
-        case .stopping: return "正在生成预览…"
-        case .review: return "预览草稿 · 点击 ✓ 复制到剪贴板"
-        case .copying: return "正在复制到剪贴板…"
-        default: return "无声录制"
-        }
+    override func resetCursorRects() {
+        addCursorRect(bounds, cursor: .openHand)
     }
 }
 
@@ -86,27 +83,5 @@ private struct RecordingControlStyle: ButtonStyle {
         configuration.label.frame(width: 26, height: 28)
             .background(configuration.isPressed ? .white.opacity(0.2) : .clear, in: RoundedRectangle(cornerRadius: 5))
             .opacity(enabled ? 1 : 0.35)
-    }
-}
-
-private struct NativeRecordingPlayer: NSViewRepresentable {
-    let player: AVPlayer
-
-    func makeNSView(context: Context) -> AVPlayerView {
-        let view = AVPlayerView()
-        view.controlsStyle = .inline
-        view.showsFullScreenToggleButton = false
-        view.showsSharingServiceButton = false
-        view.player = player
-        return view
-    }
-
-    func updateNSView(_ view: AVPlayerView, context: Context) {
-        if view.player !== player { view.player = player }
-    }
-
-    static func dismantleNSView(_ view: AVPlayerView, coordinator: ()) {
-        view.player?.pause()
-        view.player = nil
     }
 }

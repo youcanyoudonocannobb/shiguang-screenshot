@@ -5,6 +5,7 @@ BUILD_DIR="${BUILD_DIR:-$PROJECT_DIR/.build}"
 mkdir -p "$BUILD_DIR"
 export CLANG_MODULE_CACHE_PATH="$BUILD_DIR/ModuleCache"
 swiftc -parse-as-library -swift-version 5 -target "$(uname -m)-apple-macosx15.0" \
+    "$PROJECT_DIR/Sources/Shiguang/Localization.swift" \
     "$PROJECT_DIR/Sources/Shiguang/Models.swift" \
     "$PROJECT_DIR/Sources/Shiguang/HotkeySettings.swift" \
     "$PROJECT_DIR/Sources/Shiguang/AITranslation.swift" \

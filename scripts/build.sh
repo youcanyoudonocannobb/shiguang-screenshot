@@ -30,6 +30,9 @@ APP="$STAGING_DIR/PawShot.app"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN_DIR/Shiguang" "$APP/Contents/MacOS/Shiguang"
 cp "$PROJECT_DIR/Info.plist" "$APP/Contents/Info.plist"
+if compgen -G "$PROJECT_DIR/Sources/Shiguang/Resources/*.lproj" > /dev/null; then
+    cp -R "$PROJECT_DIR"/Sources/Shiguang/Resources/*.lproj "$APP/Contents/Resources/"
+fi
 ICON_BUILD_DIR="$BUILD_DIR/IconRenderer"
 ICON_RENDERER="$ICON_BUILD_DIR/icon-renderer"
 mkdir -p "$ICON_BUILD_DIR"
@@ -38,19 +41,45 @@ CLANG_MODULE_CACHE_PATH="$CLANG_MODULE_CACHE_PATH" swiftc \
     "$PROJECT_DIR/Sources/Shiguang/BrandArtwork.swift" "$ICON_BUILD_DIR/main.swift" \
     -o "$ICON_RENDERER"
 "$ICON_RENDERER" "$BUILD_DIR/AppIcon.iconset" "$APP/Contents/Resources/AppIcon.icns"
+
+FINDER_DIR="$PROJECT_DIR/Sources/PawShotFinder"
+FINDER_BUNDLE="$APP/Contents/PlugIns/PawShotFinder.appex"
+FINDER_ENTITLEMENTS="$FINDER_DIR/Finder.entitlements"
+mkdir -p "$FINDER_BUNDLE/Contents/MacOS"
+cp "$FINDER_DIR/Info.plist" "$FINDER_BUNDLE/Contents/Info.plist"
+for key in CFBundleVersion CFBundleShortVersionString LSMinimumSystemVersion; do
+    value="$(/usr/libexec/PlistBuddy -c "Print :$key" "$APP/Contents/Info.plist")"
+    /usr/libexec/PlistBuddy -c "Set :$key $value" "$FINDER_BUNDLE/Contents/Info.plist"
+done
+MIN_MACOS="$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "$APP/Contents/Info.plist")"
+FINDER_BINARIES=()
+for arch in $(lipo -archs "$APP/Contents/MacOS/Shiguang"); do
+    binary="$STAGING_DIR/PawShotFinder-$arch"
+    swiftc -O -swift-version 5 -target "$arch-apple-macosx$MIN_MACOS" \
+        -parse-as-library -application-extension -Xlinker -e -Xlinker _NSExtensionMain \
+        "$PROJECT_DIR/Sources/Shiguang/Localization.swift" \
+        "$PROJECT_DIR/Sources/Shiguang/FinderActionRequest.swift" \
+        "$FINDER_DIR/FinderSync.swift" -o "$binary"
+    FINDER_BINARIES+=("$binary")
+done
+lipo -create "${FINDER_BINARIES[@]}" -output "$FINDER_BUNDLE/Contents/MacOS/PawShotFinder"
+
 if [[ "$SIGN_IDENTITY" == "-" ]]; then
+    codesign --force --sign - --entitlements "$FINDER_ENTITLEMENTS" "$FINDER_BUNDLE"
     # CI fallback without certificates: ad-hoc signing keeps the bundle launchable locally.
     # Pin a stable designated requirement to the bundle identifier so TCC
     # permissions (Screen Recording, Accessibility) survive local rebuilds.
     codesign --force --sign - --identifier dev.shiguang.screenshot \
         --requirements '=designated => identifier "dev.shiguang.screenshot"' "$APP"
 elif [[ -n "$SIGN_IDENTITY" ]]; then
+    codesign --force --options runtime --timestamp --sign "$SIGN_IDENTITY" \
+        --entitlements "$FINDER_ENTITLEMENTS" "$FINDER_BUNDLE"
     codesign --force --options runtime --timestamp \
         --sign "$SIGN_IDENTITY" --identifier dev.shiguang.screenshot "$APP"
 else
     python3 "$PROJECT_DIR/scripts/local-signing.py" sign "$APP"
 fi
-codesign --verify --strict "$APP"
+codesign --verify --deep --strict "$APP"
 # Publish only after signing and verification; preserve the previous app on failure.
 python3 - "$APP" "$FINAL_APP" <<'PY'
 from pathlib import Path

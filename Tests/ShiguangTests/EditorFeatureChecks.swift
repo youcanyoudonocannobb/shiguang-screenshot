@@ -99,6 +99,21 @@ struct EditorFeatureChecks {
                     model.maskSizePoints == AnnotationSizeMetrics.defaultMaskSizePoints,
                     "Annotation controls must start from explicit point sizes")
 
+        try require(AnnotationSizeMetrics.clampedPoints(
+            from: " 12 pt ", within: AnnotationSizeMetrics.lineWidthRange
+        ) == 12, "Manual point-size input must accept an optional pt suffix")
+        try require(AnnotationSizeMetrics.clampedPoints(
+            from: "120", within: AnnotationSizeMetrics.lineWidthRange
+        ) == AnnotationSizeMetrics.lineWidthRange.upperBound,
+                    "Manual point-size input must clamp values above the range")
+        try require(AnnotationSizeMetrics.clampedPoints(
+            from: "0", within: AnnotationSizeMetrics.numberSizeRange
+        ) == AnnotationSizeMetrics.numberSizeRange.lowerBound,
+                    "Manual point-size input must clamp values below the range")
+        try require(AnnotationSizeMetrics.clampedPoints(
+            from: "not-a-size", within: AnnotationSizeMetrics.textSizeRange
+        ) == nil, "Manual point-size input must reject non-numeric text")
+
         let sourceSize = CGSize(width: 400, height: 200)
         let lineFraction = AnnotationSizeMetrics.fraction(points: 4, imageSize: sourceSize)
         let maskFraction = AnnotationSizeMetrics.fraction(points: 24, imageSize: sourceSize)
@@ -162,6 +177,86 @@ struct EditorFeatureChecks {
         let decodedNumber = try JSONDecoder().decode(Mark.self, from: JSONEncoder().encode(number))
         try require(decodedNumber == number,
                     "Number marker point sizes must survive history round trips")
+    }
+
+    static func annotationMarksCanBeMoved() async throws {
+        let canvas = NativeImageCanvas(frame: NSRect(x: 0, y: 0, width: 320, height: 240))
+
+        let original = Mark(
+            tool: .arrow,
+            points: [UnitPoint(x: 0.2, y: 0.2), UnitPoint(x: 0.7, y: 0.6)],
+            colorHex: "E45F3C"
+        )
+        var moved: Mark?
+        var beganEditing = false
+        var finishedEditing = false
+        canvas.onBeginMarkEdit = { id in beganEditing = id == original.id }
+        canvas.onUpdateMark = { moved = $0 }
+        canvas.onFinishMarkEdit = { finishedEditing = true }
+        canvas.configure(
+            image: sample(),
+            marks: [original],
+            tool: .arrow,
+            color: "E45F3C",
+            zoom: 1,
+            resetID: UUID(),
+            movesWindow: false,
+            enabled: true
+        )
+
+        func event(_ type: NSEvent.EventType, viewPoint: CGPoint) -> NSEvent {
+            NSEvent.mouseEvent(
+                with: type,
+                location: CGPoint(x: viewPoint.x, y: canvas.bounds.height - viewPoint.y),
+                modifierFlags: [],
+                timestamp: ProcessInfo.processInfo.systemUptime,
+                windowNumber: 0,
+                context: nil,
+                eventNumber: 0,
+                clickCount: 1,
+                pressure: 1
+            )!
+        }
+
+        let midpoint = CGPoint(x: 145, y: 105)
+        let destination = CGPoint(x: 185, y: 130)
+        canvas.mouseDown(with: event(.leftMouseDown, viewPoint: midpoint))
+        canvas.mouseDragged(with: event(.leftMouseDragged, viewPoint: destination))
+        canvas.mouseUp(with: event(.leftMouseUp, viewPoint: destination))
+
+        let updated = try requireValue(moved, "Dragging an existing arrow must update its position")
+        try require(updated.id == original.id, "Moving an annotation must preserve its identity")
+        try require(abs(updated.points[0].x - original.points[0].x) > 0.05 &&
+                    abs(updated.points[0].y - original.points[0].y) > 0.05,
+                    "Dragging an existing arrow must move both endpoints")
+        try require(beganEditing && finishedEditing,
+                    "Moving an annotation must register one undoable edit")
+
+        let textMark = Mark(tool: .text, points: [UnitPoint(x: 0.2, y: 0.3)],
+                            colorHex: "111111", text: "测试文字", fontSize: 0.2)
+        moved = nil
+        beganEditing = false
+        finishedEditing = false
+        canvas.onBeginMarkEdit = { id in beganEditing = id == textMark.id }
+        canvas.onFinishMarkEdit = { finishedEditing = true }
+        canvas.configure(
+            image: sample(),
+            marks: [textMark],
+            tool: .text,
+            color: "111111",
+            zoom: 1,
+            resetID: UUID(),
+            movesWindow: false,
+            enabled: true
+        )
+        canvas.mouseDown(with: event(.leftMouseDown, viewPoint: CGPoint(x: 105, y: 103)))
+        canvas.mouseDragged(with: event(.leftMouseDragged, viewPoint: CGPoint(x: 145, y: 123)))
+        canvas.mouseUp(with: event(.leftMouseUp, viewPoint: CGPoint(x: 145, y: 123)))
+        let movedText = try requireValue(moved, "Dragging existing text must update its position")
+        try require(movedText.id == textMark.id && movedText.text == textMark.text,
+                    "Moving text must preserve its content")
+        try require(beganEditing && finishedEditing,
+                    "Moving text must register one undoable edit")
     }
 
     static func textPixels() async throws {
@@ -473,6 +568,152 @@ struct EditorFeatureChecks {
                         capturedBody.contains("Keep names unchanged"),
                         "AI request body must include model, source text and custom instructions")
         }
+    }
+
+    static func aiModelDiscovery() async throws {
+        let openAI = AITranslationConfiguration(
+            baseURL: "https://api.example.com/v1",
+            model: "model-b",
+            instructions: "",
+            api: .openAIChat
+        )
+        let responses = AITranslationConfiguration(
+            baseURL: "https://api.example.com/v1/responses",
+            model: "model-b",
+            instructions: "",
+            api: .openAIResponses
+        )
+        let anthropic = AITranslationConfiguration(
+            baseURL: "https://api.example.com/v1",
+            model: "claude-test",
+            instructions: "",
+            api: .anthropicMessages
+        )
+        let gemini = AITranslationConfiguration(
+            baseURL: "https://api.example.com/v1beta",
+            model: "gemini-test",
+            instructions: "",
+            api: .gemini
+        )
+
+        try require(AITranslationService.modelsEndpoint(for: openAI)?.path == "/v1/models",
+                    "OpenAI model discovery must use the models endpoint")
+        try require(AITranslationService.modelsEndpoint(for: responses)?.path == "/v1/models",
+                    "Responses model discovery must remove the operation suffix")
+        try require(AITranslationService.modelsEndpoint(for: anthropic)?.path == "/v1/models",
+                    "Claude model discovery must use the versioned models endpoint")
+        try require(AITranslationService.modelsEndpoint(for: gemini)?.path == "/v1beta/models",
+                    "Gemini model discovery must use the models collection endpoint")
+
+        let sessionConfiguration = URLSessionConfiguration.ephemeral
+        sessionConfiguration.protocolClasses = [MockAIURLProtocol.self]
+        let session = URLSession(configuration: sessionConfiguration)
+        var observedMethod = ""
+        var observedPath = ""
+        var observedAuthorization = ""
+        var observedAnthropicKey = ""
+        var observedAnthropicVersion = ""
+        var observedGeminiKey = ""
+        MockAIURLProtocol.handler = { request in
+            observedMethod = request.httpMethod ?? ""
+            observedPath = request.url?.path ?? ""
+            observedAuthorization = request.value(forHTTPHeaderField: "Authorization") ?? ""
+            observedAnthropicKey = request.value(forHTTPHeaderField: "x-api-key") ?? ""
+            observedAnthropicVersion = request.value(forHTTPHeaderField: "anthropic-version") ?? ""
+            observedGeminiKey = request.value(forHTTPHeaderField: "x-goog-api-key") ?? ""
+
+            if !observedAnthropicKey.isEmpty {
+                return (200, Data(#"{"data":[{"id":"claude-a","display_name":"Claude A"}]}"#.utf8))
+            }
+            if !observedGeminiKey.isEmpty || observedPath == "/v1beta/models" {
+                return (200, Data(#"{"models":[{"name":"models/gemini-2.5-pro","displayName":"Gemini 2.5 Pro"}]}"#.utf8))
+            }
+            return (200, Data(#"{"data":[{"id":"model-b"},{"id":"model-a"}]}"#.utf8))
+        }
+        defer { MockAIURLProtocol.handler = nil }
+
+        let service = AITranslationService(session: session)
+        let openAIModels = try await service.fetchModels(configuration: openAI,
+                                                          apiKey: "openai-key")
+        try require(openAIModels.map(\.id) == ["model-a", "model-b"],
+                    "OpenAI model lists must decode and sort model IDs")
+        try require(observedMethod == "GET" && observedPath == "/v1/models" &&
+                    observedAuthorization == "Bearer openai-key",
+                    "OpenAI model discovery must use GET and bearer authentication")
+
+        let anthropicModels = try await service.fetchModels(configuration: anthropic,
+                                                             apiKey: "anthropic-key")
+        try require(anthropicModels == [AIModelOption(id: "claude-a", title: "Claude A")],
+                    "Claude model lists must decode display names")
+        try require(observedAnthropicKey == "anthropic-key" &&
+                    observedAnthropicVersion == "2023-06-01",
+                    "Claude model discovery must send the native authentication headers")
+
+        let geminiModels = try await service.fetchModels(configuration: gemini,
+                                                          apiKey: "gemini-key")
+        try require(geminiModels == [AIModelOption(id: "gemini-2.5-pro",
+                                                   title: "Gemini 2.5 Pro")],
+                    "Gemini model lists must normalize the models/ prefix")
+        try require(observedGeminiKey == "gemini-key",
+                    "Gemini model discovery must send the Google API key header")
+    }
+
+    static func aiProtocolAutoFallback() async throws {
+        let sessionConfiguration = URLSessionConfiguration.ephemeral
+        sessionConfiguration.protocolClasses = [MockAIURLProtocol.self]
+        let session = URLSession(configuration: sessionConfiguration)
+        let service = AITranslationService(session: session)
+        let responses = AITranslationConfiguration(
+            baseURL: "https://api.example.com/v1",
+            model: "deepseek-chat",
+            instructions: "",
+            api: .openAIResponses
+        )
+
+        var paths: [String] = []
+        MockAIURLProtocol.handler = { request in
+            let path = request.url?.path ?? ""
+            paths.append(path)
+            if path == "/v1/responses" {
+                return (404, Data(#"{"error":{"message":"Unknown endpoint"}}"#.utf8))
+            }
+            return (200, Data(#"{"choices":[{"message":{"content":"自动切换成功"}}]}"#.utf8))
+        }
+        defer { MockAIURLProtocol.handler = nil }
+
+        let result = try await service.translateWithProtocolFallback(
+            text: "Hello",
+            source: "en",
+            target: "zh-Hans",
+            configuration: responses,
+            apiKey: "test-key"
+        )
+        try require(result.text == "自动切换成功" &&
+                    result.api == .openAIChat &&
+                    result.usedFallback,
+                    "An unsupported Responses endpoint must fall back to Chat Completions")
+        try require(paths == ["/v1/responses", "/v1/chat/completions"],
+                    "Protocol fallback must retry the alternate OpenAI endpoint exactly once")
+
+        paths = []
+        MockAIURLProtocol.handler = { request in
+            paths.append(request.url?.path ?? "")
+            return (401, Data(#"{"error":{"message":"Invalid API key"}}"#.utf8))
+        }
+        var failed = false
+        do {
+            _ = try await service.translateWithProtocolFallback(
+                text: "Hello",
+                source: "en",
+                target: "zh-Hans",
+                configuration: responses,
+                apiKey: "bad-key"
+            )
+        } catch {
+            failed = true
+        }
+        try require(failed && paths == ["/v1/responses"],
+                    "Authentication failures must not trigger an unnecessary protocol retry")
     }
 
     static func aiTranslationErrors() async throws {
@@ -1271,6 +1512,7 @@ struct EditorFeatureChecks {
         var checks: [(String, () async throws -> Void)] = [
             ("legacy_history_and_text_roundtrip", legacyMarks),
             ("annotation_sizes_use_points", annotationPointSizes),
+            ("annotation_marks_can_be_moved", annotationMarksCanBeMoved),
             ("text_annotation_export_pixels", textPixels),
             ("mosaic_changes_only_selected_pixels", mosaicPixels),
             ("advanced_annotation_styles", advancedAnnotationStyles),
@@ -1292,6 +1534,8 @@ struct EditorFeatureChecks {
             ("manual_hotkey_input_parser", manualHotkeyInput),
             ("selected_text_translation", selectedTextTranslation),
             ("ai_translation_request_contract", aiTranslationRequests),
+            ("ai_model_discovery", aiModelDiscovery),
+            ("ai_protocol_auto_fallback", aiProtocolAutoFallback),
             ("ai_translation_server_error", aiTranslationErrors),
             ("ai_protocol_compatibility", aiProtocolCompatibility),
             ("variable_names_and_random_test_data", textToolboxGeneration)

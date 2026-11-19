@@ -15,6 +15,8 @@ import tempfile
 
 
 IDENTIFIER = "dev.shiguang.screenshot"
+FINDER_IDENTIFIER = IDENTIFIER + ".finder"
+FINDER_ENTITLEMENTS = Path(__file__).resolve().parents[1] / "Sources/PawShotFinder/Finder.entitlements"
 SIGNING_HOME = Path(os.environ.get(
     "SHIGUANG_SIGNING_HOME",
     str(Path.home() / "Library/Application Support/PawShotSigning"),
@@ -40,8 +42,8 @@ def run(arguments, **kwargs):
     return result.stdout
 
 
-def requirement(fingerprint):
-    return f'identifier "{IDENTIFIER}" and certificate leaf = H"{fingerprint}"'
+def requirement(fingerprint, identifier=IDENTIFIER):
+    return f'identifier "{identifier}" and certificate leaf = H"{fingerprint}"'
 
 
 def read_identity():
@@ -63,16 +65,18 @@ def read_identity():
     return identity
 
 
-def sign_with_identity(app, fingerprint):
-    run([
+def sign_with_identity(app, fingerprint, identifier=IDENTIFIER, entitlements=None):
+    command = [
         "/usr/bin/codesign", "--force", "--sign", fingerprint,
         "--keychain", str(KEYCHAIN), "--timestamp=none",
-        "--identifier", IDENTIFIER,
-        "--requirements", "=designated => " + requirement(fingerprint),
-        str(app),
-    ])
+        "--identifier", identifier,
+        "--requirements", "=designated => " + requirement(fingerprint, identifier),
+    ]
+    if entitlements is not None:
+        command.extend(["--entitlements", str(entitlements)])
+    run(command + [str(app)])
     run(["/usr/bin/codesign", "--verify", "--strict",
-         "-R=" + requirement(fingerprint), str(app)])
+         "-R=" + requirement(fingerprint, identifier), str(app)])
     details = subprocess.run(
         ["/usr/bin/codesign", "-d", "--verbose=4", str(app)],
         capture_output=True, text=True, check=True,
@@ -94,6 +98,9 @@ def sign(app):
         raise SigningError("Expected an existing .app bundle.")
     run(["/usr/bin/security", "unlock-keychain", "-p", PASSWORD.read_text().strip(), str(KEYCHAIN)])
     try:
+        finder = app / "Contents/PlugIns/PawShotFinder.appex"
+        if finder.is_dir():
+            sign_with_identity(finder, identity["certificate_sha1"], FINDER_IDENTIFIER, FINDER_ENTITLEMENTS)
         sign_with_identity(app, identity["certificate_sha1"])
     finally:
         run(["/usr/bin/security", "lock-keychain", str(KEYCHAIN)])

@@ -1,5 +1,7 @@
 import AppKit
 import Carbon
+import Darwin
+import Security
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -19,6 +21,23 @@ struct ShiguangApp {
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuDelegate {
     let model = AppModel()
+    private let finderActions = FinderActionsCoordinator()
+    private var pendingFinderRequest: FinderActionRequest?
+    private lazy var finderExtensionRequirement: SecRequirement? = {
+        guard let extensionURL = Bundle.main.builtInPlugInsURL?.appendingPathComponent("PawShotFinder.appex") else {
+            return nil
+        }
+        var application: SecStaticCode?
+        var finderExtension: SecStaticCode?
+        var requirement: SecRequirement?
+        let nestedCode = SecCSFlags(rawValue: UInt32(kSecCSCheckNestedCode))
+        guard SecStaticCodeCreateWithPath(Bundle.main.bundleURL as CFURL, [], &application) == errSecSuccess,
+              let application, SecStaticCodeCheckValidity(application, nestedCode, nil) == errSecSuccess,
+              SecStaticCodeCreateWithPath(extensionURL as CFURL, [], &finderExtension) == errSecSuccess,
+              let finderExtension,
+              SecCodeCopyDesignatedRequirement(finderExtension, [], &requirement) == errSecSuccess else { return nil }
+        return requirement
+    }()
     private var window: NSWindow!
     private var editorWindow: NSWindow!
     private var statusItem: NSStatusItem!
@@ -59,11 +78,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     private var clipboardReturnApplication: NSRunningApplication?
     private weak var clipboardReturnWindow: NSWindow?
     private var quickToolWindow: NSPanel?
+    private var quickActionsWindow: NSPanel?
     private var quickToolTopEdge: CGFloat?
     private var quickToolPendingHeight: CGFloat?
     private var quickToolResizeScheduled = false
     private var quickToolReturnApplication: NSRunningApplication?
     private var toolboxWindow: NSPanel?
+    private var selectionTranslationPanel: SelectionTranslationPanel?
+    private var selectionTranslationReturnApplication: NSRunningApplication?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let ownPID = ProcessInfo.processInfo.processIdentifier
@@ -96,7 +118,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         window.isReleasedWhenClosed = false
         window.delegate = self
         window.contentViewController = settingsContentController(
-            rootView: SettingsView(model: model, clipboard: clipboard)
+            rootView: SettingsView(model: model, clipboard: clipboard, finderActions: finderActions)
         )
         window.center()
         window.setFrameAutosaveName("ShiguangSettingsV3")
@@ -118,6 +140,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         model.showClipboard = { [weak self] in self?.showClipboardWindow() }
         model.translateSelection = { [weak self] in self?.translateSelection() }
         model.statusItemPreferencesChanged = { [weak self] in self?.applyStatusItemPreferences() }
+        model.languageChanged = { [weak self] in self?.refreshLocalization() }
+        model.loadStoredAIAPIKey()
         model.publishImage = { [unowned self] image in try self.clipboard.copyImage(image) }
         model.publishText = { [unowned self] text in try self.clipboard.copyText(text) }
         model.didCopyCapture = { [weak self] in self?.restoreCaptureApplication() }
@@ -135,6 +159,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         }
         escapeMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self else { return event }
+            if event.keyCode == 53, self.finderActions.cancel(in: event.window) { return nil }
             if event.keyCode == 53, let target = event.window,
                self.pinnedWindows.contains(where: { $0 === target }) {
                 self.closePinnedWindow(target)
@@ -189,8 +214,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         model.hotkeysChanged = { [weak self] in self?.rebindHotkeys() }
         model.hotkeyCaptureChanged = { [weak self] active in self?.setHotkeyCaptureActive(active) }
         clipboard.start()
-        window.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
+        finderActions.publishSettings()
+        if let request = pendingFinderRequest {
+            pendingFinderRequest = nil
+            handleFinderRequest(request)
+        } else if !FinderActionRequest.isFinderLaunch(ProcessInfo.processInfo.arguments) {
+            window.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+        }
         if ProcessInfo.processInfo.arguments.contains("--demo") {
             model.useDemo()
         }
@@ -198,9 +229,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
 
+    func application(_ application: NSApplication, open urls: [URL]) {
+        guard let request = urls.lazy.compactMap(FinderActionRequest.init(url:)).first,
+              isFinderExtensionSender() else { return }
+        if window == nil { pendingFinderRequest = request }
+        else { handleFinderRequest(request) }
+    }
+
+    private func isFinderExtensionSender() -> Bool {
+        guard let event = NSAppleEventManager.shared().currentAppleEvent,
+              let token = event.attributeDescriptor(forKeyword: AEKeyword(keySenderAuditTokenAttr))?.data,
+              let finderExtensionRequirement else { return false }
+        var sender: SecCode?
+        let attributes = [kSecGuestAttributeAudit: token] as CFDictionary
+        guard SecCodeCopyGuestWithAttributes(nil, attributes, [], &sender) == errSecSuccess, let sender else {
+            return false
+        }
+        return SecCodeCheckValidity(sender, [], finderExtensionRequirement) == errSecSuccess
+    }
+
+    private func handleFinderRequest(_ request: FinderActionRequest) {
+        finderActions.handle(request) { try clipboard.copyText($0) }
+    }
+
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         if captureController?.isActive == true { return false }
-        let activeWindows: [NSWindow?] = [quickToolWindow, toolboxWindow, clipboardWindow, recordingWindow, scrollPanel, overlayWindow, editorWindow]
+        let activeWindows: [NSWindow?] = [finderActions.window, quickToolWindow, quickActionsWindow, toolboxWindow, clipboardWindow,
+                                          selectionTranslationPanel, recordingWindow, scrollPanel,
+                                          overlayWindow, editorWindow]
         if let active = activeWindows.compactMap({ $0 }).first(where: { $0.isVisible }) {
             active.makeKeyAndOrderFront(nil)
             return false
@@ -225,19 +281,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         let copying = recordingClipboardTask
+        let fileOperation = finderActions.pendingFileOperation
+        let recording = recorder
         copying?.cancel()
         regionAction?.cancel()
-        guard let recorder else {
-            guard let copying else { return .terminateNow }
-            Task { await copying.value; NSApp.reply(toApplicationShouldTerminate: true) }
-            return .terminateLater
+        guard recording != nil || copying != nil || fileOperation != nil else { return .terminateNow }
+        if recording != nil {
+            recordingSession?.cancel()
+            recordingStartup?.cancel()
+            closeRecordingWindows()
         }
-        recordingSession?.cancel()
-        recordingStartup?.cancel()
-        closeRecordingWindows()
         Task {
-            await recorder.cancel()
+            await recording?.cancel()
             await copying?.value
+            await fileOperation?.value
             NSApp.reply(toApplicationShouldTerminate: true)
         }
         return .terminateLater
@@ -246,6 +303,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     func applicationDidBecomeActive(_ notification: Notification) {
         model.refreshPermissionStatus()
         model.refreshLaunchAtLoginState()
+        finderActions.refreshExtensionStatus()
     }
 
     @objc func showWorkspace() {
@@ -275,7 +333,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             requestSelectionAccess(for: "划词翻译")
             return
         }
-        guard let text = SelectedTextReader.selectedText(
+        guard let selection = SelectedTextReader.selection(
             applicationPID: lastExternalApplication?.processIdentifier
         ) else {
             let alert = NSAlert()
@@ -286,7 +344,74 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             alert.runModal()
             return
         }
-        model.translateSelectedText(text)
+        presentSelectionTranslation(selection)
+    }
+
+    private func presentSelectionTranslation(_ selection: SelectedTextSelection) {
+        if captureController?.isActive == true { captureController?.cancelByUser() }
+        selectionTranslationPanel?.orderOut(nil)
+        selectionTranslationReturnApplication = lastExternalApplication
+
+        let panel = SelectionTranslationPanel(
+            contentRect: NSRect(
+                x: 0,
+                y: 0,
+                width: SelectionTranslationLayout.width,
+                height: SelectionTranslationLayout.height
+            ),
+            styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered,
+            defer: false
+        )
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
+        panel.hasShadow = true
+        panel.isReleasedWhenClosed = false
+        panel.level = .floating
+        panel.hidesOnDeactivate = false
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        panel.contentView = NSHostingView(rootView: SelectionTranslationView(
+            model: model,
+            text: selection.text,
+            onClose: { [weak self] in self?.closeSelectionTranslation() }
+        ).environment(\.locale, model.appLanguage.locale))
+        panel.onEscape = { [weak self] in self?.closeSelectionTranslation() }
+        positionSelectionTranslation(panel, relativeTo: selection.bounds)
+        panel.makeKeyAndOrderFront(nil)
+        panel.orderFrontRegardless()
+        NSApp.activate(ignoringOtherApps: true)
+        selectionTranslationPanel = panel
+    }
+
+    private func positionSelectionTranslation(_ panel: NSPanel, relativeTo accessibilityBounds: CGRect?) {
+        let mouse = NSEvent.mouseLocation
+        let anchor = accessibilityBounds.map { rect -> CGRect in
+            let primaryTop = NSScreen.screens.first?.frame.maxY ?? rect.maxY
+            return CGRect(x: rect.minX, y: primaryTop - rect.maxY, width: rect.width, height: rect.height)
+        }
+        let referencePoint = anchor.map { NSPoint(x: $0.midX, y: $0.midY) } ?? mouse
+        let screen = NSScreen.screens.first(where: { $0.frame.contains(referencePoint) }) ?? NSScreen.main
+        let visible = screen?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
+        let size = panel.frame.size
+        var x = (anchor?.minX ?? mouse.x) - 12
+        var y = (anchor?.minY ?? mouse.y) - size.height - 10
+        if let anchor, y < visible.minY + 8 {
+            y = anchor.maxY + 10
+        }
+        x = min(max(x, visible.minX + 8), visible.maxX - size.width - 8)
+        y = min(max(y, visible.minY + 8), visible.maxY - size.height - 8)
+        panel.setFrameOrigin(NSPoint(x: x, y: y))
+    }
+
+    private func closeSelectionTranslation() {
+        selectionTranslationPanel?.orderOut(nil)
+        selectionTranslationPanel?.contentView = nil
+        selectionTranslationPanel = nil
+        if let app = selectionTranslationReturnApplication,
+           app.processIdentifier != ProcessInfo.processInfo.processIdentifier {
+            app.activate(options: [])
+        }
+        selectionTranslationReturnApplication = nil
     }
 
     @objc private func showQuickToolWindow() {
@@ -354,7 +479,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
                     self?.resizeQuickToolWindow(to: height)
                 }
             }
-        ))
+        ).environment(\.locale, model.appLanguage.locale))
         positionQuickToolWindowAtTop(panel)
         panel.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
@@ -373,7 +498,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
                 backing: .buffered,
                 defer: false
             )
-            created.title = "PawShot · 工具箱"
+            created.title = "PawShot · \(L("工具箱"))"
             created.titleVisibility = .hidden
             created.titlebarAppearsTransparent = true
             created.isReleasedWhenClosed = false
@@ -381,7 +506,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             created.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
             created.backgroundColor = NSColor(hex: "F4F7FA")
             created.minSize = NSSize(width: 760, height: 520)
-            created.contentView = NSHostingView(rootView: ToolboxView())
+            created.contentView = NSHostingView(
+                rootView: ToolboxView().environment(\.locale, AppLanguage.stored.locale)
+            )
             created.center()
             toolboxWindow = created
             panel = created
@@ -505,23 +632,63 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         if clipboardWindow == nil {
             let panel = ScrollCapturePanel(contentRect: NSRect(x: 0, y: 0, width: 580, height: 650),
                 styleMask: [.titled, .closable, .resizable, .utilityWindow], backing: .buffered, defer: false)
-            panel.title = "PawShot · 剪贴板"
+            panel.title = "PawShot · \(L("剪贴板"))"
             panel.minSize = NSSize(width: 520, height: 460)
             panel.isReleasedWhenClosed = false
             panel.hidesOnDeactivate = true
             panel.level = .floating
             panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
             panel.backgroundColor = NSColor(hex: "F4F7FA")
-            panel.contentView = NSHostingView(rootView: ClipboardView(model: model, history: clipboard,
+            panel.contentView = NSHostingView(rootView: ClipboardPanelView(history: clipboard,
                 onCopy: { [weak self] entry in self?.copyClipboardEntry(entry) },
-                onCopyText: { [weak self] text in self?.copyGeneratedText(text) },
-                onClose: { [weak self] in self?.closeClipboardWindow() }))
+                onClose: { [weak self] in self?.closeClipboardWindow() })
+                .environment(\.locale, AppLanguage.stored.locale))
             panel.center()
             clipboardWindow = panel
         }
         clipboardWindow?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
         window?.orderOut(nil)
+    }
+
+    @objc private func showQuickActionsWindow() {
+        if quickActionsWindow?.isVisible == true {
+            quickActionsWindow?.orderOut(nil)
+            return
+        }
+        if captureController?.isActive == true { captureController?.cancelByUser() }
+        let panel: NSPanel
+        if let existing = quickActionsWindow {
+            panel = existing
+        } else {
+            let created = NSPanel(
+                contentRect: NSRect(x: 0, y: 0, width: 620, height: 680),
+                styleMask: [.titled, .closable, .miniaturizable, .resizable, .utilityWindow],
+                backing: .buffered,
+                defer: false
+            )
+            created.title = "PawShot · \(L("快捷操作"))"
+            created.titleVisibility = .hidden
+            created.titlebarAppearsTransparent = true
+            created.isReleasedWhenClosed = false
+            created.isMovableByWindowBackground = true
+            created.hidesOnDeactivate = true
+            created.level = .floating
+            created.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+            created.backgroundColor = NSColor(hex: "F4F7FA")
+            created.minSize = NSSize(width: 560, height: 520)
+            created.contentView = NSHostingView(rootView: QuickActionsView(
+                model: model,
+                onCopyText: { [weak self] text in self?.copyGeneratedText(text) },
+                onClose: { [weak self] in self?.quickActionsWindow?.orderOut(nil) }
+            ).environment(\.locale, model.appLanguage.locale))
+            created.center()
+            quickActionsWindow = created
+            panel = created
+        }
+        window?.orderOut(nil)
+        panel.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
     }
 
     private func copySelectedClipboardEntry() {
@@ -578,7 +745,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     @objc func showEditorWindow() { showEditorWindowInternal() }
 
     private func menuItem(_ title: String, action: Selector, key: String = "") -> NSMenuItem {
-        let item = NSMenuItem(title: title, action: action, keyEquivalent: key)
+        let item = NSMenuItem(title: L(title), action: action, keyEquivalent: key)
         item.target = self
         return item
     }
@@ -601,7 +768,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         appItem.submenu = appMenu
         main.addItem(appItem)
         let fileItem = NSMenuItem()
-        let file = NSMenu(title: "文件")
+        let file = NSMenu(title: L("文件"))
         file.addItem(menuItem("区域截图", action: #selector(capture), key: "n"))
         file.addItem(menuItem("截图并翻译", action: #selector(translateCapture)))
         file.addItem(menuItem("录制 MP4 视频…", action: #selector(recordVideo)))
@@ -623,6 +790,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         let variableName = menuItem("启动台", action: #selector(showQuickToolWindow))
         variableNameMenuItem = variableName
         file.addItem(variableName)
+        file.addItem(menuItem("快捷操作", action: #selector(showQuickActionsWindow)))
         file.addItem(menuItem("工具箱", action: #selector(showToolboxWindow)))
         let clipboardItem = menuItem("剪贴板历史", action: #selector(showClipboardWindow))
         clipboardMenuItem = clipboardItem
@@ -630,7 +798,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         fileItem.submenu = file
         main.addItem(fileItem)
         let editItem = NSMenuItem()
-        let edit = NSMenu(title: "编辑")
+        let edit = NSMenu(title: L("编辑"))
         for (title, action, key) in [
             ("撤销文字编辑", Selector(("undo:")), "z"),
             ("剪切", #selector(NSText.cut(_:)), "x"),
@@ -638,7 +806,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             ("粘贴", #selector(NSText.paste(_:)), "v"),
             ("全选", #selector(NSText.selectAll(_:)), "a")
         ] {
-            edit.addItem(NSMenuItem(title: title, action: action, keyEquivalent: key))
+            edit.addItem(NSMenuItem(title: L(title), action: action, keyEquivalent: key))
         }
         let undo = menuItem("撤销标注", action: #selector(undoMark), key: "z")
         undo.keyEquivalentModifierMask = [.command, .option]
@@ -649,13 +817,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         editItem.submenu = edit
         main.addItem(editItem)
         let windowItem = NSMenuItem()
-        let windowMenu = NSMenu(title: "窗口")
+        let windowMenu = NSMenu(title: L("窗口"))
         windowMenu.addItem(menuItem("设置", action: #selector(showWorkspace), key: "1"))
         windowMenu.addItem(menuItem("快速编辑", action: #selector(showEditorWindow)))
         windowMenu.addItem(menuItem("悬浮编辑", action: #selector(showFloatingEditor)))
+        windowMenu.addItem(menuItem("快捷操作", action: #selector(showQuickActionsWindow)))
         windowMenu.addItem(menuItem("剪贴板历史", action: #selector(showClipboardWindow)))
-        windowMenu.addItem(NSMenuItem(title: "最小化", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m"))
-        windowMenu.addItem(NSMenuItem(title: "关闭窗口", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w"))
+        windowMenu.addItem(NSMenuItem(title: L("最小化"), action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m"))
+        windowMenu.addItem(NSMenuItem(title: L("关闭窗口"), action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w"))
         windowItem.submenu = windowMenu
         main.addItem(windowItem)
         NSApp.mainMenu = main
@@ -664,7 +833,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
 
     @objc private func about() {
         let credits = NSMutableAttributedString(
-            string: "截取片刻，读懂世界。\n原生 macOS 截图、文字识别与翻译。\n\n",
+            string: "\(L("截取片刻，读懂世界。"))\n\(L("原生 macOS 截图、文字识别与翻译。"))\n\n",
             attributes: [.font: NSFont.systemFont(ofSize: NSFont.smallSystemFontSize)]
         )
         if let url = URL(string: "https://github.com/youcanyoudonocannobb/shiguang-screenshot") {
@@ -686,40 +855,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
 
     private func setupStatusItem() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+        statusMenu = makeStatusMenu()
+        statusItem.menu = nil
+        statusItem.button?.target = self
+        statusItem.button?.action = #selector(toggleStatusMenu)
+        statusItem.button?.sendAction(on: [.leftMouseUp, .rightMouseUp])
+        applyStatusItemPreferences()
+    }
+
+    private func makeStatusMenu() -> NSMenu {
         let menu = NSMenu()
-        menu.addItem(menuItem("区域截图                  \(model.captureHotkey.symbol)",
+        menu.addItem(menuItem("\(L("区域截图"))                  \(model.captureHotkey.symbol)",
                               action: #selector(capture), symbol: "viewfinder"))
-        menu.addItem(menuItem("截图并翻译              \(model.translateHotkey.symbol)",
+        menu.addItem(menuItem("\(L("截图并翻译"))              \(model.translateHotkey.symbol)",
                               action: #selector(translateCapture), symbol: "character.bubble"))
-        menu.addItem(menuItem("剪贴板历史              \(model.clipboardHotkey.symbol)",
+        menu.addItem(menuItem("\(L("剪贴板历史"))              \(model.clipboardHotkey.symbol)",
                               action: #selector(showClipboardWindow), symbol: "doc.on.clipboard"))
-        menu.addItem(menuItem("翻译剪贴板              \(model.clipboardTranslateHotkey.symbol)",
+        menu.addItem(menuItem("\(L("翻译剪贴板"))              \(model.clipboardTranslateHotkey.symbol)",
                               action: #selector(translateClipboard), symbol: "character.book.closed"))
-        menu.addItem(menuItem("划词翻译                  \(model.selectionTranslateHotkey.symbol)",
+        menu.addItem(menuItem("\(L("划词翻译"))                  \(model.selectionTranslateHotkey.symbol)",
                               action: #selector(translateSelection), symbol: "text.cursor"))
-        menu.addItem(menuItem("启动台                  \(model.variableNamingHotkey.symbol)",
+        menu.addItem(menuItem("\(L("启动台"))                  \(model.variableNamingHotkey.symbol)",
                               action: #selector(showQuickToolWindow), symbol: "textformat.abc"))
+        menu.addItem(menuItem("快捷操作", action: #selector(showQuickActionsWindow), symbol: "bolt"))
         menu.addItem(.separator())
         menu.addItem(menuItem("录制 MP4 视频…", action: #selector(recordVideo), symbol: "record.circle"))
         menu.addItem(menuItem("录制 GIF 动图…", action: #selector(recordGIF), symbol: "photo.on.rectangle.angled"))
-        menu.addItem(recordingDraftMenuItem())
         menu.addItem(menuItem("自动长截图…", action: #selector(scrollAutomatic), symbol: "rectangle.expand.vertical"))
         menu.addItem(menuItem("手动长截图…", action: #selector(scrollManual), symbol: "hand.point.up"))
         menu.addItem(.separator())
-        menu.addItem(menuItem("快速编辑", action: #selector(showEditorWindow), symbol: "macwindow"))
-        menu.addItem(menuItem("导入图片…", action: #selector(importImage), symbol: "photo.badge.plus"))
         menu.addItem(menuItem("文字翻译", action: #selector(newText), symbol: "text.bubble"))
         menu.addItem(menuItem("工具箱", action: #selector(showToolboxWindow), symbol: "wrench.and.screwdriver"))
         menu.addItem(.separator())
         menu.addItem(menuItem("偏好设置…", action: #selector(preferences), symbol: "gearshape"))
         menu.addItem(.separator())
         menu.addItem(menuItem("退出 PawShot", action: #selector(quit), symbol: "power"))
-        statusMenu = menu
-        statusItem.menu = nil
-        statusItem.button?.target = self
-        statusItem.button?.action = #selector(toggleStatusMenu)
-        statusItem.button?.sendAction(on: [.leftMouseUp, .rightMouseUp])
-        applyStatusItemPreferences()
+        return menu
     }
 
     @objc private func toggleStatusMenu() {
@@ -737,8 +908,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             styleID: model.menuBarDogStyle.rawValue,
             customImageData: model.customMenuBarIconData
         )
-        statusItem.button?.toolTip = "PawShot · 截图、识别与剪贴板"
-        statusItem.button?.setAccessibilityLabel("PawShot 菜单")
+        statusItem.button?.toolTip = "PawShot · \(L("截图、识别与剪贴板"))"
+        statusItem.button?.setAccessibilityLabel("PawShot \(L("菜单"))")
+    }
+
+    private func refreshLocalization() {
+        finderActions.publishSettings()
+        makeMenu()
+        if statusItem != nil {
+            statusMenu = makeStatusMenu()
+            applyStatusItemPreferences()
+        }
+        window?.title = L("偏好设置")
+        toolboxWindow?.orderOut(nil)
+        toolboxWindow = nil
+        quickToolWindow?.orderOut(nil)
+        quickToolWindow = nil
+        quickActionsWindow?.orderOut(nil)
+        quickActionsWindow = nil
+        clipboardWindow?.orderOut(nil)
+        clipboardWindow = nil
     }
 
     private func setupHotkeys() {
@@ -772,18 +961,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     }
 
     private func recordingDraftMenuItem() -> NSMenuItem {
-        let item = NSMenuItem(title: "复制之前的录制", action: nil, keyEquivalent: "")
-        let menu = NSMenu(title: "复制之前的录制")
+        let item = NSMenuItem(title: L("复制之前的录制"), action: nil, keyEquivalent: "")
+        let menu = NSMenu(title: L("复制之前的录制"))
         menu.delegate = self
         item.submenu = menu
         return item
     }
 
     func menuNeedsUpdate(_ menu: NSMenu) {
-        guard menu.title == "复制之前的录制" else { return }
+        guard menu.title == L("复制之前的录制") else { return }
         menu.removeAllItems()
         if pendingRecordings.isEmpty {
-            let empty = NSMenuItem(title: "没有待保存的录制", action: nil, keyEquivalent: "")
+            let empty = NSMenuItem(title: L("没有待保存的录制"), action: nil, keyEquivalent: "")
             empty.isEnabled = false
             menu.addItem(empty)
         }
@@ -868,18 +1057,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             let panel = CaptureEditorWindow(contentRect: NSRect(x: 0, y: 0, width: 980, height: 760),
                                  styleMask: [.titled, .closable, .miniaturizable, .resizable],
                                  backing: .buffered, defer: false)
-            panel.title = "PawShot · 快速编辑"
+            panel.title = "PawShot · \(L("快速编辑"))"
             panel.backgroundColor = NSColor(hex: "F4F7FA")
             panel.isReleasedWhenClosed = false
             panel.delegate = self
-            panel.contentView = NSHostingView(rootView: CaptureEditorView(model: model))
+            panel.contentView = NSHostingView(
+                rootView: CaptureEditorView(model: model)
+                    .environment(\.locale, model.appLanguage.locale)
+            )
             panel.center()
             editorWindow = panel
         }
         let text = model.isTextWorkspace
         if text { window?.orderOut(nil) }
-        editorWindow.title = model.editorMode == .recognition ? "PawShot · 文字识别" :
-            (text ? "PawShot · 翻译" : "PawShot · 快速编辑")
+        editorWindow.title = model.editorMode == .recognition ? "PawShot · \(L("文字识别"))" :
+            (text ? "PawShot · \(L("翻译"))" : "PawShot · \(L("快速编辑"))")
         editorWindow.minSize = text ? NSSize(width: model.editorMode == .recognition ? 760 : 700,
                                              height: model.editorMode == .recognition ? 500 : 440) :
             NSSize(width: AnnotationToolbar.minimumWidth, height: 400)
@@ -1002,7 +1194,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         let baseHeight = displayHeight + 72
         let panel = CaptureEditorWindow(contentRect: NSRect(origin: .zero, size: NSSize(width: displayWidth, height: baseHeight)),
                              styleMask: [.borderless, .resizable], backing: .buffered, defer: false)
-        panel.title = "PawShot · 悬浮编辑"
+        panel.title = "PawShot · \(L("悬浮编辑"))"
         panel.minSize = NSSize(width: min(AnnotationToolbar.minimumWidth, available.width - 24), height: 260)
         panel.backgroundColor = .clear
         panel.isOpaque = false
@@ -1010,7 +1202,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         panel.hasShadow = false
         panel.isMovableByWindowBackground = true
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-        panel.contentView = NSHostingView(rootView: CaptureEditorView(model: model, floating: true))
+        panel.contentView = NSHostingView(
+            rootView: CaptureEditorView(model: model, floating: true)
+                .environment(\.locale, model.appLanguage.locale)
+        )
         panel.setFrameOrigin(CGPoint(x: available.midX - displayWidth / 2, y: available.midY - baseHeight / 2))
         panel.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
@@ -1116,7 +1311,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         capture.onComplete = { [weak self] image in
             guard let self else { return }
             self.closeScrollCapture()
-            self.model.acceptImage(image, title: "长截图 \(Date().formatted(.dateTime.hour().minute()))", inlineRect: global)
+            self.model.acceptImage(image, title: "长截图 \(Date().formatted(.dateTime.hour().minute()))",
+                                   inlineRect: global, presentEditor: false)
+            self.model.confirmDraft()
         }
         capture.onCancel = { [weak self] in
             self?.closeScrollCapture()
@@ -1141,14 +1338,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         let panelSize = CGSize(width: 260, height: min(560, visible.height - 24))
         let panel = ScrollCapturePanel(contentRect: CGRect(origin: .zero, size: panelSize),
                                        styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
-        panel.title = "PawShot · \(mode.title)"
+        panel.title = "PawShot · \(L(mode.title))"
         panel.backgroundColor = .clear
         panel.isOpaque = false
         panel.hidesOnDeactivate = false
         panel.isMovableByWindowBackground = true
         panel.level = .floating
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-        panel.contentView = NSHostingView(rootView: ScrollCaptureStatusView(capture: capture))
+        panel.contentView = NSHostingView(
+            rootView: ScrollCaptureStatusView(capture: capture)
+                .environment(\.locale, AppLanguage.stored.locale)
+        )
         let sideX = global.maxX + 8 + panelSize.width <= visible.maxX ? global.maxX + 8 :
             (global.minX - panelSize.width - 8 >= visible.minX ? global.minX - panelSize.width - 8 :
                 visible.maxX - panelSize.width - 8)
@@ -1203,9 +1403,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             switch result {
             case .success(let url):
                 session.didFinish(url)
-                self.model.notice = "录制草稿 · 点击 ✅ 复制到剪贴板，❌ 放弃"
-                if session.confirmRequested { self.commitRecording(session) }
-                else { self.showRecordingReview(session) }
+                _ = session.requestConfirmation()
+                self.commitRecording(session)
             case .failure(let error):
                 self.cancelRecording()
                 if ScreenCaptureService.isPermissionError(error) { self.model.captureFailed(error) }
@@ -1223,7 +1422,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         recordingBorder = border
         let bar = ScrollCapturePanel(contentRect: CGRect(x: 0, y: 0, width: 400, height: 42),
                                       styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
-        bar.title = "PawShot · 录制"
+        bar.title = "PawShot · \(L("录制"))"
         bar.backgroundColor = .clear
         bar.isOpaque = false
         bar.level = .floating
@@ -1246,7 +1445,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
                 }
             },
             onConfirm: { [weak self] in self?.confirmRecording() },
-            onCancel: { [weak self] in self?.cancelRecording() }))
+            onCancel: { [weak self] in self?.cancelRecording() })
+            .environment(\.locale, AppLanguage.stored.locale))
         let visible = screen.visibleFrame
         let y = global.minY - 44 >= visible.minY ? global.minY - 44 : min(visible.maxY - 44, global.maxY + 2)
         bar.setFrameOrigin(CGPoint(x: max(visible.minX + 8, min(global.midX - 200, visible.maxX - 408)), y: y))
@@ -1292,6 +1492,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
 
     private func commitRecording(_ session: RecordingSession) {
         guard recordingSession === session, let url = session.movieURL, session.beginCopy() else { return }
+        // Committing is the end of the recording UI. Keep the copy task alive,
+        // but remove the control bar immediately instead of flashing a status row.
+        recordingWindow?.orderOut(nil)
+        recordingBorder?.orderOut(nil)
         publishRecording(url, format: session.format, session: session)
     }
 
@@ -1361,7 +1565,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
                 else {
                     try await Task.detached(priority: .userInitiated) {
                         try Task.checkCancellation()
-                        try FileManager.default.copyItem(at: source, to: output)
+                        let cloned = source.path.withCString { sourcePath in
+                            output.path.withCString { outputPath in
+                                clonefile(sourcePath, outputPath, 0)
+                            }
+                        }
+                        if cloned != 0 {
+                            try FileManager.default.copyItem(at: source, to: output)
+                        }
                     }.value
                 }
                 try Task.checkCancellation()

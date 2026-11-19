@@ -1,5 +1,5 @@
 import Foundation
-import Security
+import CryptoKit
 
 enum TranslationProvider: String, Codable, CaseIterable, Identifiable {
     case apple
@@ -9,8 +9,8 @@ enum TranslationProvider: String, Codable, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .apple: return "Apple 翻译"
-        case .ai: return "AI 翻译"
+        case .apple: return L("Apple 翻译")
+        case .ai: return L("AI 翻译")
         }
     }
 
@@ -93,11 +93,23 @@ struct AITranslationConfiguration: Equatable {
     }
 }
 
+struct AIModelOption: Identifiable, Hashable {
+    let id: String
+    let title: String
+}
+
+struct AITranslationResult {
+    let text: String
+    let api: AITranslationAPI
+    let usedFallback: Bool
+}
+
 enum AITranslationError: LocalizedError {
     case aiMissingAPIKey
     case aiInvalidEndpoint
     case aiInvalidResponse
     case aiEmptyResponse
+    case aiEmptyModelList
     case aiServer(Int, String)
 
     var errorDescription: String? {
@@ -110,80 +122,96 @@ enum AITranslationError: LocalizedError {
             return "AI 服务返回了无法识别的数据。请确认接口地址、协议与模型匹配。"
         case .aiEmptyResponse:
             return "AI 服务没有返回译文。请检查模型名称或稍后重试。"
+        case .aiEmptyModelList:
+            return "AI 服务没有返回可用模型。请确认接口地址、协议和 API Key。"
         case .aiServer(let status, let message):
             return message.isEmpty ? "AI 服务请求失败（HTTP \(status)）。" : "AI 服务请求失败（HTTP \(status)）：\(message)"
         }
     }
 }
 
+/// API keys live in a permission-restricted file under Application Support instead of
+/// the Keychain. Every rebuild produces a new code signature, and Keychain ACLs are
+/// bound to the binary that created them, so macOS kept asking for authorization after
+/// each update. A local file carries no such binding.
 enum AITranslationKeychain {
-    private static let service = "dev.shiguang.screenshot.ai-translation"
-
     static func load(for api: AITranslationAPI) -> String {
-        let value = load(account: api.rawValue)
-        if !value.isEmpty || api != .openAIChat { return value }
-        // Migrate the single key stored by versions before protocol support.
-        return load(account: "api-key")
+        loadFromFile(account: api.rawValue) ?? ""
     }
 
     static func save(_ value: String, for api: AITranslationAPI) throws {
-        try save(value, account: api.rawValue)
-    }
-
-    private static func load(account: String) -> String {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
-            kSecReturnData as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne
-        ]
-        var result: CFTypeRef?
-        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
-              let data = result as? Data,
-              let value = String(data: data, encoding: .utf8) else { return "" }
-        return value
-    }
-
-    private static func save(_ value: String, account: String) throws {
         let key = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        if key.isEmpty {
-            let query: [String: Any] = [
-                kSecClass as String: kSecClassGenericPassword,
-                kSecAttrService as String: service,
-                kSecAttrAccount as String: account
-            ]
-            let status = SecItemDelete(query as CFDictionary)
-            guard status == errSecSuccess || status == errSecItemNotFound else {
-                throw keychainError(status)
-            }
-            return
-        }
-
-        let data = Data(key.utf8)
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account
-        ]
-        let update: [String: Any] = [
-            kSecValueData as String: data,
-            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlock
-        ]
-        let updated = SecItemUpdate(query as CFDictionary, update as CFDictionary)
-        if updated == errSecSuccess { return }
-        guard updated == errSecItemNotFound else { throw keychainError(updated) }
-        var item = query
-        item[kSecValueData as String] = data
-        item[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
-        let added = SecItemAdd(item as CFDictionary, nil)
-        guard added == errSecSuccess else { throw keychainError(added) }
+        try writeToFile(key, account: api.rawValue)
     }
 
-    private static func keychainError(_ status: OSStatus) -> Error {
-        let message = SecCopyErrorMessageString(status, nil) as String? ?? "OSStatus \(status)"
-        return NSError(domain: NSOSStatusErrorDomain, code: Int(status),
-                       userInfo: [NSLocalizedDescriptionKey: "无法保存 API Key：\(message)"])
+    /// True when no local key file has been written yet, so settings can explain the
+    /// one-time re-entry needed by users coming from the Keychain-based build.
+    static var hasStoredKeyFile: Bool {
+        guard let url = storeURL else { return false }
+        return FileManager.default.fileExists(atPath: url.path)
+    }
+
+    // MARK: - Local store
+
+    private static var storeURL: URL? {
+        guard let support = FileManager.default.urls(for: .applicationSupportDirectory,
+                                                     in: .userDomainMask).first else { return nil }
+        let directory = support.appendingPathComponent("Shiguang", isDirectory: true)
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true,
+                                                 attributes: [.posixPermissions: 0o700])
+        return directory.appendingPathComponent("ai-keys.json")
+    }
+
+    private static func loadStore() -> [String: String] {
+        guard let url = storeURL, let data = try? Data(contentsOf: url),
+              let dictionary = try? JSONDecoder().decode([String: String].self, from: data) else {
+            return [:]
+        }
+        return dictionary
+    }
+
+    private static func loadFromFile(account: String) -> String? {
+        guard let sealed = loadStore()[account],
+              let payload = Data(base64Encoded: sealed) else { return nil }
+        return decrypt(payload)
+    }
+
+    private static func writeToFile(_ value: String, account: String) throws {
+        guard let url = storeURL else { throw error("找不到应用数据目录。") }
+        var store = loadStore()
+        if value.isEmpty {
+            store.removeValue(forKey: account)
+        } else {
+            guard let payload = encrypt(value) else { throw error("无法加密 API Key。") }
+            store[account] = payload.base64EncodedString()
+        }
+        let data = try JSONEncoder().encode(store)
+        try data.write(to: url, options: .atomic)
+        try? FileManager.default.setAttributes([.posixPermissions: 0o600],
+                                               ofItemAtPath: url.path)
+    }
+
+    // This keeps keys out of plain-text backups and casual inspection. It is
+    // obfuscation, not protection against a local attacker.
+    private static var encryptionKey: SymmetricKey {
+        let seed = "dev.shiguang.screenshot.ai-key.v1"
+        return SymmetricKey(data: SHA256.hash(data: Data(seed.utf8)))
+    }
+
+    private static func encrypt(_ value: String) -> Data? {
+        guard let sealed = try? AES.GCM.seal(Data(value.utf8), using: encryptionKey) else { return nil }
+        return sealed.combined
+    }
+
+    private static func decrypt(_ data: Data) -> String? {
+        guard let box = try? AES.GCM.SealedBox(combined: data),
+              let plain = try? AES.GCM.open(box, using: encryptionKey) else { return nil }
+        return String(data: plain, encoding: .utf8)
+    }
+
+    private static func error(_ message: String) -> Error {
+        NSError(domain: "PawShotAIKey", code: -1,
+                userInfo: [NSLocalizedDescriptionKey: "无法保存 API Key：\(message)"])
     }
 }
 
@@ -278,6 +306,81 @@ struct AITranslationService {
         return content
     }
 
+    func translateWithProtocolFallback(text: String, source: String, target: String,
+                                       configuration: AITranslationConfiguration,
+                                       apiKey: String) async throws -> AITranslationResult {
+        do {
+            let translated = try await translate(
+                text: text,
+                source: source,
+                target: target,
+                configuration: configuration,
+                apiKey: apiKey
+            )
+            return AITranslationResult(text: translated,
+                                       api: configuration.api,
+                                       usedFallback: false)
+        } catch {
+            guard let fallback = Self.fallbackAPI(for: configuration.api, after: error) else {
+                throw error
+            }
+            var fallbackConfiguration = configuration
+            fallbackConfiguration.api = fallback
+            let translated = try await translate(
+                text: text,
+                source: source,
+                target: target,
+                configuration: fallbackConfiguration,
+                apiKey: apiKey
+            )
+            return AITranslationResult(text: translated,
+                                       api: fallback,
+                                       usedFallback: true)
+        }
+    }
+
+    func fetchModels(configuration: AITranslationConfiguration,
+                     apiKey: String) async throws -> [AIModelOption] {
+        let key = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !key.isEmpty || configuration.allowsEmptyAPIKey else {
+            throw AITranslationError.aiMissingAPIKey
+        }
+        guard let endpoint = Self.modelsEndpoint(for: configuration) else {
+            throw AITranslationError.aiInvalidEndpoint
+        }
+
+        var request = URLRequest(url: endpoint)
+        request.httpMethod = "GET"
+        request.timeoutInterval = 30
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        switch configuration.api {
+        case .openAIChat, .openAIResponses:
+            if !key.isEmpty {
+                request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
+            }
+        case .anthropicMessages:
+            if !key.isEmpty {
+                request.setValue(key, forHTTPHeaderField: "x-api-key")
+            }
+            request.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
+        case .gemini:
+            if !key.isEmpty {
+                request.setValue(key, forHTTPHeaderField: "x-goog-api-key")
+            }
+        }
+
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw AITranslationError.aiInvalidResponse
+        }
+        guard (200..<300).contains(http.statusCode) else {
+            throw AITranslationError.aiServer(http.statusCode, Self.errorMessage(from: data))
+        }
+        let models = Self.models(from: data, api: configuration.api)
+        guard !models.isEmpty else { throw AITranslationError.aiEmptyModelList }
+        return models
+    }
+
     static func endpoint(for baseURL: String) -> URL? {
         endpoint(for: AITranslationConfiguration(baseURL: baseURL), allowInsecureLoopback: true)
     }
@@ -288,14 +391,10 @@ struct AITranslationService {
 
     private static func endpoint(for configuration: AITranslationConfiguration,
                                  allowInsecureLoopback: Bool) -> URL? {
-        let baseURL = configuration.baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard var components = URLComponents(string: baseURL),
-              let scheme = components.scheme?.lowercased(),
-              let host = components.host?.lowercased() else { return nil }
-        let loopback = ["localhost", "127.0.0.1", "::1", "0.0.0.0"].contains(host)
-        guard scheme == "https" || (allowInsecureLoopback && scheme == "http" && loopback) else {
-            return nil
-        }
+        guard var components = validatedComponents(
+            configuration.baseURL,
+            allowInsecureLoopback: allowInsecureLoopback
+        ) else { return nil }
         let path = components.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         let model = configuration.model.trimmingCharacters(in: .whitespacesAndNewlines)
         let suffix: String
@@ -321,10 +420,72 @@ struct AITranslationService {
         return components.url
     }
 
+    static func modelsEndpoint(for configuration: AITranslationConfiguration) -> URL? {
+        guard var components = validatedComponents(
+            configuration.baseURL,
+            allowInsecureLoopback: true
+        ) else { return nil }
+        var path = components.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+
+        for suffix in ["chat/completions", "responses", "messages"] {
+            if path == suffix {
+                path = ""
+                break
+            }
+            if path.hasSuffix("/\(suffix)") {
+                path.removeLast(suffix.count + 1)
+                break
+            }
+        }
+
+        if let operation = path.range(of: ":generateContent") {
+            let modelPath = path[..<operation.lowerBound]
+            if let models = modelPath.range(of: "models/", options: .backwards) {
+                let prefix = modelPath[..<models.lowerBound]
+                path = String(prefix) + "models"
+            }
+        }
+
+        if path != "models", !path.hasSuffix("/models") {
+            path = path.isEmpty ? "models" : "\(path)/models"
+        }
+        components.path = "/" + path
+        return components.url
+    }
+
+    private static func validatedComponents(_ baseURL: String,
+                                            allowInsecureLoopback: Bool) -> URLComponents? {
+        let trimmed = baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let components = URLComponents(string: trimmed),
+              let scheme = components.scheme?.lowercased(),
+              let host = components.host?.lowercased() else { return nil }
+        let loopback = ["localhost", "127.0.0.1", "::1", "0.0.0.0"].contains(host)
+        guard scheme == "https" || (allowInsecureLoopback && scheme == "http" && loopback) else {
+            return nil
+        }
+        return components
+    }
+
     static func isLoopbackBaseURL(_ value: String) -> Bool {
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let host = URLComponents(string: trimmed)?.host?.lowercased() else { return false }
         return ["localhost", "127.0.0.1", "::1", "0.0.0.0"].contains(host)
+    }
+
+    static func fallbackAPI(for current: AITranslationAPI, after error: Error) -> AITranslationAPI? {
+        guard let serviceError = error as? AITranslationError,
+              case .aiServer(let status, let message) = serviceError else { return nil }
+        let detail = message.lowercased()
+        let endpointMissing = [404, 405, 501].contains(status)
+            || (status == 400 && ["endpoint", "not found", "unsupported", "unknown"].contains {
+                detail.contains($0)
+            })
+        guard endpointMissing else { return nil }
+        switch current {
+        case .openAIChat: return .openAIResponses
+        case .openAIResponses: return .openAIChat
+        case .anthropicMessages, .gemini: return nil
+        }
     }
 
     static func languageName(_ identifier: String) -> String {
@@ -367,6 +528,45 @@ struct AITranslationService {
         if let text = part["text"] as? String { return text }
         if let text = part["text"] as? [String: Any] { return text["value"] as? String }
         return nil
+    }
+
+    static func models(from data: Data, api: AITranslationAPI) -> [AIModelOption] {
+        let rootObject = try? JSONSerialization.jsonObject(with: data)
+        let records: [[String: Any]]
+        if let root = rootObject as? [String: Any] {
+            switch api {
+            case .gemini:
+                records = root["models"] as? [[String: Any]]
+                    ?? root["data"] as? [[String: Any]]
+                    ?? []
+            case .openAIChat, .openAIResponses, .anthropicMessages:
+                records = root["data"] as? [[String: Any]]
+                    ?? root["models"] as? [[String: Any]]
+                    ?? []
+            }
+        } else {
+            records = rootObject as? [[String: Any]] ?? []
+        }
+
+        var seen = Set<String>()
+        var options: [AIModelOption] = []
+        for record in records {
+            guard let rawID = record["id"] as? String
+                    ?? record["name"] as? String
+                    ?? record["model"] as? String else { continue }
+            let id = rawID.replacingOccurrences(of: "^models/", with: "",
+                                                options: .regularExpression)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !id.isEmpty, seen.insert(id).inserted else { continue }
+            let display = record["display_name"] as? String
+                ?? record["displayName"] as? String
+            let title = display?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let resolvedTitle = title.flatMap { $0.isEmpty ? nil : $0 } ?? id
+            options.append(AIModelOption(id: id, title: resolvedTitle))
+        }
+        return options.sorted {
+            $0.title.localizedStandardCompare($1.title) == .orderedAscending
+        }
     }
 
     private static func errorMessage(from data: Data) -> String {

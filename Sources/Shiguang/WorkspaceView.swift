@@ -110,7 +110,7 @@ struct HotkeyRow: View {
     var body: some View {
         HStack(spacing: 14) {
             VStack(alignment: .leading, spacing: 3) {
-                Text(title)
+                Text(LocalizedStringKey(title))
                     .font(.system(size: 12.5, weight: .medium))
                     .foregroundStyle(Palette.ink)
                 if isRecording {
@@ -119,12 +119,13 @@ struct HotkeyRow: View {
                         .foregroundStyle(Palette.accent)
                         .lineLimit(1)
                 } else if let message {
-                    Text(message)
+                    Text(LocalizedStringKey(message))
                         .font(.system(size: 11))
-                        .foregroundStyle(message.hasPrefix("已") ? Palette.success : Palette.accent)
+                        .foregroundStyle(message.hasPrefix(L("已应用")) ? Palette.success : Palette.accent)
                         .lineLimit(1)
                 } else {
-                    Text("支持 \(settings.symbol) 或 option+shift+\(settings.key.lowercased())")
+                    (Text("支持") + Text(verbatim: " \(settings.symbol) ") + Text("或")
+                        + Text(verbatim: " option+shift+\(settings.key.lowercased())"))
                         .font(.system(size: 11))
                         .foregroundStyle(Palette.muted)
                         .lineLimit(1)
@@ -169,7 +170,7 @@ struct HotkeyRow: View {
             else { finishRecording() }
         }
         .onChange(of: draft) { _, _ in
-            if message?.hasPrefix("已") != true { message = nil }
+            if message?.hasPrefix(L("已应用")) != true { message = nil }
         }
         .onDisappear {
             captureCoordinator.stop()
@@ -183,12 +184,12 @@ struct HotkeyRow: View {
     private func apply() {
         finishRecording()
         guard let parsed = HotkeySettings.parseInput(draft) else {
-            message = "格式无效，请包含至少一个修饰键"
+            message = L("格式无效，请包含至少一个修饰键")
             return
         }
         settings = parsed
         draft = parsed.symbol
-        message = "已应用 \(parsed.symbol)"
+        message = "\(L("已应用")) \(parsed.symbol)"
         focused = false
     }
 
@@ -200,11 +201,11 @@ struct HotkeyRow: View {
         captureCoordinator.start(window: NSApp.keyWindow, onCapture: { captured in
             settings = captured
             draft = captured.symbol
-            message = "已应用 \(captured.symbol)"
+            message = "\(L("已应用")) \(captured.symbol)"
             finishRecording()
             focused = false
         }, onInvalid: { text in
-            message = text
+            message = L(text)
         }, onCancel: {
             finishRecording()
             focused = false
@@ -242,7 +243,11 @@ struct CaptureEditorView: View {
                                     maskSizePoints: model.maskSizePoints,
                                     spotlightStrength: model.spotlightStrength,
                                     onColorPick: { model.markColor = $0; model.tool = .pointer },
-                                    onMark: model.addMark, onEscape: model.closeEditor)
+                                    onMark: model.addMark,
+                                    onBeginMarkEdit: model.beginEditingMark,
+                                    onUpdateMark: model.updateMark,
+                                    onFinishMarkEdit: model.finishEditingMark,
+                                    onEscape: model.closeEditor)
                             .frame(minHeight: 130, maxHeight: .infinity).layoutPriority(1)
                         AnnotationToolbar(model: model)
                             .padding(.horizontal, 4)

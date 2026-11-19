@@ -278,6 +278,7 @@ struct AnnotationToolbar: View {
                 .padding(.horizontal, 8)
                 .background(selected ? .white.opacity(0.16) : .clear,
                             in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityLabel(title)
@@ -285,96 +286,35 @@ struct AnnotationToolbar: View {
     }
 
     private var lineWeightToggle: some View {
-        stepperControl(
-            value: pointLabel(model.markLineWidthPoints),
+        pointSizeControl(
+            points: $model.markLineWidthPoints,
+            range: AnnotationSizeMetrics.lineWidthRange,
+            label: "线条粗细",
             decreaseHelp: "减小线条粗细",
-            increaseHelp: "增大线条粗细",
-            canDecrease: model.markLineWidthPoints > AnnotationSizeMetrics.lineWidthRange.lowerBound,
-            canIncrease: model.markLineWidthPoints < AnnotationSizeMetrics.lineWidthRange.upperBound,
-            decrease: {
-                model.markLineWidthPoints = stepped(
-                    model.markLineWidthPoints,
-                    by: -AnnotationSizeMetrics.stepPoints,
-                    within: AnnotationSizeMetrics.lineWidthRange
-                )
-            },
-            increase: {
-                model.markLineWidthPoints = stepped(
-                    model.markLineWidthPoints,
-                    by: AnnotationSizeMetrics.stepPoints,
-                    within: AnnotationSizeMetrics.lineWidthRange
-                )
-            }
+            increaseHelp: "增大线条粗细"
         )
     }
 
     private var numberSizeToggle: some View {
-        stepperControl(
-            value: pointLabel(model.numberSizePoints),
+        pointSizeControl(
+            points: $model.numberSizePoints,
+            range: AnnotationSizeMetrics.numberSizeRange,
+            label: "序号大小",
             decreaseHelp: "减小序号大小",
-            increaseHelp: "增大序号大小",
-            canDecrease: model.numberSizePoints > AnnotationSizeMetrics.numberSizeRange.lowerBound,
-            canIncrease: model.numberSizePoints < AnnotationSizeMetrics.numberSizeRange.upperBound,
-            decrease: {
-                model.numberSizePoints = stepped(
-                    model.numberSizePoints,
-                    by: -AnnotationSizeMetrics.stepPoints,
-                    within: AnnotationSizeMetrics.numberSizeRange
-                )
-            },
-            increase: {
-                model.numberSizePoints = stepped(
-                    model.numberSizePoints,
-                    by: AnnotationSizeMetrics.stepPoints,
-                    within: AnnotationSizeMetrics.numberSizeRange
-                )
-            }
+            increaseHelp: "增大序号大小"
         )
     }
 
-    private func pointLabel(_ value: Double) -> String {
-        "\(Int(value.rounded())) pt"
-    }
-
-    private func stepped(_ value: Double, by delta: Double,
-                         within range: ClosedRange<Double>) -> Double {
-        min(range.upperBound, max(range.lowerBound, value + delta))
-    }
-
-    private func stepperControl(value: String, decreaseHelp: String, increaseHelp: String,
-                                canDecrease: Bool, canIncrease: Bool,
-                                decrease: @escaping () -> Void,
-                                increase: @escaping () -> Void) -> some View {
-        HStack(spacing: 1) {
-            stepperButton(symbol: "minus", help: decreaseHelp,
-                          enabled: canDecrease, perform: decrease)
-            Text(value)
-                .font(.system(size: 10.5, weight: .semibold, design: .rounded))
-                .foregroundStyle(.white)
-                .frame(width: 42, height: 24)
-                .background(.white.opacity(0.08),
-                            in: RoundedRectangle(cornerRadius: 6, style: .continuous))
-            stepperButton(symbol: "plus", help: increaseHelp,
-                          enabled: canIncrease, perform: increase)
-        }
-        .padding(2)
-        .background(.white.opacity(0.07),
-                    in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-    }
-
-    private func stepperButton(symbol: String, help: String, enabled: Bool,
-                               perform: @escaping () -> Void) -> some View {
-        Button(action: perform) {
-            Image(systemName: symbol)
-                .font(.system(size: 9.5, weight: .bold))
-                .foregroundStyle(.white.opacity(enabled ? 1 : 0.3))
-                .frame(width: 24, height: 24)
-                .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-        }
-        .buttonStyle(.plain)
-        .disabled(!enabled)
-        .help(help)
-        .accessibilityLabel(help)
+    private func pointSizeControl(points: Binding<Double>, range: ClosedRange<Double>,
+                                  label: String, decreaseHelp: String,
+                                  increaseHelp: String) -> some View {
+        PointSizeControl(
+            points: points,
+            range: range,
+            label: label,
+            decreaseHelp: decreaseHelp,
+            increaseHelp: increaseHelp
+        )
     }
 
     private var arrowHeadToggle: some View {
@@ -393,26 +333,12 @@ struct AnnotationToolbar: View {
 
     private var textControls: some View {
         HStack(spacing: 5) {
-            stepperControl(
-                value: pointLabel(model.textFontSize),
+            pointSizeControl(
+                points: $model.textFontSize,
+                range: AnnotationSizeMetrics.textSizeRange,
+                label: "字号",
                 decreaseHelp: "减小字号",
-                increaseHelp: "增大字号",
-                canDecrease: model.textFontSize > AnnotationSizeMetrics.textSizeRange.lowerBound,
-                canIncrease: model.textFontSize < AnnotationSizeMetrics.textSizeRange.upperBound,
-                decrease: {
-                    model.textFontSize = stepped(
-                        model.textFontSize,
-                        by: -AnnotationSizeMetrics.stepPoints,
-                        within: AnnotationSizeMetrics.textSizeRange
-                    )
-                },
-                increase: {
-                    model.textFontSize = stepped(
-                        model.textFontSize,
-                        by: AnnotationSizeMetrics.stepPoints,
-                        within: AnnotationSizeMetrics.textSizeRange
-                    )
-                }
+                increaseHelp: "增大字号"
             )
 
             HStack(spacing: 2) {
@@ -430,26 +356,12 @@ struct AnnotationToolbar: View {
 
     private var maskControls: some View {
         HStack(spacing: 5) {
-            stepperControl(
-                value: pointLabel(model.maskSizePoints),
+            pointSizeControl(
+                points: $model.maskSizePoints,
+                range: AnnotationSizeMetrics.maskSizeRange,
+                label: "马赛克颗粒",
                 decreaseHelp: "减小马赛克颗粒",
-                increaseHelp: "增大马赛克颗粒",
-                canDecrease: model.maskSizePoints > AnnotationSizeMetrics.maskSizeRange.lowerBound,
-                canIncrease: model.maskSizePoints < AnnotationSizeMetrics.maskSizeRange.upperBound,
-                decrease: {
-                    model.maskSizePoints = stepped(
-                        model.maskSizePoints,
-                        by: -AnnotationSizeMetrics.stepPoints,
-                        within: AnnotationSizeMetrics.maskSizeRange
-                    )
-                },
-                increase: {
-                    model.maskSizePoints = stepped(
-                        model.maskSizePoints,
-                        by: AnnotationSizeMetrics.stepPoints,
-                        within: AnnotationSizeMetrics.maskSizeRange
-                    )
-                }
+                increaseHelp: "增大马赛克颗粒"
             )
 
             HStack(spacing: 2) {
@@ -475,6 +387,7 @@ struct AnnotationToolbar: View {
                 .padding(.horizontal, 7)
                 .background(selected ? .white.opacity(0.16) : .clear,
                             in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityLabel(title)
@@ -630,6 +543,7 @@ struct AnnotationToolbar: View {
             .frame(height: 38)
             .background(model.tool == tool ? Color.white.opacity(0.16) : Color.white.opacity(0.07),
                         in: RoundedRectangle(cornerRadius: 8))
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .disabled(model.isBusy)
@@ -642,6 +556,7 @@ struct AnnotationToolbar: View {
                 .font(.system(size: 10, weight: .bold))
                 .frame(width: 27, height: 27)
                 .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .help(help)
@@ -721,6 +636,126 @@ struct AnnotationToolbar: View {
         .buttonStyle(ToolbarActionStyle())
         .help(title)
         .accessibilityLabel(title)
+    }
+}
+
+private struct PointSizeControl: View {
+    @Binding var points: Double
+    let range: ClosedRange<Double>
+    let label: String
+    let decreaseHelp: String
+    let increaseHelp: String
+
+    @StoredState private var draft = ""
+    @StoredState private var hovering = false
+    @FocusState private var editing: Bool
+
+    private var canDecrease: Bool { editing || points > range.lowerBound }
+    private var canIncrease: Bool { editing || points < range.upperBound }
+
+    var body: some View {
+        HStack(spacing: 1) {
+            stepperButton(
+                symbol: "minus",
+                help: decreaseHelp,
+                enabled: canDecrease,
+                delta: -AnnotationSizeMetrics.stepPoints
+            )
+
+            HStack(spacing: 2) {
+                TextField("", text: $draft)
+                    .font(.system(size: 10.5, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.white)
+                    .multilineTextAlignment(.trailing)
+                    .textFieldStyle(.plain)
+                    .tint(.white)
+                    .frame(width: 23, height: 24)
+                    .focused($editing)
+                    .onSubmit {
+                        commit()
+                        editing = false
+                    }
+                    .onChange(of: editing) { _, isEditing in
+                        if isEditing {
+                            draft = formatted(points)
+                        } else {
+                            commit()
+                        }
+                    }
+                    .onChange(of: points) { _, value in
+                        if !editing { draft = formatted(value) }
+                    }
+                    .accessibilityLabel(label)
+                    .accessibilityValue("\(formatted(points)) pt")
+
+                Text("pt")
+                    .font(.system(size: 9, weight: .medium, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.72))
+                    .onTapGesture { editing = true }
+
+                Image(systemName: "pencil")
+                    .font(.system(size: 7.5, weight: .semibold))
+                    .foregroundStyle(.white.opacity(editing ? 0.95 : 0.54))
+                    .frame(width: 8)
+                    .onTapGesture { editing = true }
+            }
+            .padding(.horizontal, 4)
+            .frame(width: 58, height: 24)
+            .background(.white.opacity(editing ? 0.14 : (hovering ? 0.11 : 0.08)),
+                        in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .stroke(editing ? Palette.overlayAccent.opacity(0.9) :
+                                .white.opacity(hovering ? 0.22 : 0.08),
+                            lineWidth: 0.8)
+            }
+            .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+            .onHover { hovering = $0 }
+            .help("点击数字或铅笔手动输入\(label)（\(formatted(range.lowerBound))–\(formatted(range.upperBound)) pt）")
+
+            stepperButton(
+                symbol: "plus",
+                help: increaseHelp,
+                enabled: canIncrease,
+                delta: AnnotationSizeMetrics.stepPoints
+            )
+        }
+        .padding(2)
+        .background(.white.opacity(0.07),
+                    in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .onAppear { draft = formatted(points) }
+    }
+
+    private func stepperButton(symbol: String, help: String,
+                               enabled: Bool, delta: Double) -> some View {
+        Button {
+            commit()
+            points = min(range.upperBound, max(range.lowerBound, points + delta))
+            draft = formatted(points)
+        } label: {
+            Image(systemName: symbol)
+                .font(.system(size: 9.5, weight: .bold))
+                .foregroundStyle(.white.opacity(enabled ? 1 : 0.3))
+                .frame(width: 24, height: 24)
+                .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .disabled(!enabled)
+        .help(help)
+        .accessibilityLabel(help)
+    }
+
+    private func commit() {
+        guard let value = AnnotationSizeMetrics.clampedPoints(from: draft, within: range) else {
+            draft = formatted(points)
+            return
+        }
+        points = value
+        draft = formatted(points)
+    }
+
+    private func formatted(_ value: Double) -> String {
+        "\(Int(value.rounded()))"
     }
 }
 

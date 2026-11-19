@@ -35,12 +35,21 @@ final class AppModel: ObservableObject {
     @Published var aiAPI: AITranslationAPI = AITranslationAPI(
         rawValue: UserDefaults.standard.string(forKey: "aiAPI") ?? ""
     ) ?? .openAIChat {
-        didSet { UserDefaults.standard.set(aiAPI.rawValue, forKey: "aiAPI") }
+        didSet {
+            UserDefaults.standard.set(aiAPI.rawValue, forKey: "aiAPI")
+            if !isApplyingDetectedAIAPI { resetAIModelDiscovery() }
+        }
     }
     @Published var variableNamingStyle: VariableNamingStyle = VariableNamingStyle(
         rawValue: UserDefaults.standard.string(forKey: "variableNamingStyle") ?? ""
     ) ?? .lowerCamel {
         didSet { UserDefaults.standard.set(variableNamingStyle.rawValue, forKey: "variableNamingStyle") }
+    }
+    @Published var appLanguage: AppLanguage {
+        didSet {
+            preferences.set(appLanguage.rawValue, forKey: "appLanguage")
+            languageChanged?()
+        }
     }
     @Published var showsMenuBarIcon: Bool {
         didSet {
@@ -70,21 +79,28 @@ final class AppModel: ObservableObject {
     @Published var aiBaseURL: String = UserDefaults.standard.string(forKey: "aiBaseURL")
         ?? AITranslationAPI(rawValue: UserDefaults.standard.string(forKey: "aiAPI") ?? "")?.defaultBaseURL
         ?? AITranslationConfiguration().baseURL {
-        didSet { UserDefaults.standard.set(aiBaseURL, forKey: "aiBaseURL") }
+        didSet {
+            UserDefaults.standard.set(aiBaseURL, forKey: "aiBaseURL")
+            resetAIModelDiscovery()
+        }
     }
     @Published var aiModel: String = UserDefaults.standard.string(forKey: "aiModel")
         ?? AITranslationAPI(rawValue: UserDefaults.standard.string(forKey: "aiAPI") ?? "")?.defaultModel
         ?? AITranslationConfiguration().model {
         didSet { UserDefaults.standard.set(aiModel, forKey: "aiModel") }
     }
+    @Published var aiModels: [AIModelOption] = []
+    @Published var aiModelFetching = false
+    @Published var aiModelFetchMessage: String?
     @Published var aiInstructions: String = UserDefaults.standard.string(forKey: "aiInstructions") ?? "" {
         didSet { UserDefaults.standard.set(aiInstructions, forKey: "aiInstructions") }
     }
     @Published var aiAPIKey: String = "" {
         didSet {
             guard !isSwitchingAIKey else { return }
-            do { try AITranslationKeychain.save(aiAPIKey, for: aiAPI) }
-            catch { errorMessage = error.localizedDescription }
+            aiKeyLoadGeneration = UUID()
+            scheduleAIKeySave()
+            resetAIModelDiscovery()
         }
     }
     @Published var aiTesting = false
@@ -131,6 +147,12 @@ final class AppModel: ObservableObject {
     }
     @Published var keepHistory: Bool {
         didSet { preferences.set(keepHistory, forKey: "keepHistory") }
+    }
+    @Published var autoCleanHistory: Bool {
+        didSet {
+            preferences.set(autoCleanHistory, forKey: "history.autoCleanHistory30Days.v1")
+            if autoCleanHistory { pruneExpiredHistory() }
+        }
     }
     @Published var captureHotkey: HotkeySettings = AppModel.loadHotkey(prefix: "captureHotkey", defaultKey: "S") {
         didSet {
@@ -181,6 +203,7 @@ final class AppModel: ObservableObject {
     var pinImage: ((NSImage) -> Void)?
     var hotkeysChanged: (() -> Void)?
     var hotkeyCaptureChanged: ((Bool) -> Void)?
+    var languageChanged: (() -> Void)?
     var statusItemPreferencesChanged: (() -> Void)?
     var restartApp: (() -> Void)?
     var beginRecording: ((RecordingFormat, CGRect?) -> Void)?
@@ -216,7 +239,12 @@ final class AppModel: ObservableObject {
     private var translationWatchdog: Task<Void, Never>?
     private var aiTranslationTask: Task<Void, Never>?
     private var aiTestTask: Task<Void, Never>?
+    private var aiModelFetchTask: Task<Void, Never>?
+    private var aiKeyLoadTask: Task<Void, Never>?
+    private var aiKeySaveTask: Task<Void, Never>?
+    private var aiKeyLoadGeneration = UUID()
     private var isSwitchingAIKey = false
+    private var isApplyingDetectedAIAPI = false
     private var undoMarks: [[Mark]] = []
     private var redoMarks: [[Mark]] = []
     private var draftTitle = ""
@@ -246,10 +274,6 @@ final class AppModel: ObservableObject {
          preferences: UserDefaults = .standard,
          recognizeImage: @escaping (CGImage) async throws -> String = OCRService.recognize,
          ocrTiming: OCRTimingPolicy = OCRTimingPolicy()) {
-        let initialAIAPI = AITranslationAPI(
-            rawValue: UserDefaults.standard.string(forKey: "aiAPI") ?? ""
-        ) ?? .openAIChat
-        aiAPIKey = AITranslationKeychain.load(for: initialAIAPI)
         self.preferences = preferences
         self.recognizeImage = recognizeImage
         self.ocrTiming = ocrTiming
@@ -265,6 +289,9 @@ final class AppModel: ObservableObject {
         }
         translationProvider = initialTranslationProvider
         showsMenuBarIcon = preferences.object(forKey: "showsMenuBarIcon") as? Bool ?? true
+        appLanguage = AppLanguage(
+            rawValue: preferences.string(forKey: "appLanguage") ?? ""
+        ) ?? .simplifiedChinese
         let storedMenuBarStyle = MenuBarDogStyle(
             rawValue: preferences.string(forKey: "menuBarDogStyle") ?? ""
         ) ?? .system
@@ -276,6 +303,7 @@ final class AppModel: ObservableObject {
             ?? preferences.object(forKey: "autoOCR") as? Bool ?? false
         autoTranslate = preferences.bool(forKey: "autoTranslate")
         keepHistory = preferences.object(forKey: "keepHistory") as? Bool ?? true
+        autoCleanHistory = preferences.object(forKey: "history.autoCleanHistory30Days.v1") as? Bool ?? true
         fillShapes = preferences.bool(forKey: "fillShapes")
         screenPermission = permission
         screenPermission.refresh()
@@ -284,6 +312,7 @@ final class AppModel: ObservableObject {
             let saved = try store.load()
             self.store = store
             records = saved
+            pruneExpiredHistory()
         } catch {
             errorMessage = "读取历史失败：\(error.localizedDescription)。原文件已保留。"
         }
@@ -346,10 +375,67 @@ final class AppModel: ObservableObject {
             aiModel = next.defaultModel
         }
         isSwitchingAIKey = true
+        aiAPIKey = ""
         aiAPI = next
-        aiAPIKey = AITranslationKeychain.load(for: next)
         isSwitchingAIKey = false
         aiTestMessage = nil
+        resetAIModelDiscovery()
+        loadStoredAIAPIKey(for: next)
+    }
+
+    func applyDetectedAIAPI(_ next: AITranslationAPI) {
+        guard next != aiAPI else { return }
+        let key = aiAPIKey
+        isApplyingDetectedAIAPI = true
+        aiAPI = next
+        isApplyingDetectedAIAPI = false
+        scheduleAIKeySave(key, for: next)
+    }
+
+    func loadStoredAIAPIKey() {
+        loadStoredAIAPIKey(for: aiAPI)
+    }
+
+    private func loadStoredAIAPIKey(for api: AITranslationAPI) {
+        let generation = UUID()
+        aiKeyLoadGeneration = generation
+        aiKeyLoadTask?.cancel()
+        aiKeyLoadTask = Task { [weak self] in
+            let key = await Task.detached(priority: .utility) {
+                AITranslationKeychain.load(for: api)
+            }.value
+            guard let self, !Task.isCancelled,
+                  self.aiKeyLoadGeneration == generation,
+                  self.aiAPI == api else { return }
+            self.isSwitchingAIKey = true
+            self.aiAPIKey = key
+            self.isSwitchingAIKey = false
+            self.aiKeyLoadTask = nil
+            self.resetAIModelDiscovery()
+        }
+    }
+
+    private func scheduleAIKeySave(_ value: String? = nil,
+                                   for api: AITranslationAPI? = nil) {
+        let key = value ?? aiAPIKey
+        let target = api ?? aiAPI
+        aiKeySaveTask?.cancel()
+        aiKeySaveTask = Task { [weak self] in
+            do { try await Task.sleep(for: .milliseconds(350)) } catch { return }
+            let message: String? = await Task.detached(priority: .utility) {
+                do {
+                    try AITranslationKeychain.save(key, for: target)
+                    return nil
+                } catch {
+                    return error.localizedDescription
+                }
+            }.value
+            guard let self, !Task.isCancelled else { return }
+            if let message { self.errorMessage = message }
+            if self.aiAPI == target, self.aiAPIKey == key {
+                self.aiKeySaveTask = nil
+            }
+        }
     }
 
     func openLoginItemsSettings() {
@@ -465,7 +551,8 @@ final class AppModel: ObservableObject {
         acceptImage(DemoImage.make(), title: "灵感卡片 · 示例")
     }
 
-    func acceptImage(_ newImage: NSImage, title: String, translate: Bool = false, inlineRect: NSRect? = nil) {
+    func acceptImage(_ newImage: NSImage, title: String, translate: Bool = false,
+                     inlineRect: NSRect? = nil, presentEditor: Bool = true) {
         if isRecognizing { cancelRecognition() }
         if translationJob != nil { cancelTranslation() }
         activity = nil
@@ -489,6 +576,7 @@ final class AppModel: ObservableObject {
         tool = .pointer
         captureAspectRatio = .free
         notice = "编辑中 · 点击 ✅ 复制到剪贴板"
+        guard presentEditor else { return }
         let automatic = inlineRect == nil && (autoTranslate || autoOCR)
         if translate || automatic {
             presentTextWorkspace(translate || autoTranslate ? .text : .recognition)
@@ -538,8 +626,11 @@ final class AppModel: ObservableObject {
             record.targetLanguage = targetLanguage
             record.marks = marks
             var updated = [record] + records
-            let expired = Array(updated.dropFirst(30))
-            updated = Array(updated.prefix(30))
+            if autoCleanHistory {
+                updated = updated.filter { $0.createdAt >= screenshotRetentionCutoff() }
+            }
+            let retainedIDs = Set(updated.map(\.id))
+            let expired = records.filter { !retainedIDs.contains($0.id) }
             // Commit the index before pruning images so a failed write cannot break existing history.
             do { try store.save(updated) }
             catch {
@@ -933,7 +1024,7 @@ final class AppModel: ObservableObject {
         let apiKey = aiAPIKey
         aiTranslationTask = Task { [weak self] in
             do {
-                let result = try await AITranslationService().translate(
+                let result = try await AITranslationService().translateWithProtocolFallback(
                     text: job.text,
                     source: job.source,
                     target: job.target,
@@ -941,7 +1032,11 @@ final class AppModel: ObservableObject {
                     apiKey: apiKey
                 )
                 guard !Task.isCancelled else { return }
-                self?.finishTranslation(job, text: result)
+                self?.applyDetectedAIAPI(result.api)
+                self?.finishTranslation(job, text: result.text)
+                if result.usedFallback {
+                    self?.notice = "翻译完成 · 已自动切换到 \(result.api.title)"
+                }
             } catch {
                 guard !Task.isCancelled else { return }
                 self?.failTranslation(job, error: error)
@@ -1005,7 +1100,7 @@ final class AppModel: ObservableObject {
         aiTestTask?.cancel()
         aiTestTask = Task { [weak self] in
             do {
-                let result = try await AITranslationService().translate(
+                let result = try await AITranslationService().translateWithProtocolFallback(
                     text: "Hello",
                     source: "en",
                     target: "zh-Hans",
@@ -1013,14 +1108,64 @@ final class AppModel: ObservableObject {
                     apiKey: apiKey
                 )
                 guard !Task.isCancelled else { return }
+                self?.applyDetectedAIAPI(result.api)
                 self?.aiTesting = false
-                self?.aiTestMessage = "连接成功 · 返回“\(result.prefix(24))”"
+                let prefix = result.usedFallback ? "已自动切换为 \(result.api.title) · " : ""
+                self?.aiTestMessage = "\(prefix)连接成功 · 返回“\(result.text.prefix(24))”"
             } catch {
                 guard !Task.isCancelled else { return }
                 self?.aiTesting = false
                 self?.aiTestMessage = error.localizedDescription
             }
         }
+    }
+
+    func fetchAIModels() {
+        guard !aiModelFetching else { return }
+        let configuration = aiConfiguration
+        let apiKey = aiAPIKey
+        guard !configuration.baseURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            aiModelFetchMessage = "请先填写接口地址。"
+            return
+        }
+        guard configuration.allowsEmptyAPIKey ||
+                !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            aiModelFetchMessage = "请先填写 API Key。"
+            return
+        }
+
+        aiModelFetching = true
+        aiModelFetchMessage = "正在获取模型列表…"
+        aiModelFetchTask?.cancel()
+        aiModelFetchTask = Task { [weak self] in
+            do {
+                let models = try await AITranslationService().fetchModels(
+                    configuration: configuration,
+                    apiKey: apiKey
+                )
+                guard !Task.isCancelled else { return }
+                self?.aiModels = models
+                self?.aiModelFetching = false
+                if self?.aiModel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == true,
+                   let first = models.first {
+                    self?.aiModel = first.id
+                }
+                self?.aiModelFetchMessage = "已获取 \(models.count) 个模型，可从右侧列表选择。"
+            } catch {
+                guard !Task.isCancelled else { return }
+                self?.aiModels = []
+                self?.aiModelFetching = false
+                self?.aiModelFetchMessage = error.localizedDescription
+            }
+        }
+    }
+
+    private func resetAIModelDiscovery() {
+        aiModelFetchTask?.cancel()
+        aiModelFetchTask = nil
+        aiModelFetching = false
+        aiModels = []
+        aiModelFetchMessage = nil
     }
 
     func sourceEdited(_ value: String) {
@@ -1057,6 +1202,21 @@ final class AppModel: ObservableObject {
         undoMarks.append(marks)
         marks.append(mark)
         redoMarks = []
+        persistCurrent()
+    }
+
+    func beginEditingMark(_ id: UUID) {
+        guard marks.contains(where: { $0.id == id }) else { return }
+        undoMarks.append(marks)
+        redoMarks = []
+    }
+
+    func updateMark(_ mark: Mark) {
+        guard let index = marks.firstIndex(where: { $0.id == mark.id }) else { return }
+        marks[index] = mark
+    }
+
+    func finishEditingMark() {
         persistCurrent()
     }
 
@@ -1177,5 +1337,37 @@ final class AppModel: ObservableObject {
             for record in old { try store.removeImage(record) }
             notice = "本地截图历史已清空。"
         } catch { errorMessage = "清理失败：\(error.localizedDescription)" }
+    }
+
+    private func screenshotRetentionCutoff(now: Date = Date()) -> Date {
+        let calendar = Calendar.current
+        let startOfToday = calendar.startOfDay(for: now)
+        return calendar.date(byAdding: .day, value: -29, to: startOfToday) ?? startOfToday
+    }
+
+    private func pruneExpiredHistory(now: Date = Date()) {
+        guard autoCleanHistory, let store, !records.isEmpty else { return }
+        let cutoff = screenshotRetentionCutoff(now: now)
+        let retained = records.filter { $0.createdAt >= cutoff }
+        guard retained.count != records.count else { return }
+        let retainedIDs = Set(retained.map(\.id))
+        let expired = records.filter { !retainedIDs.contains($0.id) }
+        do {
+            // Save the new index first so a write failure never deletes still-indexed files.
+            try store.save(retained)
+            records = retained
+            if let selectedID, !retainedIDs.contains(selectedID) {
+                self.selectedID = retained.first?.id
+                image = nil
+                sourceText = ""
+                translatedText = ""
+                marks = []
+                undoMarks = []
+                redoMarks = []
+            }
+            for record in expired { try store.removeImage(record) }
+        } catch {
+            errorMessage = "截图历史自动清理失败：\(error.localizedDescription)"
+        }
     }
 }

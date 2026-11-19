@@ -286,29 +286,29 @@ struct QuickToolView: View {
         .shadow(color: Palette.shadow, radius: 12, y: 4)
     }
 
+    @ViewBuilder
     private var resultsFooter: some View {
-        HStack(spacing: 8) {
-            keyHint("↑ ↓", label: "选择")
-            keyHint("↩", label: "打开 / 复制")
-            if let errorMessage {
-                Text(errorMessage).foregroundStyle(Palette.danger).lineLimit(1)
-            } else if let translationError {
-                Text(translationError).foregroundStyle(Palette.danger).lineLimit(1)
-            } else if isTranslatingChinese {
-                HStack(spacing: 5) {
-                    ProgressView().controlSize(.mini)
-                    Text("翻译中")
+        if errorMessage != nil || translationError != nil || isTranslatingChinese {
+            HStack(spacing: 8) {
+                if let errorMessage {
+                    Text(errorMessage).foregroundStyle(Palette.danger).lineLimit(1)
+                } else if let translationError {
+                    Text(translationError).foregroundStyle(Palette.danger).lineLimit(1)
+                } else if isTranslatingChinese {
+                    HStack(spacing: 5) {
+                        ProgressView().controlSize(.mini)
+                        Text("翻译中")
+                    }
+                    .foregroundStyle(Palette.muted)
                 }
-                .foregroundStyle(Palette.muted)
+                Spacer(minLength: 4)
             }
-            Spacer(minLength: 4)
-            Text("Esc 关闭").foregroundStyle(Palette.muted)
-        }
-        .font(.system(size: 9))
-        .padding(.horizontal, 4)
-        .frame(height: 25)
-        .overlay(alignment: .top) {
-            Rectangle().fill(Palette.line).frame(height: 1)
+            .font(.system(size: 9))
+            .padding(.horizontal, 4)
+            .frame(height: 25)
+            .overlay(alignment: .top) {
+                Rectangle().fill(Palette.line).frame(height: 1)
+            }
         }
     }
 
@@ -666,20 +666,6 @@ struct QuickToolView: View {
         }
     }
 
-    private func keyHint(_ key: String, label: String) -> some View {
-        HStack(spacing: 4) {
-            Text(key)
-                .font(.system(size: 8, weight: .semibold, design: .monospaced))
-                .foregroundStyle(Palette.muted)
-                .padding(.horizontal, 5)
-                .frame(height: 19)
-                .background(Palette.panel, in: RoundedRectangle(cornerRadius: 4))
-                .overlay(RoundedRectangle(cornerRadius: 4).stroke(Palette.line))
-            Text(label)
-                .font(.system(size: 9))
-                .foregroundStyle(Palette.muted)
-        }
-    }
 }
 
 private struct QuickTranslationBridge: View {

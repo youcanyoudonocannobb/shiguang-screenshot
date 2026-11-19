@@ -12,10 +12,6 @@ struct TextWorkspaceView: View {
         VStack(alignment: .leading, spacing: 16) {
             header
             VStack(spacing: 0) {
-                if !isRecognition {
-                    languageBar
-                    Rectangle().fill(Palette.line).frame(height: 1)
-                }
                 HStack(spacing: 0) {
                     sourcePanel
                     if !isRecognition {
@@ -69,20 +65,6 @@ struct TextWorkspaceView: View {
         }
     }
 
-    private var languageBar: some View {
-        HStack(spacing: 12) {
-            languageControl(accessibilityTitle: "原文语言",
-                            selection: Binding(get: { model.sourceLanguage },
-                set: { model.languageEdited(source: $0) }), choices: LanguageChoice.sources)
-            languageControl(accessibilityTitle: "目标语言",
-                            selection: Binding(get: { model.targetLanguage },
-                set: { model.languageEdited(target: $0) }), choices: LanguageChoice.targets)
-            Spacer(minLength: 0)
-        }
-        .padding(.horizontal, 16).padding(.vertical, 10)
-        .disabled(model.isBusy)
-    }
-
     private func languageControl(accessibilityTitle: String, selection: Binding<String>,
                                  choices: [LanguageChoice]) -> some View {
         Picker(accessibilityTitle, selection: selection) {
@@ -91,7 +73,7 @@ struct TextWorkspaceView: View {
         .labelsHidden()
         .pickerStyle(.menu)
         .controlSize(.regular)
-        .frame(width: 148, alignment: .leading)
+        .fixedSize()
         .accessibilityLabel(accessibilityTitle)
     }
 
@@ -99,6 +81,12 @@ struct TextWorkspaceView: View {
         VStack(spacing: 0) {
             HStack(spacing: 8) {
                 Text(isRecognition ? "识别文字" : "原文").font(.system(size: 12, weight: .semibold))
+                if !isRecognition {
+                    languageControl(accessibilityTitle: "原文语言",
+                                    selection: Binding(get: { model.sourceLanguage },
+                        set: { model.languageEdited(source: $0) }), choices: LanguageChoice.sources)
+                        .disabled(model.isBusy)
+                }
                 Text("\(model.sourceText.count) 字符").font(.system(size: 10)).foregroundStyle(Palette.muted)
                 Spacer()
                 copyButton("复制原文", text: model.sourceText)
@@ -109,7 +97,7 @@ struct TextWorkspaceView: View {
                     Text(model.isRecognizing ? "正在设备上识别文字…" :
                             isRecognition ? "没有识别到文字，可以重试或输入。" : "粘贴或输入原文…")
                         .foregroundStyle(Palette.muted).font(.system(size: 15))
-                        .padding(.horizontal, 18).padding(.vertical, 12).allowsHitTesting(false)
+                        .padding(.horizontal, 16).padding(.vertical, 12).allowsHitTesting(false)
                 }
                 TextEditor(text: Binding(get: { model.sourceText }, set: { model.sourceEdited($0) }))
                     .font(.system(size: 15)).lineSpacing(6)
@@ -125,6 +113,10 @@ struct TextWorkspaceView: View {
         VStack(spacing: 0) {
             HStack(spacing: 8) {
                 Text("译文").font(.system(size: 12, weight: .semibold))
+                languageControl(accessibilityTitle: "目标语言",
+                                selection: Binding(get: { model.targetLanguage },
+                    set: { model.languageEdited(target: $0) }), choices: LanguageChoice.targets)
+                    .disabled(model.isBusy)
                 Spacer()
                 copyButton("复制译文", text: model.translatedText)
             }
@@ -160,11 +152,6 @@ struct TextWorkspaceView: View {
         HStack(spacing: 10) {
             statusBar.layoutPriority(-1)
             Spacer(minLength: 8)
-            if !isRecognition {
-                Button("复制对照") { model.copyText("\(model.sourceText)\n\n\(model.translatedText)") }
-                    .buttonStyle(QuietButton())
-                    .disabled(model.sourceText.isEmpty || model.translatedText.isEmpty)
-            }
             if isRecognition && model.image != nil {
                 Button("重新识别") { model.recognize() }
                     .buttonStyle(QuietButton()).disabled(model.isBusy)
@@ -184,8 +171,10 @@ struct TextWorkspaceView: View {
     private var statusBar: some View {
         HStack(spacing: 8) {
             if model.isBusy { ProgressView().controlSize(.small) }
-            Text(model.isBusy ? (model.activity ?? "处理中…") : isRecognition ? "可直接校对文字" : "自动识别语言 · Esc 关闭")
-                .font(.system(size: 11)).foregroundStyle(Palette.muted).lineLimit(2)
+            if model.isBusy {
+                Text(model.activity ?? "处理中…")
+                    .font(.system(size: 11)).foregroundStyle(Palette.muted).lineLimit(2)
+            }
             if model.isRecognizing {
                 Button("停止识别") { model.cancelRecognition() }.buttonStyle(TextPanelButtonStyle())
             }

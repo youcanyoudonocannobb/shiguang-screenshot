@@ -119,12 +119,12 @@ struct ClipboardEntry: Codable, Identifiable {
         case text, image, gif, video, files, other
         var title: String {
             switch self {
-            case .text: return "文字"
-            case .image: return "图片"
+            case .text: return L("文字")
+            case .image: return L("图片")
             case .gif: return "GIF"
-            case .video: return "视频"
-            case .files: return "文件"
-            case .other: return "其他"
+            case .video: return L("视频")
+            case .files: return L("文件")
+            case .other: return L("其他")
             }
         }
         var symbol: String {
@@ -170,24 +170,33 @@ enum ClipboardSection: String, CaseIterable, Identifiable {
     case tools
 
     var id: String { rawValue }
-    var title: String { self == .history ? "历史" : "快捷工具" }
+    var title: String { L(self == .history ? "历史" : "快捷工具") }
 }
 
 @MainActor
 final class ClipboardHistory: ObservableObject {
+    static let retentionOptions = [1, 3, 7, 15, 30]
+    static let defaultRetentionDays = 30
+
     @Published private(set) var entries: [ClipboardEntry] = []
     @Published private(set) var message = "复制的内容会显示在这里。"
     @Published var search = ""
     @Published var filter: ClipboardEntry.Kind?
     @Published var selectedID: UUID?
     @Published var section: ClipboardSection = .history
+    @Published var retentionDays: Int {
+        didSet {
+            preferences.set(retentionDays, forKey: "clipboard.retentionDays")
+            pruneExpiredEntries()
+        }
+    }
     @Published var monitorsSystem: Bool {
         didSet { preferences.set(monitorsSystem, forKey: "clipboard.monitor"); observedChange = pasteboard.changeCount }
     }
     private let directory: URL
     private let pasteboard: NSPasteboard
     private let preferences: UserDefaults
-    private let limit: Int
+    private let limit: Int?
     private var observedChange: Int
     private var lastPublishedChange: Int?
     private var timer: Timer?
@@ -231,11 +240,24 @@ final class ClipboardHistory: ObservableObject {
         selectedID = rows[min(rows.count - 1, max(0, current + delta))].id
     }
 
-    init(directory: URL, pasteboard: NSPasteboard = .general, preferences: UserDefaults = .standard, limit: Int = 100) {
+    init(directory: URL, pasteboard: NSPasteboard = .general, preferences: UserDefaults = .standard, limit: Int? = nil) {
         self.directory = directory.standardizedFileURL.resolvingSymlinksInPath()
         self.pasteboard = pasteboard
         self.preferences = preferences
-        self.limit = max(1, limit)
+        self.limit = limit.map { max(1, $0) }
+        let retentionMigrationKey = "clipboard.retentionDays.default30.v1"
+        let storedRetention = preferences.integer(forKey: "clipboard.retentionDays")
+        if !preferences.bool(forKey: retentionMigrationKey) {
+            retentionDays = Self.defaultRetentionDays
+            preferences.set(Self.defaultRetentionDays, forKey: "clipboard.retentionDays")
+            preferences.set(true, forKey: retentionMigrationKey)
+        } else if Self.retentionOptions.contains(storedRetention) {
+            retentionDays = storedRetention
+        } else if storedRetention > (Self.retentionOptions.last ?? Self.defaultRetentionDays) {
+            retentionDays = Self.retentionOptions.last ?? Self.defaultRetentionDays
+        } else {
+            retentionDays = Self.defaultRetentionDays
+        }
         monitorsSystem = preferences.object(forKey: "clipboard.monitor") as? Bool ?? true
         observedChange = pasteboard.changeCount
         do {
@@ -244,6 +266,7 @@ final class ClipboardHistory: ObservableObject {
             if FileManager.default.fileExists(atPath: indexURL.path) {
                 entries = try JSONDecoder().decode([ClipboardEntry].self, from: Data(contentsOf: indexURL))
                     .filter { FileManager.default.fileExists(atPath: payloadURL($0).path) }
+                pruneExpiredEntries()
             }
         } catch {
             storageAvailable = false
@@ -266,6 +289,7 @@ final class ClipboardHistory: ObservableObject {
     func report(_ value: String) { message = value }
 
     func poll() {
+        pruneExpiredEntries()
         guard pasteboard.changeCount != observedChange else { return }
         guard canReadInBackground else {
             let notice = "系统尚未允许后台读取；打开面板可读取当前内容，允许系统剪贴板访问后可自动记录。"
@@ -371,7 +395,17 @@ final class ClipboardHistory: ObservableObject {
             var existing = updated.remove(at: index)
             existing.createdAt = Date()
             updated.insert(existing, at: 0)
-            do { try saveIndex(updated); entries = updated }
+            let fresh = updated.filter { $0.createdAt >= retentionCutoff() }
+            let retained = limit.map { Array(fresh.prefix($0)) } ?? fresh
+            do {
+                try saveIndex(retained)
+                entries = retained
+                let keptIDs = Set(retained.map(\.id))
+                for expired in updated where !keptIDs.contains(expired.id) {
+                    previews[expired.id] = nil
+                    try? FileManager.default.removeItem(at: payloadURL(expired))
+                }
+            }
             catch { message = "已复制，历史保存失败：\(error.localizedDescription)" }
             return
         }
@@ -385,11 +419,13 @@ final class ClipboardHistory: ObservableObject {
             try encoder.encode(snapshot).write(to: payloadURL(entry), options: .atomic)
             try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: payloadURL(entry).path)
             let all = [entry] + entries
-            let updated = Array(all.prefix(limit))
+            let fresh = all.filter { $0.createdAt >= retentionCutoff() }
+            let updated = limit.map { Array(fresh.prefix($0)) } ?? fresh
             do { try saveIndex(updated) }
             catch { try? FileManager.default.removeItem(at: payloadURL(entry)); throw error }
             entries = updated
-            for expired in all.dropFirst(limit) {
+            let keptIDs = Set(updated.map(\.id))
+            for expired in all where !keptIDs.contains(expired.id) {
                 previews[expired.id] = nil
                 try? FileManager.default.removeItem(at: payloadURL(expired))
             }
@@ -402,6 +438,36 @@ final class ClipboardHistory: ObservableObject {
     }
 
     private func payloadURL(_ entry: ClipboardEntry) -> URL { directory.appendingPathComponent("\(entry.id.uuidString).plist") }
+
+    private func retentionCutoff(now: Date = Date()) -> Date {
+        let calendar = Calendar.current
+        let startOfToday = calendar.startOfDay(for: now)
+        return calendar.date(byAdding: .day, value: -(retentionDays - 1), to: startOfToday) ?? startOfToday
+    }
+
+    private func pruneExpiredEntries(now: Date = Date()) {
+        guard storageAvailable, !entries.isEmpty else { return }
+        let cutoff = retentionCutoff(now: now)
+        let retained = entries.filter { $0.createdAt >= cutoff }
+        guard retained.count != entries.count else { return }
+        let keptIDs = Set(retained.map(\.id))
+        let expired = entries.filter { !keptIDs.contains($0.id) }
+        do {
+            try saveIndex(retained)
+            entries = retained
+            if let selectedID, !keptIDs.contains(selectedID) {
+                self.selectedID = retained.first?.id
+            }
+            for entry in expired {
+                previews[entry.id] = nil
+                try? FileManager.default.removeItem(at: payloadURL(entry))
+            }
+            pruneMedia()
+        } catch {
+            message = "剪贴板历史清理失败：\(error.localizedDescription)"
+        }
+    }
+
     private func saveIndex(_ entries: [ClipboardEntry]) throws {
         try JSONEncoder().encode(entries).write(to: indexURL, options: .atomic)
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: indexURL.path)
