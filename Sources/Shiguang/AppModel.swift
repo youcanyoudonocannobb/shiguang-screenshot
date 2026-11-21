@@ -48,19 +48,19 @@ final class AppModel: ObservableObject {
     @Published var appLanguage: AppLanguage {
         didSet {
             preferences.set(appLanguage.rawValue, forKey: "appLanguage")
-            languageChanged?()
+            if !isApplyingConfiguration { languageChanged?() }
         }
     }
     @Published var showsMenuBarIcon: Bool {
         didSet {
             preferences.set(showsMenuBarIcon, forKey: "showsMenuBarIcon")
-            statusItemPreferencesChanged?()
+            if !isApplyingConfiguration { statusItemPreferencesChanged?() }
         }
     }
     @Published var menuBarDogStyle: MenuBarDogStyle {
         didSet {
             preferences.set(menuBarDogStyle.rawValue, forKey: "menuBarDogStyle")
-            statusItemPreferencesChanged?()
+            if !isApplyingConfiguration { statusItemPreferencesChanged?() }
         }
     }
     @Published var customMenuBarIconData: Data? {
@@ -70,7 +70,7 @@ final class AppModel: ObservableObject {
             } else {
                 preferences.removeObject(forKey: "customMenuBarIconData")
             }
-            statusItemPreferencesChanged?()
+            if !isApplyingConfiguration { statusItemPreferencesChanged?() }
         }
     }
     @Published private(set) var launchAtLoginEnabled = false
@@ -160,37 +160,37 @@ final class AppModel: ObservableObject {
     @Published var captureHotkey: HotkeySettings = AppModel.loadHotkey(prefix: "captureHotkey", defaultKey: "S") {
         didSet {
             AppModel.saveHotkey(captureHotkey, prefix: "captureHotkey")
-            hotkeysChanged?()
+            if !isApplyingConfiguration { hotkeysChanged?() }
         }
     }
     @Published var translateHotkey: HotkeySettings = AppModel.loadHotkey(prefix: "translateHotkey", defaultKey: "T") {
         didSet {
             AppModel.saveHotkey(translateHotkey, prefix: "translateHotkey")
-            hotkeysChanged?()
+            if !isApplyingConfiguration { hotkeysChanged?() }
         }
     }
     @Published var clipboardHotkey: HotkeySettings = AppModel.loadHotkey(prefix: "clipboardHotkey", defaultKey: "V") {
         didSet {
             AppModel.saveHotkey(clipboardHotkey, prefix: "clipboardHotkey")
-            hotkeysChanged?()
+            if !isApplyingConfiguration { hotkeysChanged?() }
         }
     }
     @Published var clipboardTranslateHotkey: HotkeySettings = AppModel.loadHotkey(prefix: "clipboardTranslateHotkey", defaultKey: "C") {
         didSet {
             AppModel.saveHotkey(clipboardTranslateHotkey, prefix: "clipboardTranslateHotkey")
-            hotkeysChanged?()
+            if !isApplyingConfiguration { hotkeysChanged?() }
         }
     }
     @Published var selectionTranslateHotkey: HotkeySettings = AppModel.loadHotkey(prefix: "selectionTranslateHotkey", defaultKey: "D") {
         didSet {
             AppModel.saveHotkey(selectionTranslateHotkey, prefix: "selectionTranslateHotkey")
-            hotkeysChanged?()
+            if !isApplyingConfiguration { hotkeysChanged?() }
         }
     }
     @Published var variableNamingHotkey: HotkeySettings = AppModel.loadHotkey(prefix: "variableNamingHotkey", defaultKey: "X") {
         didSet {
             AppModel.saveHotkey(variableNamingHotkey, prefix: "variableNamingHotkey")
-            hotkeysChanged?()
+            if !isApplyingConfiguration { hotkeysChanged?() }
         }
     }
     @Published var hotkeyAvailable = true
@@ -249,6 +249,7 @@ final class AppModel: ObservableObject {
     private var aiKeySaveTask: Task<Void, Never>?
     private var aiKeyLoadGeneration = UUID()
     private var isSwitchingAIKey = false
+    private var isApplyingConfiguration = false
     private var isApplyingDetectedAIAPI = false
     private var undoMarks: [[Mark]] = []
     private var redoMarks: [[Mark]] = []
@@ -293,6 +294,8 @@ final class AppModel: ObservableObject {
             preferences.set(true, forKey: "translationProvider.defaultApple.v1")
         }
         translationProvider = initialTranslationProvider
+        if let source = preferences.string(forKey: "translation.sourceLanguage"), !source.isEmpty { sourceLanguage = source }
+        if let target = preferences.string(forKey: "translation.targetLanguage"), !target.isEmpty { targetLanguage = target }
         showsMenuBarIcon = preferences.object(forKey: "showsMenuBarIcon") as? Bool ?? true
         appLanguage = AppLanguage(
             rawValue: preferences.string(forKey: "appLanguage") ?? ""
@@ -368,6 +371,51 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// Apply a validated snapshot without registering intermediate shortcut combinations
+    /// or rebuilding the settings window before the other values have been restored.
+    func performConfigurationUpdate(_ update: () -> Void) {
+        let previousLanguage = appLanguage
+        isApplyingConfiguration = true
+        update()
+        isApplyingConfiguration = false
+        hotkeysChanged?()
+        statusItemPreferencesChanged?()
+        if appLanguage != previousLanguage { languageChanged?() }
+    }
+
+    func applyImportedAIConfiguration(api: AITranslationAPI, baseURL: String, model: String, instructions: String) {
+        let endpointChanged = aiAPI != api || aiBaseURL.trimmingCharacters(in: .whitespacesAndNewlines) !=
+            baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        aiTestTask?.cancel()
+        aiTestTask = nil
+        aiTesting = false
+        resetAIModelDiscovery()
+        if endpointChanged {
+            // A configuration file never authorizes sending an existing secret to a new endpoint.
+            // Keep the saved secret intact, and remember this across restarts until manual entry.
+            aiKeyLoadGeneration = UUID()
+            aiKeyLoadTask?.cancel()
+            aiKeyLoadTask = nil
+            // Switching protocol may retain the imported URL, so block automatic key
+            // loading for every protocol until its key is explicitly entered again.
+            for candidate in AITranslationAPI.allCases {
+                preferences.set(true, forKey: Self.manualAIKeyEntryKey(for: candidate))
+            }
+            isSwitchingAIKey = true
+            aiAPIKey = ""
+            isSwitchingAIKey = false
+        }
+        aiAPI = api
+        aiBaseURL = baseURL
+        aiModel = model
+        aiInstructions = instructions
+        aiTestMessage = nil
+    }
+
+    private static func manualAIKeyEntryKey(for api: AITranslationAPI) -> String {
+        "aiKey.requiresManualEntry.\(api.rawValue)"
+    }
+
     func selectAIAPI(_ next: AITranslationAPI) {
         guard next != aiAPI else { return }
         let previous = aiAPI
@@ -394,7 +442,9 @@ final class AppModel: ObservableObject {
         isApplyingDetectedAIAPI = true
         aiAPI = next
         isApplyingDetectedAIAPI = false
-        scheduleAIKeySave(key, for: next)
+        if !key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            scheduleAIKeySave(key, for: next)
+        }
     }
 
     func loadStoredAIAPIKey() {
@@ -402,6 +452,7 @@ final class AppModel: ObservableObject {
     }
 
     private func loadStoredAIAPIKey(for api: AITranslationAPI) {
+        guard !preferences.bool(forKey: Self.manualAIKeyEntryKey(for: api)) else { return }
         let generation = UUID()
         aiKeyLoadGeneration = generation
         aiKeyLoadTask?.cancel()
@@ -424,6 +475,7 @@ final class AppModel: ObservableObject {
                                    for api: AITranslationAPI? = nil) {
         let key = value ?? aiAPIKey
         let target = api ?? aiAPI
+        let generation = aiKeyLoadGeneration
         aiKeySaveTask?.cancel()
         aiKeySaveTask = Task { [weak self] in
             do { try await Task.sleep(for: .milliseconds(350)) } catch { return }
@@ -439,6 +491,9 @@ final class AppModel: ObservableObject {
             if let message { self.errorMessage = message }
             if self.aiAPI == target, self.aiAPIKey == key {
                 self.aiKeySaveTask = nil
+                if message == nil, self.aiKeyLoadGeneration == generation {
+                    self.preferences.removeObject(forKey: Self.manualAIKeyEntryKey(for: target))
+                }
             }
         }
     }
@@ -505,6 +560,30 @@ final class AppModel: ObservableObject {
         showEditor?()
     }
 
+    var defaultSourceLanguage: String {
+        preferences.string(forKey: "translation.sourceLanguage") ?? "auto"
+    }
+
+    var defaultTargetLanguage: String {
+        preferences.string(forKey: "translation.targetLanguage") ?? "zh-Hans"
+    }
+
+    func restoreTranslationLanguageDefaults(source: String, target: String) {
+        preferences.set(source, forKey: "translation.sourceLanguage")
+        preferences.set(target, forKey: "translation.targetLanguage")
+        resetLanguagesToDefaults()
+    }
+
+    func setDefaultTargetLanguage(_ target: String) {
+        preferences.set(target, forKey: "translation.targetLanguage")
+        languageEdited(target: target)
+    }
+
+    private func resetLanguagesToDefaults() {
+        sourceLanguage = defaultSourceLanguage
+        targetLanguage = defaultTargetLanguage
+    }
+
     func newText() {
         guard !isBusy else { return }
         persistCurrent()
@@ -516,6 +595,7 @@ final class AppModel: ObservableObject {
         image = nil
         sourceText = ""
         translatedText = ""
+        resetLanguagesToDefaults()
         marks = []
         undoMarks = []
         redoMarks = []
@@ -573,8 +653,7 @@ final class AppModel: ObservableObject {
         zoomFactor = 1
         sourceText = ""
         translatedText = ""
-        sourceLanguage = "auto"
-        targetLanguage = "zh-Hans"
+        resetLanguagesToDefaults()
         marks = []
         undoMarks = []
         redoMarks = []
@@ -984,7 +1063,9 @@ final class AppModel: ObservableObject {
             recognizer.processString(text)
             source = recognizer.dominantLanguage?.rawValue ?? "auto"
             sourceLanguage = source
-            targetLanguage = source.hasPrefix("zh") ? "en" : "zh-Hans"
+            if preferences.object(forKey: "translation.targetLanguage") == nil {
+                targetLanguage = source.hasPrefix("zh") ? "en" : "zh-Hans"
+            }
         }
         let target = targetLanguage
         let sourceBase = source.split(separator: "-").first

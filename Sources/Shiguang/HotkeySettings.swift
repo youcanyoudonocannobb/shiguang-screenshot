@@ -8,6 +8,10 @@ struct HotkeySettings: Codable, Equatable {
     var control = false
     var command = false
 
+    var isValid: Bool {
+        Self.keyCodes[key.uppercased()] != nil && (option || shift || control || command)
+    }
+
     var keyCode: UInt32 {
         Self.keyCodes[key.uppercased()] ?? Self.keyCodes["S"]!
     }

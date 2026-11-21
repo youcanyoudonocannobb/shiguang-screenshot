@@ -56,6 +56,7 @@ final class FinderActionsCoordinator: NSObject, ObservableObject, NSWindowDelega
         .flatMap { try? PropertyListDecoder().decode([FinderFavorite].self, from: $0) } ?? FinderFavorite.standardDirectories()
     @Published private(set) var apps = UserDefaults.standard.data(forKey: appsKey)
         .flatMap { try? PropertyListDecoder().decode([FinderApp].self, from: $0) } ?? []
+    private var isRestoringConfiguration = false
     private var picker: NSOpenPanel?
     private(set) var window: NSPanel?
     private(set) var pendingFileOperation: Task<Void, Never>?
@@ -94,7 +95,42 @@ final class FinderActionsCoordinator: NSObject, ObservableObject, NSWindowDelega
         FIFinderSyncController.showExtensionManagementInterface()
     }
 
+    func restoreConfiguration(coverage: FinderCoverage, menuDepth: FinderMenuDepth,
+                              favorites: [FinderFavorite]?, apps: [FinderApp]?) throws {
+        // Encode everything before changing any preferences. Folder grants are never read from JSON.
+        let restoredFavorites = favorites.map { folders in folders.map { folder in
+            var result = folder
+            if let existing = self.favorites.first(where: { $0.directory == folder.directory }) {
+                result.id = existing.id
+            }
+            return result
+        } }
+        let restoredApps = apps.map { imported in imported.map { app in
+            var result = app
+            if let existing = self.apps.first(where: { $0.isSameApp(as: app) }) { result.id = existing.id }
+            return result
+        } }
+        let foldersData = try restoredFavorites.map { try PropertyListEncoder().encode($0) }
+        let appsData = try restoredApps.map { try PropertyListEncoder().encode($0) }
+        isRestoringConfiguration = true
+        defer {
+            isRestoringConfiguration = false
+            publishSettings()
+        }
+        setCoverage(coverage)
+        if self.menuDepth != menuDepth { self.menuDepth = menuDepth }
+        if let foldersData, let restoredFavorites {
+            UserDefaults.standard.set(foldersData, forKey: Self.favoritesKey)
+            self.favorites = restoredFavorites
+        }
+        if let appsData, let restoredApps {
+            UserDefaults.standard.set(appsData, forKey: Self.appsKey)
+            self.apps = restoredApps
+        }
+    }
+
     func publishSettings() {
+        guard !isRestoringConfiguration else { return }
         FinderMenuSettings(scope: activeScope, language: .stored, depth: menuDepth,
                            favorites: favorites.map(\.menuEntry), apps: apps.map(\.menuEntry)).publish()
     }

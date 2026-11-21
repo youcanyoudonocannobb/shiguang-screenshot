@@ -71,7 +71,7 @@ enum ShiguangSettingsPage: String, CaseIterable, Identifiable {
         switch self {
         case .general:
             return ["截图", "开始", "菜单栏", "状态", "权限", "剪贴板", "快捷键", "翻译",
-                    "开机", "启动", "登录项", "小狗", "颜色", "图标"]
+                    "开机", "启动", "登录项", "小狗", "颜色", "图标", "配置", "导出", "备份", "JSON", "export", "backup"]
         case .screenshot:
             return ["自动识别", "OCR", "文字识别", "自动翻译", "历史", "保存", "截图流程", "确认", "复制"]
         case .translation:
@@ -344,6 +344,13 @@ private struct SettingsDetailView: View {
     let page: ShiguangSettingsPage
     @StoredState private var revealsAIKey = false
     @StoredState private var confirmsClearHistory = false
+    @StoredState private var isExportingConfiguration = false
+    @StoredState private var exportedConfigurationURL: URL?
+    @StoredState private var configurationExportError: String?
+    @StoredState private var isImportingConfiguration = false
+    @StoredState private var pendingConfigurationImport: PendingConfigurationImport?
+    @StoredState private var configurationImportError: String?
+    @StoredState private var configurationImportNotes: [String]?
 
     var body: some View {
         ScrollView {
@@ -370,6 +377,11 @@ private struct SettingsDetailView: View {
         .animation(nil, value: page)
         .background(Palette.background)
         .onChange(of: page) { _, _ in revealsAIKey = false }
+        .sheet(item: $pendingConfigurationImport, onDismiss: showConfigurationImportResult) { pending in
+            ConfigurationImportConfirmation(pending: pending, model: model,
+                onCancel: { pendingConfigurationImport = nil },
+                onApply: { applyConfigurationImport(pending) })
+        }
         .alert("清空全部截图历史？", isPresented: $confirmsClearHistory) {
             Button("取消", role: .cancel) {}
             Button("全部清除", role: .destructive) { model.clearHistory() }
@@ -435,6 +447,186 @@ private struct SettingsDetailView: View {
                                       language: model.appLanguage)
                 }
             }
+            configurationExportContent
+        }
+    }
+
+    private var configurationExportContent: some View {
+        SettingsSection("配置备份") {
+            SettingsActionRow(title: "导出配置",
+                              detail: "保存当前设置，不含 API Key、历史内容和系统授权",
+                              symbol: "square.and.arrow.up") { exportConfiguration() }
+                .disabled(isExportingConfiguration || isImportingConfiguration || pendingConfigurationImport != nil)
+            SettingsSeparator()
+            SettingsActionRow(title: "导入配置",
+                              detail: "读取 PawShot 配置备份，确认后恢复设置",
+                              symbol: "square.and.arrow.down") { importConfiguration() }
+                .disabled(isExportingConfiguration || isImportingConfiguration || pendingConfigurationImport != nil || model.isBusy)
+            if let error = configurationImportError {
+                SettingsSeparator()
+                Text("\(L("配置导入失败"))：\(error)")
+                    .font(.system(size: 11)).foregroundStyle(Palette.danger)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 16).padding(.vertical, 12)
+            }
+            if let url = exportedConfigurationURL {
+                SettingsSeparator()
+                HStack(spacing: 12) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Label("配置已导出", systemImage: "checkmark.circle.fill")
+                            .foregroundStyle(Palette.success)
+                        Text(url.lastPathComponent).foregroundStyle(Palette.muted)
+                            .textSelection(.enabled)
+                    }
+                    .font(.system(size: 11))
+                    Spacer(minLength: 0)
+                    Button("在访达中显示") {
+                        NSWorkspace.shared.activateFileViewerSelecting([url])
+                    }
+                    .controlSize(.small)
+                }
+                .padding(.horizontal, 16).padding(.vertical, 12)
+            }
+            if let error = configurationExportError {
+                SettingsSeparator()
+                Label {
+                    Text("\(L("配置导出失败"))：\(error)")
+                        .fixedSize(horizontal: false, vertical: true)
+                } icon: {
+                    Image(systemName: "exclamationmark.circle")
+                }
+                .font(.system(size: 11)).foregroundStyle(Palette.danger)
+                .padding(.horizontal, 16).padding(.vertical, 12)
+            }
+        }
+    }
+
+    private var configurationSnapshot: ConfigurationExport {
+        ConfigurationExport(settings: .init(
+            general: .init(appLanguage: model.appLanguage.rawValue,
+                           launchAtLogin: model.launchAtLoginEnabled || model.launchAtLoginRequiresApproval,
+                           showsMenuBarIcon: model.showsMenuBarIcon,
+                           menuBarIconStyle: model.menuBarDogStyle.rawValue,
+                           customMenuBarIconData: model.customMenuBarIconData),
+            screenshot: .init(autoOCR: model.autoOCR, autoTranslate: model.autoTranslate,
+                              keepHistory: model.keepHistory, autoCleanHistory: model.autoCleanHistory,
+                              fillShapes: model.fillShapes),
+            translation: .init(provider: model.translationProvider.rawValue,
+                               sourceLanguage: model.defaultSourceLanguage, targetLanguage: model.defaultTargetLanguage,
+                               aiAPI: model.aiAPI.rawValue, aiBaseURL: model.aiBaseURL,
+                               aiModel: model.aiModel, aiInstructions: model.aiInstructions),
+            clipboard: .init(monitorsSystem: clipboard.monitorsSystem, retentionDays: clipboard.retentionDays),
+            shortcuts: .init(capture: model.captureHotkey, translate: model.translateHotkey,
+                             clipboard: model.clipboardHotkey, clipboardTranslate: model.clipboardTranslateHotkey,
+                             selectionTranslate: model.selectionTranslateHotkey, launcher: model.variableNamingHotkey),
+            quickInput: .init(variableNamingStyle: model.variableNamingStyle.rawValue),
+            finderActions: .init(coverage: finderActions.coverage.rawValue,
+                                 selectedFolderPath: finderActions.selectedFolder?.path,
+                                 menuDepth: finderActions.menuDepth.rawValue,
+                                 favoriteFolders: finderActions.favorites.map {
+                                     .init(path: $0.directory.path, systemTitle: $0.systemTitle, symbol: $0.symbol)
+                                 },
+                                 openWithApps: finderActions.apps.map {
+                                     .init(path: $0.url.path, bundleIdentifier: $0.bundleIdentifier)
+                                 })
+        ))
+    }
+
+    private func importConfiguration() {
+        guard !isImportingConfiguration, !isExportingConfiguration, !model.isBusy else { return }
+        isImportingConfiguration = true
+        configurationImportError = nil
+        let panel = NSOpenPanel()
+        panel.title = L("导入配置")
+        panel.prompt = L("选择")
+        panel.allowedContentTypes = [.json]
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        let completion: (NSApplication.ModalResponse) -> Void = { response in
+            isImportingConfiguration = false
+            guard response == .OK, let url = panel.url else { return }
+            let accessed = url.startAccessingSecurityScopedResource()
+            defer { if accessed { url.stopAccessingSecurityScopedResource() } }
+            do {
+                let plan = try ConfigurationImport(configuration: ConfigurationExport.read(from: url))
+                pendingConfigurationImport = PendingConfigurationImport(url: url, plan: plan)
+            } catch { configurationImportError = importErrorDescription(error) }
+        }
+        NSApp.activate(ignoringOtherApps: true)
+        if let window = NSApp.keyWindow ?? NSApp.mainWindow {
+            panel.beginSheetModal(for: window, completionHandler: completion)
+        } else {
+            panel.begin(completionHandler: completion)
+            panel.makeKeyAndOrderFront(nil)
+        }
+    }
+
+    private func applyConfigurationImport(_ pending: PendingConfigurationImport) {
+        do {
+            // Recheck local paths immediately before commit, using the exact approved snapshot.
+            let plan = try ConfigurationImport(configuration: pending.plan.configuration)
+            configurationImportNotes = try plan.apply(to: model, clipboard: clipboard, finderActions: finderActions)
+            configurationImportError = nil
+            pendingConfigurationImport = nil
+        } catch {
+            pendingConfigurationImport = nil
+            configurationImportError = importErrorDescription(error)
+        }
+    }
+
+    private func showConfigurationImportResult() {
+        guard let notes = configurationImportNotes else { return }
+        configurationImportNotes = nil
+        let alert = NSAlert()
+        alert.messageText = L("配置已导入")
+        alert.informativeText = ([L("设置已恢复并保存，无需重新启动。")] + notes).joined(separator: "\n\n")
+        alert.addButton(withTitle: L("好"))
+        if let window = NSApp.keyWindow ?? NSApp.mainWindow {
+            alert.beginSheetModal(for: window)
+        } else {
+            alert.runModal()
+        }
+    }
+
+    private func importErrorDescription(_ error: Error) -> String {
+        guard let error = error as? ConfigurationFileError else { return error.localizedDescription }
+        switch error {
+        case .tooLarge: return L("配置文件超过 8 MB，请选择 PawShot 导出的 JSON 文件。")
+        case .invalidFormat: return L("这不是有效的 PawShot 配置备份。")
+        case .unsupportedVersion: return L("暂不支持此配置版本，请使用兼容版本的 PawShot。")
+        case .invalidData: return L("配置内容缺失或损坏，当前设置未更改。")
+        case .invalidValue(let field): return "\(L("配置值无效"))：\(L(field))"
+        }
+    }
+
+    private func exportConfiguration() {
+        guard !isExportingConfiguration else { return }
+        isExportingConfiguration = true
+        let panel = NSSavePanel()
+        panel.title = L("导出配置")
+        panel.prompt = L("导出")
+        panel.allowedContentTypes = [.json]
+        panel.canCreateDirectories = true
+        panel.isExtensionHidden = false
+        panel.nameFieldStringValue = ConfigurationExport.suggestedFilename()
+        let completion: (NSApplication.ModalResponse) -> Void = { response in
+            isExportingConfiguration = false
+            guard response == .OK, let url = panel.url else { return }
+            exportedConfigurationURL = nil
+            configurationExportError = nil
+            do {
+                try configurationSnapshot.write(to: url)
+                exportedConfigurationURL = url
+            } catch {
+                configurationExportError = importErrorDescription(error)
+            }
+        }
+        NSApp.activate(ignoringOtherApps: true)
+        if let window = NSApp.keyWindow ?? NSApp.mainWindow {
+            panel.beginSheetModal(for: window, completionHandler: completion)
+        } else {
+            panel.begin(completionHandler: completion)
+            panel.makeKeyAndOrderFront(nil)
         }
     }
 
@@ -549,8 +741,8 @@ private struct SettingsDetailView: View {
 
             SettingsSection("语言") {
                 SettingsRow("默认目标语言") {
-                    Picker("目标语言", selection: Binding(get: { model.targetLanguage },
-                                                        set: { model.languageEdited(target: $0) })) {
+                    Picker("目标语言", selection: Binding(get: { model.defaultTargetLanguage },
+                                                        set: { model.setDefaultTargetLanguage($0) })) {
                         ForEach(LanguageChoice.targets) { Text($0.name).tag($0.id) }
                     }
                     .labelsHidden()
@@ -981,6 +1173,84 @@ private struct MenuBarBrandMark: View {
             Text(AppLocalization.text("当前菜单栏图标：", language: language))
                 + Text(verbatim: AppLocalization.text(style.titleKey, language: language))
         )
+    }
+}
+
+private struct PendingConfigurationImport: Identifiable {
+    let id = UUID()
+    let url: URL
+    let plan: ConfigurationImport
+}
+
+private struct ConfigurationImportConfirmation: View {
+    let pending: PendingConfigurationImport
+    @ObservedObject var model: AppModel
+    let onCancel: () -> Void
+    let onApply: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Label("导入配置", systemImage: "square.and.arrow.down")
+                .font(.system(size: 18, weight: .semibold))
+            Text("请核对备份信息，确认后将覆盖当前设置。")
+                .font(.system(size: 12)).foregroundStyle(Palette.muted)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 10) {
+                        previewRow("备份文件", pending.url.lastPathComponent)
+                        previewRow("导出时间", pending.plan.configuration.exportedAt.formatted(date: .abbreviated, time: .shortened))
+                        previewRow("备份版本", "PawShot \(pending.plan.configuration.appVersion) (\(pending.plan.configuration.buildNumber))")
+                        previewRow("界面语言", pending.plan.appLanguage.nativeTitle)
+                        previewRow("翻译引擎", pending.plan.provider.title)
+                        previewRow("AI 接口", pending.plan.aiAPI.title)
+                        previewRow("AI 接口地址", pending.plan.configuration.settings.translation.aiBaseURL)
+                        previewRow("剪贴板保留天数", String(pending.plan.configuration.settings.clipboard.retentionDays))
+                        previewRow("操作范围", L(pending.plan.coverage.title))
+                        if let path = pending.plan.configuration.settings.finderActions.selectedFolderPath {
+                            previewRow("备份操作文件夹", path)
+                        }
+                    }
+                    Divider()
+                    Text("将恢复通用、截图、翻译、剪贴板、六组快捷键、启动台和超级右键设置。")
+                    Text("历史保留策略会立即生效，过期的截图或剪贴板记录可能被清理。")
+                        .foregroundStyle(Palette.danger)
+                    Text("系统授权保留本机状态；操作文件夹需在超级右键中重新选择并授权。")
+                    if pending.plan.coverage == .allFolders {
+                        Text("备份将启用所有文件夹范围，超级右键菜单会出现在本机有权访问的所有目录中。")
+                    }
+                    if pending.plan.changesAIEndpoint(in: model) {
+                        Text("AI 接口已更改，请重新填写 API Key；本机保存的密钥未删除。")
+                    }
+                    if pending.plan.hasConflictingShortcuts {
+                        Text("备份中的快捷键存在重复，导入后请在快捷键设置中调整。")
+                            .foregroundStyle(Palette.danger)
+                    }
+                    if pending.plan.unavailableItemCount > 0 {
+                        Text("未找到的目录或应用已跳过；整组都不可用时保留本机列表。")
+                    }
+                }
+                .font(.system(size: 12)).textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .frame(maxHeight: 380)
+            Divider()
+            HStack {
+                Spacer()
+                Button("取消", action: onCancel).keyboardShortcut(.cancelAction)
+                Button("确认导入", action: onApply)
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(model.isBusy)
+            }
+        }
+        .padding(24).frame(width: 520)
+    }
+
+    private func previewRow(_ title: String, _ value: String) -> some View {
+        GridRow(alignment: .top) {
+            Text(LocalizedStringKey(title)).foregroundStyle(Palette.muted)
+            Text(verbatim: value).frame(maxWidth: .infinity, alignment: .leading)
+                .fixedSize(horizontal: false, vertical: true)
+        }
     }
 }
 
