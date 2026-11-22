@@ -1,296 +1,61 @@
 # PawShot
 
-一个可以本地编译、运行的原生 macOS 截图、录制、翻译与剪贴板工具。采用 SwiftUI + AppKit，当前英文名称与显示名称为 **PawShot**，当前版本 1.5.3。本项目按截图与翻译需求独立实现，不包含 CapCap 的代码、素材或商标。
+**English** · [简体中文](README.zh-CN.md)
 
-项目主页与问题反馈：[github.com/youcanyoudonocannobb/shiguang-screenshot](https://github.com/youcanyoudonocannobb/shiguang-screenshot)。
+PawShot is a native macOS menu bar app for screenshots, screen recording, OCR, translation, and clipboard history. Capture what you need, mark it up, and paste it back into your work.
 
-## 交互方式
+**[Download the latest release](https://github.com/youcanyoudonocannobb/shiguang-screenshot/releases/latest)** · macOS 15 or later · Apple silicon
 
-应用以菜单栏工具方式运行，不在 Dock 或 Command + Tab 中显示；顶部菜单栏图标始终保留，即使关闭设置窗口也不会退出。点击菜单栏图标会打开独立菜单，点击菜单外空白处即可正常收起，常驻图标不会随之消失。启动时打开设置窗口，包含通用、截图、翻译、剪贴板、快捷输入、快捷键、历史记录、隐私与存储和关于。菜单栏图标不可被用户误移除，避免隐藏 Dock 后失去入口。
+![PawShot's editor with a rectangle, arrow, and numbered callout on a sample trail guide](docs/screenshots/annotation-editor.jpg)
 
-应用图标采用湖蓝色圆角底与简洁小狗头像。菜单栏图标支持系统单色、四种小狗配色、小猫、兔子、狐狸和熊猫样式，并可单独隐藏；系统单色使用实心模板图并随菜单栏明暗自动反色。也可以从本地选择 PNG、JPG、HEIC 或 TIFF 图片，应用会自动居中缩放并保存为自定义菜单栏图标。通用设置提供登录时自动启动和菜单栏显示开关，登录项需要系统确认时会给出进入 macOS 设置的入口。整体界面以冷白、浅雾蓝和湖蓝为统一配色。偏好设置窗口采用左固定导航栏（`206pt`）+ 右侧 `620pt` 卡片工作区结构：左侧提供应用标识、搜索框、可控圆角分组导航与底部运行状态；右侧使用带主题图标砖块的简洁页头和统一 `12pt` 圆角卡片分组，AI 服务输入框左对齐铺满卡片宽度，快捷键行左文右框对齐。窗口默认 `880×620`，最小 `820×560`，并记住上次浏览的页面。界面结构参考公开设计原则，不复制参考项目的代码、图标或素材。
+## What you can do
 
-快捷键页不再使用字母下拉框和修饰键开关。点击输入框后可直接按下真实组合键，支持 `Option`、`Control`、`Command`、`Shift` 与字母、数字、功能键及方向键，不会再被输入框转换成特殊字符；录入期间会暂停现有全局快捷键，避免旧的截图/翻译快捷键抢先触发。仍保留手动输入，例如 `⌥⇧S`、`option+shift+s` 或 `control + option + s`，输入后点击「应用」或按回车即可立即重新注册。
+- **Capture and annotate** Select an area or click a window. Add arrows, numbers, text, and mosaic masks. Select existing marks to edit them. Confirm to copy the result, or pin it directly to your desktop.
+- **Record and stitch** Record a region as a silent MP4 or GIF, with pause and resume. Take a scrolling screenshot manually or automatically, preview the stitched image, and copy it when you're done.
+- **Read and translate** Extract text, tables, and simple formulas on device. Translate a screenshot, the clipboard, or selected text in a popup. Use Apple Translation by default or configure an AI service compatible with OpenAI Chat, OpenAI Responses, Claude Messages, or Gemini.
+- **Search and reuse** Find past clipboard items by text or type. Use the launcher to search apps, prefix a query with `/` to find files, or generate variable names and test data. The toolbox handles JSON, Base64, and other conversions.
+- **Work in Finder** Use the Finder extension to create files, copy paths, compress or extract archives, jump to favorite folders, and open files or folders with your chosen apps.
 
-屏幕截图支持拖动框选，或悬停识别窗口后单击选中。框选遮罩使用更深的背景、亮湖蓝描边、实时像素尺寸和八点控制柄，窗口悬停与自由拖动都能清楚辨认当前范围。选择结束后在屏幕原位编辑，继续保留八点调整手柄；拖动边框可改变大小，选择「移动选区」后拖动图片可移动范围，方向键按像素微调，Shift + 方向键移动 10pt。选区限制在当前显示器内。编辑使用本次冻结的屏幕画面，调整选区不会把工具栏重新截进去。
+## PawShot in action
 
-单行深色编辑工具条会跟随选区吸附：默认位于选区下方并保持 `10pt` 间距，底部空间不足时切换到上方，整屏高度下再切换至选区右侧或左侧，水平或垂直方向都会随选区居中并限制在屏幕可见区域内。取消（❌）与确认（✅）固定在最右端，并用一条更明显的分隔线与编辑功能隔开。整条工具条是同一个圆角整体，区域框选与完整编辑器使用同一套布局，不再出现两段黑色控件。从左到右依次为：常用标注工具、撤销/重做、识别与翻译、长截图与录制、剪贴板与钉住、确认。可以先标注、添加文字或马赛克，再点击对应按钮进入识别、翻译、长截图或录制；裁剪调整会保留标注的屏幕位置，超出选区的部分仅被裁掉，扩大范围可恢复。普通截图不自动跳转文字窗口。工具栏不再单设复制按钮：点击 ✅ 就是唯一的"复制并完成"，直接把带标注的图片复制到系统剪贴板，关闭编辑器并返回原应用，可按 Command + V 粘贴，不会打开保存对话框。取消或 Esc 丢弃本次草稿，不改变剪贴板、不新增截图历史。开启截图历史时，确认后同时保留本地历史；关闭历史仍可直接复制。
+### Table OCR
 
-工具栏的当前工具使用浅色底和湖蓝短线标识；调色板按钮右下角显示当前颜色（色点收在按钮内，不会溢出被裁切）。确认与取消使用中性底 + 绿色/红色描边圆角块，两者结构对称，悬停有 1.05 缩放与浅色反馈。功能区按"常用标注 / 撤销重做 / 识别翻译与长图录制 / 剪贴板与钉住"分成四组圆角容器（纵向渐变底 + 细描边），确认区独立在分组之外。矩形、椭圆、直线、箭头、画笔、自动编号、文字、马赛克和图片取色直接显示在主工具栏；荧光笔、黑色遮盖、矩形/椭圆填充及缩放按钮收进「更多功能」弹层。框选完成后工具栏即显示钉住按钮；点击后无需再按 ✅，当前标注结果会立即成为无标题栏桌面贴图。贴图可拖动，滚轮围绕指针等比缩放，鼠标悬浮右上角显示关闭与透明度控制，按 Esc 也可关闭；对已确认图片也可直接钉住。文字工具保留 T 字形但改用无衬线字重，和相邻 SF Symbols 对齐。鼠标停在任意图标上会在该按钮正上方浮出名称标签，不常显。编辑窗口开启了 `acceptsMouseMovedEvents`，否则 SwiftUI 的悬停状态和系统 tooltip 都收不到鼠标移动事件。完整编辑器最小宽度与悬浮编辑窗口初始宽度都保证整条工具条完整显示，不会把最右侧的 ❌/✅ 裁掉。文字识别与截图翻译使用同一套独立文字工作台：顶部是紧凑品牌标题和翻译引擎切换，下方是一体化原文/译文表面和单一主操作区；语言选择条只保留原文与目标语言两个原生下拉框，并在左上角紧凑排列；复制入口收进各面板标题行，状态与主按钮并排，不混入截图或标注控件。
+The original image stays on the left while PawShot rebuilds the table on the right. Copy the result as Markdown or export it as CSV.
 
-录制和长截图的选择菜单使用不透明深色底、白色标题和浅灰说明，选项整行可点击，并有悬浮/按下反馈；颜色不受浅色编辑器的橙红主题影响。
+![PawShot table OCR with the source image on the left and three reconstructed columns on the right](docs/screenshots/table-ocr.jpg)
 
-点击文字识别后只打开识别文字窗口；点击翻译或使用「截图并翻译」后只打开原文/译文窗口，包括识别尚未结束的阶段。不显示截图、图片工具栏或图片确认按钮。翻译窗口使用左右双栏：原文与译文并排展示，默认 860×520，最小 700×440，比原先上下堆叠的长文字框更紧凑；窄窗口下仍可滚动阅读。关闭文字窗口会取消正在进行的任务并丢弃未确认图片，文字可以直接复制。语种自动检测：未设置默认目标语言时，中文默认译英语，其他语言默认译简体中文；已设置或导入默认目标语言时优先使用该语言。当前文档的语言调整与默认偏好分别保存。
+### Launcher
 
-翻译页可选择 Apple 翻译或 AI 翻译。Apple 翻译使用系统框架，是首次安装和本次升级后的默认引擎，无需 API Key；AI 翻译支持 OpenAI Chat Completions、OpenAI Responses、Claude Messages 和 Gemini 四类协议，可分别填写接口地址、模型、API Key 和附加要求。OpenAI Chat 模式兼容自建或本机的 Chat Completions 服务，本机 `localhost` / `127.0.0.1` 地址允许使用 HTTP 且可省略 Key；切换到其他协议时会自动填入对应默认地址与模型，仍可手动覆盖。API Key 按接口类型单独保存在本机应用数据目录的 `ai-keys.json` 中，不写入源码、历史或日志；只有切换到 AI 翻译并实际发起请求时，待翻译文字才会发送到用户配置的服务。设置中的「测试连接」会发送一次 `Hello` 翻译请求。「翻译剪贴板」直接读取系统剪贴板中的文字或图片，默认快捷键为 `Option + Shift + C`；翻译窗口支持交换语言，并可复制原文、译文或对照结果。
+Type `xt coastal trail` to generate `coastalTrail`. Press Return to copy it.
 
-划词翻译默认快捷键为 `Option + Shift + D`：在浏览器、文档或输入框中选中文字后按下快捷键，PawShot 会通过 macOS 辅助功能接口只读取当前选区，并直接打开独立翻译窗口。不会主动改写或覆盖剪贴板；首次使用需在「系统设置 > 隐私与安全性 > 辅助功能」中允许 PawShot。快捷键可在设置中重新录制。
+![PawShot launcher converting xt coastal trail into the camelCase name coastalTrail](docs/screenshots/launcher.jpg)
 
-鼠标滚轮不再缩放图片，避免滚动画面时误触；缩放范围为相对适应窗口的 25%–800%，可通过「更多功能」中的缩小、放大或百分比按钮操作，触控板捏合仍可直接缩放。在「浏览」工具下拖动可移动放大后的画面，选择「移动选区」会恢复原比例以调整屏幕范围。选择「文字」后点击图片输入，回车完成，直接点 ✅ 也会提交正在输入的标注；选择「马赛克」后拖动框选区域。椭圆、直线、自动递增编号和图片取色直接显示在主工具栏，荧光笔与黑色遮盖位于「更多功能」；取色后自动回到浏览工具。新增标注支持撤销与重做，并会合并到复制和保存的 PNG。导入图片、历史及长图仍使用独立图片编辑器。
+## Install and get started
 
-Esc 在框选时取消截图或录制区域选择；待确认编辑中会取消并丢弃本次截图，同时隐藏悬浮和完整编辑窗口。桌面贴图获得焦点后按 Esc 关闭。取消不会打开文字翻译或设置窗口；文字翻译需要通过对应入口主动打开，图片被清空不会触发该入口。已确认打开的历史/导入图片仍可用 Esc 关闭编辑器。文字输入时先取消本次输入，关闭编辑器会结束当前识别或翻译。
+1. Download the DMG from the [latest release](https://github.com/youcanyoudonocannobb/shiguang-screenshot/releases/latest) and drag `PawShot.app` into Applications.
+2. Open PawShot and click the dog icon in the menu bar or press `⌥⇧S` to start a capture. Allow screen recording when macOS prompts you. Selected-text translation and automatic scrolling capture also need Accessibility permission.
+3. Open **Settings → General** to choose English, Simplified Chinese, Japanese, or Korean and customize the menu bar icon.
+4. To use Finder actions, open **Settings → Finder Actions → System Settings** and enable the PawShot Finder extension. Grant Full Disk Access only if you need actions in protected folders.
 
-框选层是独立的全屏遮罩，不依赖应用成为前台窗口：出现时即注册全局 Esc，即使原应用仍持有键盘焦点也能取消；右键单击同样取消，遮罩未获得焦点时第一次单击就能生效，不会被吞掉。框选完成后的屏幕捕获最多等待 20 秒，超时会自动结束并提示“屏幕截图长时间没有响应”，不会再停在无响应状态。
+## Default global shortcuts
 
-自动识别和自动翻译设置只作用于导入图片，开关会保留到下次启动。屏幕截图始终先编辑，需要识别或翻译时点击工具栏；「截图并翻译」快捷入口仍直接进入独立翻译窗口。识别使用当前标注合成后的图像。应用启动约 2 秒后会在后台用一张 128×128 的临时图片预热一次 Vision 文字模型，把模型加载从用户的第一次识别里挪走；实测首次识别由约 15 秒降到 1.3 秒。每次启动后的首次识别最多等待 120 秒，超过 3 秒会显示首次识别提示；首次成功后，后续识别最多等待 45 秒。识别过程中可取消，也可直接开始新截图，旧任务的迟到结果不会覆盖新图片。
-
-## 区域录制
-
-点击截图工具栏「录制」，选择 MP4 视频或 GIF 动图，直接沿用调整后的选区并开始录制；从应用的「文件」菜单或菜单栏开始新录制时先框选区域，再点开始。黑色控制条高 42pt，显示格式、有效录制时长、暂停/继续、停止、取消和确认。可拖动控制条的位置。暂停期间计时停止，恢复后继续同一草稿，最终视频/GIF 去掉暂停的时间。停止按钮只停止并打开视频预览。点击 ✅ 才把录制复制到系统剪贴板，也可以在录制或暂停时直接点 ✅ 结束并复制；GIF 转换时显示进度。整个流程没有保存对话框。❌ 或 Esc 会取消准备、录制、暂停、预览或转换中的草稿，并清除本次临时文件。本应用的工具窗口会从录制中排除。
-
-- MP4：H.264，目标 30 帧/秒，最长边不超过 2560 像素。
-- GIF：目标 10 帧/秒，最长边不超过 1280 像素，有效录制时间最长 60 秒，循环播放。
-- 当前为无声区域录制；不采集麦克风或系统声音。
-- MP4 通过系统原生文件引用复制；GIF 同时提供原生动图数据、文件引用和首帧图片。接收应用会选择支持的格式，视频粘贴需要接收方支持文件。
-- 已确认的录制自动缓存于本地剪贴板媒体目录，历史中可再次复制。旧版本的待导出录制完整保留，可从「复制之前的录制」再次复制；新的 MP4/GIF 入口始终开始新录制。
-- 截图和录制都需要系统屏幕录制授权。从旧临时签名版首次升级到固定签名版，仍可能需要重新授权一次；编码和导出检查通过不代表系统已允许屏幕访问。
-
-## 长截图
-
-从截图工具栏选择自动/手动长截图会直接使用当前选区；从「文件」菜单开始时框选窗口里的滚动正文，避开固定工具栏。手动模式跟随鼠标向下滚动并持续拼接；自动模式按较小步长滚动，画面稳定后拼接。自动滚动需要系统允许发送滚轮事件，手动模式不需要这项额外权限。
-
-右侧浮动面板显示已拼接的完整长图、像素尺寸和帧数，预览可滚动查看。至少成功追加一帧后才能点击「完成拼接」，随后仍进入图片草稿，需点 ✅ 才复制；取消不保存、不复制。无重叠时会提示向上滚回一点，保留此前已经匹配的内容；只有首帧时不会冒充长截图完成。
-
-长截图改从相邻两帧底部的连续重叠行反向匹配，不再用整帧平均误差寻找位移；重复文本、交替行背景和固定 footer 会参与唯一性检查，避免周期性错位静默丢行。选区跨到多个窗口时，会自动裁成目标滚动窗口内的有效区域并提示实际尺寸；命中多个候选窗口时优先使用光标处层级最高的窗口。
-
-框选层不激活应用，并在选区完成后恢复原窗口，避免台前调度切换应用后截到桌面或找不到目标窗口。滚动过快、大面积动态内容、完全没有可区分文字/纹理的重复画面仍可能无法可靠拼接。
-
-## 系统剪贴板
-
-默认按 `Option + Shift + V` 打开剪贴板历史，可在设置中修改快捷键，也可从菜单或截图工具栏打开。支持系统复制的文字、富文本、图片、GIF、视频和文件，保留最近 100 项并去重；搜索文字或文件名、按类型筛选，使用 ↑ / ↓ 选择、Return 复制、Esc 关闭。也可双击条目或点击复制按钮，复制后返回原窗口，用 Command + V 粘贴。
-
-默认按 `Option + Shift + C` 翻译当前剪贴板内容，可在设置中修改。剪贴板中是文字时直接打开翻译窗口；是图片时先本地识别再翻译。
-
-系统剪贴板记录可在设置或面板菜单中暂停。macOS 15.4 及以上遵循系统剪贴板访问策略；系统未允许后台读取时，只在主动打开面板时读取当前内容，面板会显示说明。本应用不更改系统隐私设置。来源标记为保密或临时的内容不收入历史。文件历史保留原文件引用，外部原文件移动或删除后无法再次复制。
-
-## 快捷输入
-
-按默认全局快捷键 `Option + Shift + X` 会打开参考启动台交互设计的独立「快捷输入」面板：单行搜索、纵向结果列表、当前结果预览，Return 执行或复制，↑ / ↓ 切换结果，Esc 关闭并回到原应用。偏好设置中新增独立的「快捷输入」页面，可修改启动快捷键、默认变量格式并查看全部快捷语。
-
-变量快捷语支持小驼峰 `xt` / `lt`、大驼峰 `dt`、下划线 `snake`、短横线 `kebab` 和常量 `const`。中文参数会先通过 Apple 系统翻译转为英文，再转换为变量名，例如 `xt 用户登录` 生成 `userLogin`、`lt 红烧牛肉面` 生成 `braisedBeefNoodles`；连续的未收录中文也会重新触发翻译，不会停留在旧的“翻译中”状态。输入「地址」「IP」「身份证」「姓名」「邮箱」「手机号」「UUID」「密码」或它们的英文别名会立即生成对应随机测试数据。结果区域提供明确的复制按钮，按 Return 也可复制到系统剪贴板。快捷键和默认变量格式都可修改；随机数据完全在本机生成，IPv4 使用 RFC 5737 文档测试网段，身份证会生成并通过校验位计算。
-
-## 超级右键
-
-在「偏好设置 → 超级右键」点「系统设置」，在 macOS 的「登录项与扩展」中启用 PawShot 访达扩展。在「操作范围」选择「所有文件夹」，访达会在启动磁盘和已挂载磁盘提供菜单。处理受系统隐私保护的目录时，在这一页打开「完整磁盘访问」，为 PawShot 授权一次。若只需要在一个文件夹里使用，可选择「指定文件夹」。
-
-- 在操作范围内的空白处右键，展开带彩色图标的「新建文件」可创建 TXT、Markdown、JSON 或 CSV。新建 JSON 初始内容为 `{}`。也可直接复制当前目录路径或在终端打开。
-- 右键点击文件或子文件夹，可以复制路径、复制名称、复制到其他本地文件夹，或在同一磁盘内移动。支持多选，复制的路径或名称每项一行。选中单个项目时也可打开终端，文件会定位到其上级目录。
-- 在设置的「用应用打开」中添加常用软件，例如 VS Code、Typora 或微信。右键文件或文件夹，展开「用应用打开」，选择软件即可用它打开所选项目，支持多选；在空白处右键则用它打开当前文件夹。菜单中显示软件自己的图标；软件移动或更新后会按 Bundle ID 重新找到。
-- 复制和移动需要选定目标文件夹，遇到同名项目会停止并保留原有文件。
-- 选中同一目录中的文件或文件夹，可「压缩为 ZIP」。选中 ZIP、7z、RAR 或 TAR 系列压缩包，可「解压到此处」。生成的 ZIP 和解压文件夹放在原项目旁，重名时自动编号。
-- 「常用目录」可直达桌面、文稿、下载，以及在设置中添加的文件夹。菜单默认两层，展开「新建文件」「用应用打开」或「常用目录」可见各项。选择一层后，所有操作直接显示在访达右键中，软件显示为「用「VS Code」打开」。
-
-运行 `bash scripts/test-finder-actions.sh` 可检查菜单配置、用应用打开、文件创建、复制移动和压缩解压。用 `pluginkit -m -i dev.shiguang.screenshot.finder` 查看登记状态。
-
-## 运行
-
-当前交付的应用为 Apple Silicon 架构，系统最低版本为 macOS 15。双击旁边的 `PawShot.app` 即可启动。关闭主窗口后，应用仍驻留菜单栏；从菜单栏可再次打开或退出。
-
-第一次使用：
-
-1. 可先点「体验示例」验证图片预览与真实 OCR，不需要屏幕录制权限。
-2. 点击「开始截图」并拖动选择区域。应用通过 ScreenCaptureKit 获取所选区域；按 Esc 取消。
-3. 如果系统拒绝访问，应用会显示授权引导。在「隐私与安全性 → 屏幕与系统音频录制」（部分系统称「录屏与系统录音」）中为当前版本授权。若原开关已打开但仍被拒绝，请重新授权；必要时移除旧条目并添加当前路径的应用。可通过「重启 PawShot」完成退出并重新打开。
-4. 识别结果可手工修正，选择目标语言并点击「翻译文字」。首次使用时，Apple 可能提示下载对应语言包；请按系统界面完成。
-
-本机日常构建使用固定的自签名证书，同一台 Mac 的后续构建复用同一身份。公开发布走 GitHub Releases，由 CI 使用 Developer ID 签名并公证；见下方「下载与发布」。
-
-固定身份由应用标识与证书指纹共同约束，不再随可执行文件内容变化。不要删除或重新生成签名身份；从旧临时签名迁移、替换证书或系统自身策略变化，仍可能需要重新确认屏幕权限。设置中的「检查权限」只读取状态，不触发授权；旧接口的预检结果不会提前阻止截图，实际访问结果以 ScreenCaptureKit 为准。
-
-## 下载与发布
-
-下载地址：[github.com/youcanyoudonocannobb/shiguang-screenshot/releases](https://github.com/youcanyoudonocannobb/shiguang-screenshot/releases)。
-
-每个版本附带三个文件，DMG 供普通安装使用：
-
-- `PawShot-<版本>-arm64.dmg`：打开后把 PawShot 拖到 Applications。
-- `PawShot-<版本>-arm64.zip`：适合命令行或脚本安装。
-- `PawShot-<版本>-arm64.sha256`：校验下载，`shasum -a 256 -c PawShot-*.sha256`。
-
-需要 macOS 15 或以上与 Apple Silicon。首次启动请在「系统设置 → 隐私与安全性 → 屏幕与系统音频录制」授权；划词翻译和自动长截图还需要「辅助功能」。
-
-### 本地打包
-
-```bash
-bash scripts/package-release.sh            # 构建并生成 DMG/ZIP/校验文件
-bash scripts/package-release.sh --skip-build
-bash scripts/package-release.sh --notarize # 需 Apple ID 与公证密码环境变量
-```
-
-产物在 `dist/`，DMG 内含 `PawShot.app` 和指向 `/Applications` 的链接。使用 Developer ID 构建时传入证书名称即可：
-
-```bash
-SHIGUANG_SIGN_IDENTITY="Developer ID Application: Name (TEAMID)" bash scripts/package-release.sh
-```
-
-`SWIFT_BUILD_ARGS` 可追加 Swift 构建参数，例如 `"--arch arm64 --arch x86_64"` 生成通用二进制（打包脚本按实际架构命名文件）。
-
-### 自动发布
-
-`.github/workflows/release.yml` 在推送 `v*` 标签时构建并发布，也可在 Actions 页面手动运行并填入标签。标签必须与 `Info.plist` 的 `CFBundleShortVersionString` 一致，例如 `v1.5.3`。
-
-```bash
-git tag v1.5.3
-git push origin v1.5.3
-```
-
-仓库 Secrets 可配置以下值；缺少证书时 CI 会退回临时签名，产物仍可用于本机测试，但别人下载后会被 Gatekeeper 拦截：
-
-| Secret | 说明 |
+| Action | Shortcut |
 | --- | --- |
-| `APPLE_CERTIFICATE_P12` | Developer ID Application 证书导出的 p12，Base64 编码 |
-| `APPLE_CERTIFICATE_PASSWORD` | p12 导出密码 |
-| `APPLE_SIGNING_IDENTITY` | 证书全名，例如 `Developer ID Application: Name (TEAMID)` |
-| `APPLE_ID` | 公证使用的 Apple ID |
-| `APPLE_TEAM_ID` | 开发者 Team ID |
-| `APPLE_APP_SPECIFIC_PASSWORD` | App 专用密码，不是账号密码 |
+| Capture a region | `⌥⇧S` |
+| Capture and translate | `⌥⇧T` |
+| Clipboard history | `⌥⇧V` |
+| Translate the clipboard | `⌥⇧C` |
+| Translate selected text | `⌥⇧D` |
+| Launcher | `⌥⇧X` |
 
-有 Developer ID 证书时 CI 会启用 hardened runtime 并签名；三项公证凭据齐全时再提交公证并 stapler。没有 Apple Developer 账号就只能自签名，用户需右键「打开」或在终端执行 `xattr -dr com.apple.quarantine /Applications/PawShot.app` 才能绕过拦截，不建议长期这样分发。
+Customize these shortcuts in **Settings → Shortcuts**. Press Esc to cancel a selection or discard the current draft.
 
-## 已实现
+## Privacy and settings
 
-- 菜单栏常驻入口与六个可在设置中修改的全局快捷键：区域截图 `Option + Shift + S`、截图并翻译 `Option + Shift + T`、剪贴板历史 `Option + Shift + V`、翻译剪贴板 `Option + Shift + C`、划词翻译 `Option + Shift + D`、快捷输入工具 `Option + Shift + X`。
-- 原生区域框选/窗口点选与 ScreenCaptureKit 截图，原位调整选区、像素尺寸提示、方向键微调，以及图片导入和剪贴板粘贴。
-- Apple Vision 本地 OCR，支持中、英、日、韩、法、德、西等候选语言；实际能力以本机系统为准。
-- Apple Translation 翻译：自动识别语种；中文默认译 English，其他语言默认译简体中文，也可手动调整或交换语言。原文与译文对照，可分别复制或复制对照。
-- 不依赖截图的文字翻译；原文可编辑，编辑后会清空旧译文以免混淆。
-- 划词翻译：在其他应用中选中文字后按全局快捷键，直接读取当前选区并打开翻译窗口；只读访问选区，不改写剪贴板。
-- 常用图片标注：矩形、椭圆、直线、箭头、自由画笔、自动编号、中英文文字、马赛克、图片取色、五种颜色、撤销/重做与清除；荧光笔、黑色遮盖和形状填充收在「更多功能」。
-- 缩放按钮与触控板捏合缩放、拖动浏览和适应窗口；鼠标滚轮不再触发缩放。
-- 区域录制为 MP4 视频或 GIF 动图，紧凑浮条支持暂停/继续，停止后预览、确认后直接复制；支持复制旧版保留的录制。
-- 自动/手动长截图、累计长图侧边预览、完成拼接后继续编辑并确认复制。
-- 图片确认即复制，标注会合并到复制图。
-- 系统剪贴板历史、搜索、类型筛选、键盘选择和快捷复制，文字/图片/录制均可再次取用。
-- 快捷输入工具支持中英文变量命名转换、命令前缀、关键词触发的随机数据生成和明确的复制按钮；支持姓名、邮箱、地址、手机号、IPv4、身份证、UUID、强密码。
-- AI 翻译支持 OpenAI Chat、OpenAI Responses、Claude Messages 与 Gemini 协议，并兼容本机无 Key 的 OpenAI 兼容服务。
-- 无标题栏桌面贴图；点击钉住立即显示，无需再点确认；可拖动、关闭和调整透明度，支持鼠标滚轮围绕指针等比放大、缩小，按 Esc 关闭。
-- 最近 30 张图片及其原文、译文、语言选择、标注的本地历史；可在设置中关闭历史保存，或清理全部记录。
-- 失败提示、取消截图、取消识别与翻译、快捷键占用提示。首次识别等待上限 120 秒，首次成功后为 45 秒；翻译等待上限 120 秒，超时后恢复操作并提示重试。
-- 屏幕捕获超时保护：框选后 20 秒内没有取到画面会自动取消并恢复窗口，不会留下无法操作的遮罩。
+OCR runs on device. Screenshot and clipboard history are stored locally. When you use optional AI translation, the text you translate is sent to the service you configured. Copied screenshots include mosaic masks and other marks. The original remains editable in screenshot history.
 
-## 快捷键
+The current source supports importing and exporting JSON settings under **Settings → General → Configuration backup**. Backups exclude API keys, history, and macOS permissions.
 
-| 操作 | 快捷键 |
-| --- | --- |
-| 区域截图（全局） | Option + Shift + S |
-| 截图并翻译（全局） | Option + Shift + T |
-| 剪贴板历史（全局） | Option + Shift + V |
-| 翻译剪贴板（全局） | Option + Shift + C |
-| 划词翻译（全局） | Option + Shift + D |
-| 快捷输入工具（全局） | Option + Shift + X |
-| 选择 / 复制剪贴板条目 | ↑ ↓ / Return |
-| 新截图（应用内） | Command + N |
-| 导入图片 | Command + O |
-| 粘贴图片 | Command + Shift + V |
-| 新文字翻译 | Command + T |
-| 翻译文字（纯文字编辑器） | Command + Return |
-| 取消框选 / 关闭截图 / 取消文字输入 | Esc |
-| 确认屏幕选区并复制 | Return（文字输入中先结束文字） |
-| 微调屏幕选区 | 方向键；Shift + 方向键移动 10pt |
-| 撤销标注 | Command + Option + Z |
-| 重做标注 | Command + Shift + Z |
-| 显示工作台 | Command + 1 |
-| 偏好设置 | Command + , |
+## Development and feedback
 
-## 数据与隐私
-
-数据目录为 `~/Library/Application Support/Shiguang/`，包含 PNG 原图和 `history.json`。应用会自动保留最近 30 张截图，超出后删除最旧记录及原图。数据没有应用级加密，依赖 macOS 用户权限与磁盘保护。
-
-剪贴板数据位于该目录下的 `Clipboard/`，包含索引、各项的原生格式快照及 `Media/` 中已确认的 MP4/GIF。最多保留最近 100 项，确认前仅使用临时录制文件，取消会清理本次草稿。过期的应用媒体缓存会自动清理，但当前系统剪贴板正在引用的文件与转换中的文件会保留；清空剪贴板历史不清空系统当前内容、不删除外部原文件。旧版 `PendingRecordings/` 中的既有录制不被本次更新删除。剪贴板历史同样没有应用级加密，只保存在本机用户目录。
-
-OCR 在本地通过 Vision 执行。变量名转换与随机测试数据完全在本机生成。默认翻译通过 Apple 系统翻译框架执行，首次语言包下载需要网络；切换到 AI 翻译后，待翻译文字会发送到用户配置的 OpenAI、Anthropic、Google 或自建兼容服务。应用没有内置统计 SDK、自建服务器或账号系统，也不会自动上传数据。
-
-**马赛克与黑色遮盖会合并到复制、导出及新识别所用的图片。截图历史仍保存原图与可撤销标注，已有识别文字与译文也可能包含原始信息。** 分享时请使用应用中的复制或显式 PNG 导出，不要直接分享数据目录中的原图。需要移除原始内容时，删除对应历史记录。
-
-纯文字翻译草稿不会写入历史，开始其他任务或退出前请复制需要保留的内容。
-
-## 配置导入与导出
-
-在「偏好设置 > 通用 > 配置备份」中点击「导出配置」，选择位置后保存为 JSON；默认文件名包含导出时间。成功后可点击「在访达中显示」定位文件，取消保存不会生成文件，写入失败会在页面中显示原因。
-
-导出当前生效的界面语言、登录启动偏好、菜单栏样式与自定义图标、截图处理和历史保留开关、翻译语言与 AI 协议/地址/模型/附加要求、剪贴板监听与保留时间、全部六组快捷键、变量命名格式及超级右键的范围/目录/菜单层数/常用目录/打开方式。JSON 包含格式版本、应用版本和导出时间，自定义图标按 Base64 保存。
-
-点击同一区域的「导入配置」选择此前导出的 JSON。PawShot 会检查格式、版本和各组参数，显示备份时间、界面语言、AI 地址、剪贴板保留天数和文件操作范围，点击「确认导入」后才覆盖设置并立即保存；取消不会更改设置。支持 schema v1，文件上限为 8 MB，无效值或不支持的版本会在更改任何设置之前拒绝。六组快捷键统一重新注册，系统占用的快捷键会提示到设置中检查。
-
-API Key、系统权限、文件夹授权书签、截图/剪贴板/录制历史和翻译正文不包含在备份中。文件包含配置的接口地址、附加要求和本机目录路径。接口地址若带用户名、密码或常见密钥参数（如 `api_key`、`token`），导出和导入都会拒绝，避免把凭据写入备份。导入不会带入其他机器的文件夹授权；指定操作文件夹仍使用本机授权，必要时请到「超级右键」重新选择。备份中的「所有文件夹」范围会在确认后生效。找不到的常用目录或应用会跳过，某组全部不可用时保留本机原有列表。
-
-导入的历史保留策略会立即生效，过期的截图或剪贴板记录可能被清理；确认界面会提示这一影响。若 AI 协议或地址改变，导入会清空当前连接内存中的 Key，并要求手动重新填写，重启后也不会自动将已有 Key 用于新接口；本机单独保存的旧密钥不删除。登录项仍通过 macOS 注册，需系统批准或注册失败时会在结果中提示。
-
-## 编译与测试
-
-需要 macOS 15 或以上、Swift 6 工具链（Xcode 或 Command Line Tools），无需第三方依赖。Apple 翻译不需要 API Key；AI 翻译为可选配置。
-
-```bash
-# 每台开发机器只初始化一次；已有身份时复用，不会替换证书。
-python3 scripts/local-signing.py init
-bash scripts/build.sh
-open dist/PawShot.app
-python3 Tests/ShiguangTests/SigningChecks.py
-bash scripts/test.sh
-bash scripts/test-permissions.sh
-bash scripts/test-auto-ocr.sh
-bash scripts/test-editor-features.sh
-bash scripts/test-scroll-capture.sh
-bash scripts/test-clipboard.sh
-bash scripts/test-configuration-export.sh
-bash scripts/test-configuration-import.sh
-```
-
-Swift 6.4 的 Swift Build 在仅安装 Command Line Tools 的环境中可能无法初始化，构建脚本会自动使用原生构建系统。测试使用独立 Swift 检查程序，不依赖仅完整 Xcode 才带有的 XCTest。
-
-本机签名身份保存在 `~/Library/Application Support/PawShotSigning/`，包含独立钥匙串、公开证书、身份清单和仅本用户可读的钥匙串密码。目录权限为 `0700`，密码文件为 `0600`；私钥只保留在专用钥匙串中。初始化不添加系统证书信任、不修改屏幕授权，也不把专用钥匙串留在默认搜索列表中。签名时临时解锁，完成后锁定。
-
-请将这个目录作为私密签名资料备份，勿加入源码、源码 ZIP 或公开仓库。删除资料后，构建会报错；不会自动换证书或退回临时签名。`SHIGUANG_SIGNING_HOME` 可指定已有身份目录，日常更新应保持不变。证书有效期为 10 年，更换证书时需按新身份重新授权。
-
-构建先生成临时应用并验证签名，成功后才替换输出目录中的旧应用。签名回归检查会生成两份内容不同的测试应用，确认双方满足相同身份要求，并验证篡改资源、同名临时签名冒充、资料缺失和证书不匹配都被拒绝；不修改系统隐私授权。
-
-自动识别检查覆盖开关持久化、截图成功回调、翻译衔接、取消与旧结果隔离、取消时清理待显示错误、丢弃草稿后拒绝迟到的识别和翻译结果、首次识别时限和真实 Vision OCR。受限命令行环境可能无法创建 Vision 所需的像素缓冲；可用 `bash scripts/test-auto-ocr.sh --skip-vision` 单独运行状态回归检查，真实 OCR 仍需在正常本机环境验证。
-
-编辑器功能检查覆盖旧历史兼容、文字/马赛克/新增形状与编号标记的实际导出像素、撤销和重做、语言交换、缩放锚点、关闭与翻译操作、取消和 Esc 关闭草稿窗口、主动打开文字翻译、视频尺寸、未保存录制恢复、可播放 MP4 和多帧 GIF。新增手动快捷键解析、划词文字归一化与翻译工作台衔接、OpenAI Chat / OpenAI Responses / Claude Messages / Gemini 四类请求与响应契约、本机无 Key 服务、变量名转换、命令前缀和随机数据格式检查。视频检查使用程序生成的画面，不录制桌面；在限制系统视频编码器的环境中可用 `--skip-video` 跳过视频生成，再在正常本机环境完成全套检查。
-
-剪贴板检查使用独立命名的系统 pasteboard，覆盖多条目/富文本还原、图片实际像素与缩略图、原生 GIF/MP4 文件引用、持久化、去重、缓存生命周期、保密标记、损坏索引保护、搜索及键盘选择；不读取或更改系统当前剪贴板内容。限制 pasteboard 服务的命令行沙盒中需在正常本机环境运行。
-
-输出目录和中间目录可指定：
-
-```bash
-BUILD_DIR=/tmp/shiguang-build OUTPUT_DIR=/tmp/shiguang-output bash scripts/build.sh
-```
-
-## 代码结构
-
-- `ShiguangApp.swift`：应用生命周期、菜单、全局快捷键、悬浮窗口、Esc 路由、录制控制和剪贴板窗体。
-- `SettingsView.swift`：可搜索设置侧栏、分组表单、权限/历史/关于页面和快捷键控件。
-- `WorkspaceView.swift`：共享的完整/悬浮编辑器、文字工作台和翻译会话。
-- `TextWorkspaceView.swift`：截图翻译与文字识别的紧凑双栏工作台、语言切换和翻译引擎入口。
-- `BrandArtwork.swift`：应用小狗图标与菜单栏模板图标绘制。
-- `HotkeySettings.swift`：快捷键模型、Carbon 注册参数和手动组合键解析。
-- `SelectedTextReader.swift`：通过辅助功能 API 读取系统或最近前台应用中的当前选区文字。
-- `AITranslation.swift`：Apple/AI 引擎类型、Keychain API Key、四类 AI 协议请求与响应解析。
-- `TextToolbox.swift`：变量命名转换、命令前缀解析和本地随机测试数据生成。
-- `AnnotationToolbar.swift`：单行悬浮工具栏、常用标注、更多功能弹层、钉住、长截图入口及 MP4/GIF 格式选择。
-- `ImageCanvas.swift`：原生图片画布、触控板缩放、拖动/平移图片、文字输入与绘图。
-- `SelectionCapture.swift`：框选、窗口悬停/点选和屏幕捕获入口。
-- `CaptureSelectionGeometry.swift`：选区边界、工具条位置、Retina 裁剪与标注坐标换算。
-- `ScreenRegionEditor.swift`：冻结屏幕上的原位编辑、调整点、移动和分组工具条。
-- `ScreenRecorder.swift`：ScreenCaptureKit 区域录制、草稿/预览/复制状态、MP4/GIF 编码和旧版录制恢复。
-- `RecordingStatusView.swift`：原生视频预览和录制确认/取消控制条。
-- `ClipboardHistory.swift`：原生 pasteboard 格式、系统复制监听、剪贴板持久化与媒体缓存。
-- `ClipboardView.swift`：剪贴板历史、快捷工具、变量命名、随机数据和复制面板。
-- `QuickToolView.swift`：快捷键唤出的快捷输入面板、关键词识别、随机数据刷新和结果复制。
-- `AppModel.swift`：截图、图片导入、OCR/翻译状态、历史管理、长截图接入、复制和导出。
-- `ScreenCaptureSupport.swift`：屏幕访问状态、显示器内坐标换算、ScreenCaptureKit 截图和错误分类。
-- `AppRelauncher.swift`：先启动独立辅助进程，等待原进程退出，再打开同一路径的应用。
-- `Models.swift`：数据模型、坐标归一化、图片标注渲染、历史持久化、Vision OCR。
-- `scripts/local-signing.py`：初始化与复用固定本机签名身份，禁止缺失身份时自动降级。
-- `Tests/ShiguangTests/SigningChecks.py`：不同构建的签名身份连续性、资源篡改和冒充拦截检查。
-- `Tests/ShiguangTests`：遮盖实际像素、图片尺寸、历史读写/损坏保护/路径限制、截图权限与重启、自动识别状态和真实 OCR 验证。
-
-## 初版边界
-
-- 长截图支持自动滚动（需辅助功能权限）和跟随鼠标手动滚动；录制声音、云同步或窗口捕获模式暂未支持。
-- 截图翻译显示独立的原文/译文窗口，未实现译文覆盖原图排版。
-- 屏幕截图支持调整选区；导入图片尚无独立裁剪工具。已有标注暂不支持单独移动和再次编辑，复杂 OCR 版面重建、公式识别或简繁转换尚未实现。
-- Apple 对具体语言对的支持、语言包下载和系统授权需在目标机器上确认；macOS 26.4 及以上显式使用系统的低延迟翻译策略。
-- 当前打包只包含本机架构，尚未制作 Universal 二进制或 App Store 沙盒版本。
-
-长图限制为高 30,000px、约 32MP 或 5 分钟，达到上限时保留已拼接内容；固定底部栏只保留一次。自动模式尝试在页面底部停止，手动模式需要主动完成；相邻画面必须保留可匹配的重叠内容。
+Built with SwiftUI and AppKit. [Build, test, and package](docs/BUILDING.md) · [Report an issue](https://github.com/youcanyoudonocannobb/shiguang-screenshot/issues)
