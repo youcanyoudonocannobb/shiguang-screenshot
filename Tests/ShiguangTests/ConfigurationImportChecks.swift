@@ -170,10 +170,15 @@ struct ConfigurationImportChecks {
         let file = environment.root.appendingPathComponent("配置 备份.json")
         try original.write(to: file)
         try require(ConfigurationExport.read(from: file).encoded() == original.encoded(), "File import matches JSON import")
-        let noIcon = try changed(json(original), ["settings", "general", "menuBarIconStyle"], "lake")
+        let noIcon = try changed(json(original), ["settings", "general", "customMenuBarIconData"], nil)
         let noIconRoot = try json(noIcon)
-        _ = try ConfigurationImport(configuration: changed(noIconRoot, ["settings", "general", "customMenuBarIconData"], nil))
-        print("PASS: v1 JSON/file round trip, Unicode, custom icon, enums, and optional icon")
+        for (id, expected) in [("lake", MenuBarIconStyle.lake), ("cat", .system),
+                               ("rabbit", .system), ("fox", .system), ("panda", .system)] {
+            let backup = try changed(noIconRoot, ["settings", "general", "menuBarIconStyle"], id)
+            let legacyPlan = try ConfigurationImport(configuration: backup)
+            try require(legacyPlan.menuBarIconStyle == expected, "Legacy icon \(id) resolves without rejecting the backup")
+        }
+        print("PASS: v1 JSON/file round trip, Unicode, custom icon, enums, and legacy icons")
     }
 
     private static func invalidFiles(_ environment: IsolatedEnvironment) throws {
@@ -386,7 +391,7 @@ struct ConfigurationImportChecks {
         try require(language == 1 && hotkeys == 2 && status == 2, "Unchanged language does not trigger a language rebuild")
         let restarted = environment.model("restart-history")
         let restartedClipboard = environment.clipboard("restart-clipboard")
-        try require(restarted.appLanguage == .japanese && restarted.menuBarDogStyle == .custom && !restarted.showsMenuBarIcon,
+        try require(restarted.appLanguage == .japanese && restarted.menuBarIconStyle == .custom && !restarted.showsMenuBarIcon,
                     "General settings persist across models")
         try require(restarted.customMenuBarIconData == settings.general.customMenuBarIconData, "Custom image persists")
         try require(restarted.autoOCR && restarted.autoTranslate && !restarted.keepHistory && !restarted.autoCleanHistory && restarted.fillShapes,

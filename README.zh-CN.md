@@ -1,12 +1,14 @@
-# PawShot
+# NookPup
+
+<img src="docs/brand/nookpup.png" alt="NookPup 标志：米白与青柠绿组成的几何 N" width="112">
 
 [English](README.md) · **简体中文**
 
-PawShot 是一款原生 macOS 菜单栏工具。框选屏幕、编辑截图、录制 MP4 或 GIF，也能识别图中文字、翻译选中文本和找回剪贴板内容。
+NookPup 是你的 Mac 菜单栏工具箱。能截图录制、识别和翻译文字，也能找回剪贴板内容、启动应用和扩展访达右键菜单。早期版本名为 PawShot。
 
 **[下载最新版](https://github.com/youcanyoudonocannobb/shiguang-screenshot/releases/latest)** · 需要 macOS 15 或以上及 Apple 芯片
 
-![PawShot 编辑器用矩形、箭头和编号标注示例路线，底部显示编辑工具栏](docs/screenshots/annotation-editor.jpg)
+![编辑器用矩形、箭头和编号标注示例路线，底部显示编辑工具栏](docs/screenshots/annotation-editor.jpg)
 
 ## 主要功能
 
@@ -22,20 +24,20 @@ PawShot 是一款原生 macOS 菜单栏工具。框选屏幕、编辑截图、�
 
 左侧显示原图，右侧显示本机识别出的表格。结果可复制为 Markdown，也可导出 CSV。
 
-![PawShot 表格识别界面，左侧为路线图片，右侧为识别得到的三列表格](docs/screenshots/table-ocr.jpg)
+![表格识别界面，左侧为路线图片，右侧为识别得到的三列表格](docs/screenshots/table-ocr.jpg)
 
 ### 启动台
 
 输入 `xt coastal trail` 生成 `coastalTrail`，按回车即可复制。
 
-![PawShot 启动台显示 xt coastal trail 和生成的小驼峰变量名 coastalTrail](docs/screenshots/launcher.jpg)
+![启动台显示 xt coastal trail 和生成的小驼峰变量名 coastalTrail](docs/screenshots/launcher.jpg)
 
 ## 安装与使用
 
-1. 在[最新版发布页](https://github.com/youcanyoudonocannobb/shiguang-screenshot/releases/latest)下载 DMG，将 `PawShot.app` 拖到「应用程序」。
-2. 打开 PawShot，点击菜单栏的小狗图标或按 `⌥⇧S` 开始截图。首次录屏或截图时按 macOS 提示授予屏幕录制权限。划词翻译和自动长截图还需要「辅助功能」权限。
+1. 在[最新版发布页](https://github.com/youcanyoudonocannobb/shiguang-screenshot/releases/latest)下载 DMG，将应用拖到「应用程序」。
+2. 打开应用，从菜单栏图标选择「区域截图」，或按 `⌥⇧S`。首次录屏或截图时按 macOS 提示授予屏幕录制权限。划词翻译和自动长截图还需要「辅助功能」权限。
 3. 在「偏好设置 → 通用」可切换简体中文、English、日本語或 한국어，也可自定义菜单栏图标。
-4. 如需访达右键功能，在「偏好设置 → 超级右键」点击「系统设置」，启用 PawShot 访达扩展。访问系统保护的目录时，按需授予「完整磁盘访问」权限。
+4. 如需访达右键功能，在「偏好设置 → 超级右键」点击「系统设置」，启用应用的访达扩展。访问系统保护的目录时，按需授予「完整磁盘访问」权限。
 
 ## 默认全局快捷键
 

@@ -15,48 +15,41 @@ enum ScrollCaptureMode: String, CaseIterable {
     var title: String { L(self == .automatic ? "自动长截图" : "手动长截图") }
 }
 
-enum MenuBarDogStyle: String, Codable, CaseIterable, Identifiable {
+enum MenuBarIconStyle: String, Codable, CaseIterable, Identifiable {
     case system
     case lake
     case coral
     case teal
     case amber
-    case cat
-    case rabbit
-    case fox
-    case panda
     case custom
+
+    init?(savedValue: String) {
+        switch savedValue {
+        case "cat", "rabbit", "fox", "panda": self = .system
+        default: self.init(rawValue: savedValue)
+        }
+    }
 
     var id: String { rawValue }
 
     var titleKey: String {
         switch self {
         case .system: return "系统单色"
-        case .lake: return "湖蓝小狗"
-        case .coral: return "珊瑚小狗"
-        case .teal: return "青绿小狗"
-        case .amber: return "琥珀小狗"
-        case .cat: return "小猫"
-        case .rabbit: return "兔子"
-        case .fox: return "狐狸"
-        case .panda: return "熊猫"
+        case .lake: return "湖蓝"
+        case .coral: return "珊瑚红"
+        case .teal: return "青绿"
+        case .amber: return "琥珀"
         case .custom: return "自定义图标"
         }
     }
 
-    var title: String { L(titleKey) }
-
     var colorHex: String? {
         switch self {
         case .system, .custom: return nil
-        case .lake: return "17698B"
-        case .coral: return "B84C45"
-        case .teal: return "2C7566"
-        case .amber: return "9A641B"
-        case .cat: return "C97845"
-        case .rabbit: return "B98B96"
-        case .fox: return "D56A32"
-        case .panda: return "4A5963"
+        case .lake: return "317F9D"
+        case .coral: return "BF6254"
+        case .teal: return "36856F"
+        case .amber: return "AD782B"
         }
     }
 }

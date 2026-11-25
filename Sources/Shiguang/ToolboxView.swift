@@ -290,7 +290,7 @@ struct ToolboxView: View {
         guard !jsonText.isEmpty else { return }
         let panel = NSSavePanel()
         panel.allowedContentTypes = [.json]
-        panel.nameFieldStringValue = "PawShot.json"
+        panel.nameFieldStringValue = "NookPup.json"
         guard panel.runModal() == .OK, let url = panel.url else { return }
         do {
             try jsonText.write(to: url, atomically: true, encoding: .utf8)

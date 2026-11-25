@@ -1,10 +1,11 @@
 #!/bin/bash
-# Build PawShot and package it as a drag-to-Applications DMG plus a ZIP archive.
+# Build the app and package it as a drag-to-Applications DMG plus a ZIP archive.
 set -euo pipefail
 
 PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+APP_NAME="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleName' "$PROJECT_DIR/Info.plist")"
 OUTPUT_DIR="${OUTPUT_DIR:-$PROJECT_DIR/dist}"
-APP="$OUTPUT_DIR/PawShot.app"
+APP="$OUTPUT_DIR/$APP_NAME.app"
 SKIP_BUILD=0
 NOTARIZE=0
 
@@ -28,17 +29,17 @@ fi
 VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Contents/Info.plist")"
 BUILD_NUMBER="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP/Contents/Info.plist")"
 ARCH="$(lipo -archs "$APP/Contents/MacOS/Shiguang" | tr ' ' '-')"
-BASENAME="PawShot-${VERSION}-${ARCH}"
+BASENAME="$APP_NAME-${VERSION}-${ARCH}"
 DMG="$OUTPUT_DIR/${BASENAME}.dmg"
 ZIP="$OUTPUT_DIR/${BASENAME}.zip"
 
-echo "Packaging PawShot ${VERSION} (${BUILD_NUMBER}) for ${ARCH}"
+echo "Packaging $APP_NAME ${VERSION} (${BUILD_NUMBER}) for ${ARCH}"
 
 if [[ "$NOTARIZE" == "1" ]]; then
     : "${APPLE_ID:?APPLE_ID is required for notarization}"
     : "${APPLE_TEAM_ID:?APPLE_TEAM_ID is required for notarization}"
     : "${APPLE_APP_SPECIFIC_PASSWORD:?APPLE_APP_SPECIFIC_PASSWORD is required for notarization}"
-    NOTARY_ZIP="$(mktemp -d)/PawShot.zip"
+    NOTARY_ZIP="$(mktemp -d)/$APP_NAME.zip"
     ditto -c -k --keepParent "$APP" "$NOTARY_ZIP"
     xcrun notarytool submit "$NOTARY_ZIP" \
         --apple-id "$APPLE_ID" \
@@ -51,12 +52,12 @@ fi
 
 STAGING_DIR="$(mktemp -d "${TMPDIR:-/tmp}/pawshot-dmg.XXXXXX")"
 trap 'rm -rf "$STAGING_DIR"' EXIT
-ditto "$APP" "$STAGING_DIR/PawShot.app"
+ditto "$APP" "$STAGING_DIR/$APP_NAME.app"
 ln -s /Applications "$STAGING_DIR/Applications"
 
 rm -f "$DMG" "$ZIP"
 hdiutil create \
-    -volname "PawShot ${VERSION}" \
+    -volname "$APP_NAME ${VERSION}" \
     -srcfolder "$STAGING_DIR" \
     -fs HFS+ \
     -format UDZO \

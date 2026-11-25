@@ -1,4 +1,4 @@
-# Building PawShot
+# Building NookPup
 
 Requires macOS 15 or later, a Swift 6 toolchain (Xcode or the Command Line Tools), and Python 3. The Swift package has no third-party dependencies.
 
@@ -7,10 +7,12 @@ Requires macOS 15 or later, a Swift 6 toolchain (Xcode or the Command Line Tools
 ```bash
 python3 scripts/local-signing.py init
 bash scripts/build.sh
-open dist/PawShot.app
+open dist/NookPup.app
 ```
 
 Initialize signing once per development machine. Keep the signing directory at `~/Library/Application Support/PawShotSigning/` private and reuse it across builds. To use an existing signing directory in another location, set `SHIGUANG_SIGNING_HOME`. A new identity may require granting macOS permissions again.
+
+NookPup reuses the bundle identifier and app data directory from PawShot. Keep using the same signing identity when updating a local installation.
 
 `BUILD_DIR` and `OUTPUT_DIR` can override the default `.build/` and `dist/` directories. `SWIFT_BUILD_ARGS` passes extra flags to SwiftPM, such as `--arch arm64`.
 

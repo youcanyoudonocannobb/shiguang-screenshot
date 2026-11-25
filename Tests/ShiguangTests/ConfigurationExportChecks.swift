@@ -78,7 +78,7 @@ struct ConfigurationExportChecks {
         let noIconGeneral = try object(object(withoutIcon["settings"])["general"])
         try require(noIconGeneral["customMenuBarIconData"] == nil, "Unused custom icon can be absent")
         let filename = ConfigurationExport.suggestedFilename(at: Date(timeIntervalSince1970: 0))
-        try require(filename.range(of: #"^PawShot-configuration-\d{4}-\d{2}-\d{2}_\d{6}\.json$"#, options: .regularExpression) != nil, "Timestamped filename is safe across file systems")
+        try require(filename.range(of: #"^NookPup-configuration-\d{4}-\d{2}-\d{2}_\d{6}\.json$"#, options: .regularExpression) != nil, "Timestamped filename is safe across file systems")
     }
 
     static func fileWrites() throws {

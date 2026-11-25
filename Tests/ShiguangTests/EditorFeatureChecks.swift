@@ -860,28 +860,28 @@ struct EditorFeatureChecks {
         let first = AppModel(historyDirectory: folder, preferences: defaults)
         try require(first.translationProvider == .apple,
                     "A first run upgraded from an older version must default to Apple translation")
-        try require(first.showsMenuBarIcon && first.menuBarDogStyle == .system,
-                    "Menu bar visibility and monochrome dog must use safe defaults")
+        try require(first.showsMenuBarIcon && first.menuBarIconStyle == .system,
+                    "Menu bar visibility and monochrome icon must use safe defaults")
 
         first.translationProvider = .ai
         first.showsMenuBarIcon = false
-        first.menuBarDogStyle = .lake
+        first.menuBarIconStyle = .lake
         let second = AppModel(historyDirectory: folder, preferences: defaults)
         try require(second.translationProvider == .ai,
                     "A translation engine explicitly selected after migration must persist")
-        try require(!second.showsMenuBarIcon && second.menuBarDogStyle == .lake,
-                    "Menu bar visibility and dog colour must persist across launches")
+        try require(!second.showsMenuBarIcon && second.menuBarIconStyle == .lake,
+                    "Menu bar visibility and icon colour must persist across launches")
 
-        second.menuBarDogStyle = .cat
+        defaults.set("cat", forKey: "menuBarDogStyle")
         let third = AppModel(historyDirectory: folder, preferences: defaults)
-        try require(third.menuBarDogStyle == .cat,
-                    "Animal menu bar styles must persist across launches")
+        try require(third.menuBarIconStyle == .system,
+                    "A removed animal icon must fall back to the system icon")
 
         let customIconData = Data([0x89, 0x50, 0x4E, 0x47])
         third.customMenuBarIconData = customIconData
-        third.menuBarDogStyle = .custom
+        third.menuBarIconStyle = .custom
         let fourth = AppModel(historyDirectory: folder, preferences: defaults)
-        try require(fourth.menuBarDogStyle == .custom &&
+        try require(fourth.menuBarIconStyle == .custom &&
                     fourth.customMenuBarIconData == customIconData,
                     "Custom menu bar image data must persist across launches")
     }

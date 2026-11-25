@@ -261,7 +261,7 @@ struct OCRWorkspaceView: View {
         guard let table = model.ocrTable, !table.isEmpty else { return }
         let panel = NSSavePanel()
         panel.allowedContentTypes = [.commaSeparatedText]
-        panel.nameFieldStringValue = "PawShot-表格.csv"
+        panel.nameFieldStringValue = "NookPup-表格.csv"
         guard panel.runModal() == .OK, let url = panel.url else { return }
         do {
             try table.csv.write(to: url, atomically: true, encoding: .utf8)

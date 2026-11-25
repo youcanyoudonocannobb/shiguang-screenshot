@@ -110,7 +110,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 880, height: 620),
                               styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
                               backing: .buffered, defer: false)
-        window.title = "PawShot"
+        window.title = "NookPup"
         window.toolbarStyle = .unified
         window.tabbingMode = .disallowed
         window.titlebarAppearsTransparent = true
@@ -242,7 +242,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
 
     /// macOS opens login items with an open-application event flagged as a
-    /// login launch. Like other menu bar utilities, PawShot then starts
+    /// login launch. Like other menu bar utilities, NookPup then starts
     /// quietly instead of opening Preferences on every login.
     private static var launchedAsLoginItem: Bool {
         guard let event = NSAppleEventManager.shared().currentAppleEvent,
@@ -332,7 +332,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         // hidesOnDeactivate only hides these panels, and AppKit orders them back
         // in on the next activation. For a menu bar app that is any feature
         // (capture, clipboard, translation...), so a launcher left by clicking
-        // another app reappeared over every later feature. Leaving PawShot
+        // another app reappeared over every later feature. Leaving NookPup
         // dismisses them instead; the panels keep their state for next time.
         for panel in [quickToolWindow, clipboardWindow, quickActionsWindow, toolboxWindow] {
             panel?.orderOut(nil)
@@ -348,7 +348,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     func windowDidResignKey(_ notification: Notification) {
         guard let launcher = quickToolWindow, notification.object as? NSWindow === launcher else { return }
         // Like Spotlight, the launcher only lives while it has focus: once
-        // another PawShot window takes over (capture, clipboard, toolbox...),
+        // another NookPup window takes over (capture, clipboard, toolbox...),
         // close it rather than leave it floating over that feature. Switching
         // apps is handled in applicationWillResignActive.
         DispatchQueue.main.async { [weak self] in
@@ -370,7 +370,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         return false
     }
 
-    /// The PawShot window a transient panel hands focus back to: the one the
+    /// The NookPup window a transient panel hands focus back to: the one the
     /// user was working in when they opened it. Nil when they came from another
     /// app, so focus returns to that app instead.
     private func focusReturnWindow(frontmost: NSRunningApplication?) -> NSWindow? {
@@ -521,7 +521,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
                 backing: .buffered,
                 defer: false
             )
-            created.title = "PawShot · \(L("启动台"))"
+            created.title = "NookPup · \(L("启动台"))"
             created.titleVisibility = .hidden
             created.titlebarAppearsTransparent = true
             created.isReleasedWhenClosed = false
@@ -582,7 +582,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
                 backing: .buffered,
                 defer: false
             )
-            created.title = "PawShot · \(L("工具箱"))"
+            created.title = "NookPup · \(L("工具箱"))"
             created.titleVisibility = .hidden
             created.titlebarAppearsTransparent = true
             created.isReleasedWhenClosed = false
@@ -664,7 +664,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     private func requestSelectionAccess(for feature: String) {
         let alert = NSAlert()
         alert.messageText = "\(feature)需要辅助功能权限"
-        alert.informativeText = "PawShot 只读取当前应用中被选中的文字，不记录其他输入内容。请在「系统设置 > 隐私与安全性 > 辅助功能」中允许 PawShot。"
+        alert.informativeText = "NookPup 只读取当前应用中被选中的文字，不记录其他输入内容。请在「系统设置 > 隐私与安全性 > 辅助功能」中允许 NookPup。"
         alert.addButton(withTitle: "打开辅助功能设置")
         alert.addButton(withTitle: "取消")
         NSApp.activate(ignoringOtherApps: true)
@@ -713,7 +713,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         if clipboardWindow == nil {
             let panel = ScrollCapturePanel(contentRect: NSRect(x: 0, y: 0, width: 580, height: 650),
                 styleMask: [.titled, .closable, .resizable, .utilityWindow], backing: .buffered, defer: false)
-            panel.title = "PawShot · \(L("剪贴板"))"
+            panel.title = "NookPup · \(L("剪贴板"))"
             panel.minSize = NSSize(width: 520, height: 460)
             panel.isReleasedWhenClosed = false
             panel.hidesOnDeactivate = true
@@ -748,7 +748,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
                 backing: .buffered,
                 defer: false
             )
-            created.title = "PawShot · \(L("快捷操作"))"
+            created.title = "NookPup · \(L("快捷操作"))"
             created.titleVisibility = .hidden
             created.titlebarAppearsTransparent = true
             created.isReleasedWhenClosed = false
@@ -793,7 +793,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     private func closeClipboardWindow() {
         clipboardWindow?.orderOut(nil)
         window?.orderOut(nil)
-        // Opened from a PawShot window (toolbox, editor...): go back there so a
+        // Opened from a NookPup window (toolbox, editor...): go back there so a
         // paste lands where the user was working, not in the last other app.
         restoreFocus(to: clipboardReturnWindow, or: clipboardReturnApplication)
         clipboardReturnApplication = nil
@@ -818,7 +818,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
                 NSApp.terminate(nil)
             } catch {
                 isRestarting = false
-                model.errorMessage = "无法重启 PawShot：\(error.localizedDescription)"
+                model.errorMessage = "无法重启 NookPup：\(error.localizedDescription)"
                 showWorkspace()
             }
         }
@@ -840,12 +840,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
 
     private func makeMenu() {
         let main = NSMenu()
-        let appItem = NSMenuItem(title: "PawShot", action: nil, keyEquivalent: "")
+        let appItem = NSMenuItem(title: "NookPup", action: nil, keyEquivalent: "")
         let appMenu = NSMenu()
-        appMenu.addItem(menuItem("关于 PawShot", action: #selector(about)))
+        appMenu.addItem(menuItem("关于 NookPup", action: #selector(about)))
         appMenu.addItem(menuItem("偏好设置…", action: #selector(preferences), key: ","))
         appMenu.addItem(.separator())
-        appMenu.addItem(menuItem("退出 PawShot", action: #selector(quit), key: "q"))
+        appMenu.addItem(menuItem("退出 NookPup", action: #selector(quit), key: "q"))
         appItem.submenu = appMenu
         main.addItem(appItem)
         let fileItem = NSMenuItem()
@@ -914,7 +914,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
 
     @objc private func about() {
         let credits = NSMutableAttributedString(
-            string: "\(L("截取片刻，读懂世界。"))\n\(L("原生 macOS 截图、文字识别与翻译。"))\n\n",
+            string: "\(L("你的 Mac 菜单栏工具箱"))\n\(L("截图、录制、翻译、剪贴板与访达工具。"))\n\n",
             attributes: [.font: NSFont.systemFont(ofSize: NSFont.smallSystemFontSize)]
         )
         if let url = URL(string: "https://github.com/youcanyoudonocannobb/shiguang-screenshot") {
@@ -927,7 +927,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             ))
         }
         NSApp.orderFrontStandardAboutPanel(options: [
-            .applicationName: "PawShot",
+            .applicationName: "NookPup",
             .applicationVersion: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "",
             .version: Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "",
             .credits: credits
@@ -986,7 +986,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         menu.addItem(.separator())
         menu.addItem(menuItem("偏好设置…", action: #selector(preferences), symbol: "gearshape"))
         menu.addItem(.separator())
-        menu.addItem(menuItem("退出 PawShot", action: #selector(quit), symbol: "power"))
+        menu.addItem(menuItem("退出 NookPup", action: #selector(quit), symbol: "power"))
         return menu
     }
 
@@ -1002,11 +1002,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         guard let statusItem else { return }
         statusItem.isVisible = model.showsMenuBarIcon
         statusItem.button?.image = BrandArtwork.menuBarImage(
-            styleID: model.menuBarDogStyle.rawValue,
-            customImageData: model.customMenuBarIconData
+            tintHex: model.menuBarIconStyle.colorHex,
+            customImageData: model.menuBarIconStyle == .custom ? model.customMenuBarIconData : nil
         )
-        statusItem.button?.toolTip = "PawShot · \(L("截图、识别与剪贴板"))"
-        statusItem.button?.setAccessibilityLabel("PawShot \(L("菜单"))")
+        statusItem.button?.toolTip = "NookPup · \(L("菜单栏工具箱"))"
+        statusItem.button?.setAccessibilityLabel("NookPup \(L("菜单"))")
     }
 
     private func refreshLocalization() {
@@ -1143,7 +1143,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             let panel = CaptureEditorWindow(contentRect: NSRect(x: 0, y: 0, width: 980, height: 760),
                                  styleMask: [.titled, .closable, .miniaturizable, .resizable],
                                  backing: .buffered, defer: false)
-            panel.title = "PawShot · \(L("快速编辑"))"
+            panel.title = "NookPup · \(L("快速编辑"))"
             panel.backgroundColor = NSColor(hex: "F4F7FA")
             panel.isReleasedWhenClosed = false
             panel.delegate = self
@@ -1156,8 +1156,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         }
         let text = model.isTextWorkspace
         if text { window?.orderOut(nil) }
-        editorWindow.title = model.editorMode == .recognition ? "PawShot · \(L("文字识别"))" :
-            (text ? "PawShot · \(L("翻译"))" : "PawShot · \(L("快速编辑"))")
+        editorWindow.title = model.editorMode == .recognition ? "NookPup · \(L("文字识别"))" :
+            (text ? "NookPup · \(L("翻译"))" : "NookPup · \(L("快速编辑"))")
         editorWindow.minSize = text ? NSSize(width: model.editorMode == .recognition ? 760 : 700,
                                              height: model.editorMode == .recognition ? 500 : 440) :
             NSSize(width: AnnotationToolbar.minimumWidth, height: 400)
@@ -1280,7 +1280,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         let baseHeight = displayHeight + 72
         let panel = CaptureEditorWindow(contentRect: NSRect(origin: .zero, size: NSSize(width: displayWidth, height: baseHeight)),
                              styleMask: [.borderless, .resizable], backing: .buffered, defer: false)
-        panel.title = "PawShot · \(L("悬浮编辑"))"
+        panel.title = "NookPup · \(L("悬浮编辑"))"
         panel.minSize = NSSize(width: min(AnnotationToolbar.minimumWidth, available.width - 24), height: 260)
         panel.backgroundColor = .clear
         panel.isOpaque = false
@@ -1346,7 +1346,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             case .alertSecondButtonReturn:
                 if CGRequestPostEventAccess() { beginScrollCapture(.automatic, region: region) }
                 else {
-                    model.notice = "请在系统设置的「辅助功能」中允许 PawShot，再选择自动长截图。"
+                    model.notice = "请在系统设置的「辅助功能」中允许 NookPup，再选择自动长截图。"
                     if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
                         NSWorkspace.shared.open(url)
                     }
@@ -1422,7 +1422,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         let panelSize = CGSize(width: 260, height: min(560, visible.height - 24))
         let panel = ScrollCapturePanel(contentRect: CGRect(origin: .zero, size: panelSize),
                                        styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
-        panel.title = "PawShot · \(L(mode.title))"
+        panel.title = "NookPup · \(L(mode.title))"
         panel.backgroundColor = .clear
         panel.isOpaque = false
         panel.hidesOnDeactivate = false
@@ -1506,7 +1506,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         recordingBorder = border
         let bar = ScrollCapturePanel(contentRect: CGRect(x: 0, y: 0, width: 400, height: 42),
                                       styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
-        bar.title = "PawShot · \(L("录制"))"
+        bar.title = "NookPup · \(L("录制"))"
         bar.backgroundColor = .clear
         bar.isOpaque = false
         bar.level = .floating
@@ -1716,7 +1716,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         let panel = PinnedPanel(contentRect: frame,
                                 styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         func title(for width: CGFloat) -> String {
-            "PawShot · \(L("贴图")) · \(Int((width / max(1, baseWidth) * 100).rounded()))%"
+            "NookPup · \(L("贴图")) · \(Int((width / max(1, baseWidth) * 100).rounded()))%"
         }
         panel.title = title(for: frame.width)
         panel.isOpaque = false
@@ -1864,7 +1864,7 @@ private final class PinnedImageView: NSView {
         super.init(frame: .zero)
         setAccessibilityElement(true)
         setAccessibilityRole(.group)
-        setAccessibilityLabel("PawShot · \(L("贴图"))")
+        setAccessibilityLabel("NookPup · \(L("贴图"))")
         addSubview(closeButton)
         addSubview(opacityButton)
         addSubview(opacityPanel)
@@ -1890,7 +1890,7 @@ private final class PinnedImageView: NSView {
     override var acceptsFirstResponder: Bool { true }
     override var mouseDownCanMoveWindow: Bool { false }
     /// The first click on a pin behind another app's window must start a
-    /// drag instead of only activating PawShot.
+    /// drag instead of only activating NookPup.
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
     override func keyDown(with event: NSEvent) {

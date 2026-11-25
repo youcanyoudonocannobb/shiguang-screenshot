@@ -95,7 +95,9 @@ def main():
         print("PASS missing_identity_fails_without_silent_regeneration")
 
         output = directory / "output"
-        existing = output / "PawShot.app/Contents/MacOS/Shiguang"
+        with (PROJECT / "Info.plist").open("rb") as stream:
+            app_name = plistlib.load(stream)["CFBundleName"]
+        existing = output / f"{app_name}.app/Contents/MacOS/Shiguang"
         existing.parent.mkdir(parents=True)
         existing.write_bytes(b"Existing usable application")
         env.update(OUTPUT_DIR=str(output), BUILD_DIR=str(directory / "build"))

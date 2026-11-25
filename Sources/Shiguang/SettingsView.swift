@@ -71,7 +71,7 @@ enum ShiguangSettingsPage: String, CaseIterable, Identifiable {
         switch self {
         case .general:
             return ["截图", "开始", "菜单栏", "状态", "权限", "剪贴板", "快捷键", "翻译",
-                    "开机", "启动", "登录项", "小狗", "颜色", "图标", "配置", "导出", "备份", "JSON", "export", "backup"]
+                    "开机", "启动", "登录项", "颜色", "图标", "配置", "导出", "备份", "JSON", "export", "backup"]
         case .screenshot:
             return ["自动识别", "OCR", "文字识别", "自动翻译", "历史", "保存", "截图流程", "确认", "复制"]
         case .translation:
@@ -178,12 +178,12 @@ struct SettingsView: View {
     private var sidebar: some View {
         VStack(spacing: 0) {
             HStack(spacing: 10) {
-                MenuBarBrandMark(style: model.menuBarDogStyle,
+                MenuBarBrandMark(style: model.menuBarIconStyle,
                                  customImageData: model.customMenuBarIconData,
                                  size: 38,
                                  language: model.appLanguage)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("PawShot").font(.system(size: 13.5, weight: .semibold))
+                    Text("NookPup").font(.system(size: 13.5, weight: .semibold))
                     Text("偏好设置").font(.system(size: 11)).foregroundStyle(Palette.muted)
                 }
                 Spacer(minLength: 0)
@@ -256,7 +256,7 @@ struct SettingsView: View {
     private var permissionHelp: some View {
         VStack(alignment: .leading, spacing: 20) {
             SettingsSymbolTile(symbol: "lock.shield", accented: true, size: 40)
-            Text("允许 PawShot 访问屏幕").font(.system(size: 22, weight: .semibold))
+            Text("允许 NookPup 访问屏幕").font(.system(size: 22, weight: .semibold))
             Text(model.screenPermission.detail).font(.system(size: 13))
                 .foregroundStyle(Palette.muted).fixedSize(horizontal: false, vertical: true)
             HStack {
@@ -267,7 +267,7 @@ struct SettingsView: View {
             HStack {
                 Button("稍后", role: .cancel) { model.showsPermissionHelp = false }
                 Spacer()
-                Button("重启 PawShot") { model.restartApp?() }
+                Button("重启 NookPup") { model.restartApp?() }
             }
         }
         .padding(28).frame(width: 480).background(Palette.background)
@@ -424,7 +424,7 @@ private struct SettingsDetailView: View {
                 SettingsToggle(
                     "登录时自动启动",
                     detail: model.launchAtLoginRequiresApproval
-                        ? "等待你在系统设置中允许 PawShot"
+                        ? "等待你在系统设置中允许 NookPup"
                         : "登录 Mac 后自动在菜单栏运行",
                     isOn: Binding(
                         get: { model.launchAtLoginEnabled || model.launchAtLoginRequiresApproval },
@@ -441,8 +441,8 @@ private struct SettingsDetailView: View {
                 SettingsToggle("显示菜单栏图标", detail: "关闭后仍可通过快捷键和重新打开应用使用",
                                isOn: $model.showsMenuBarIcon)
                 SettingsSeparator()
-                SettingsRow("菜单栏图标", detail: "选择小动物，或上传图片作为自定义图标") {
-                    MenuBarIconPicker(selection: $model.menuBarDogStyle,
+                SettingsRow("菜单栏图标", detail: "选择单色、彩色或上传图片") {
+                    MenuBarIconPicker(selection: $model.menuBarIconStyle,
                                       customImageData: $model.customMenuBarIconData,
                                       language: model.appLanguage)
                 }
@@ -459,7 +459,7 @@ private struct SettingsDetailView: View {
                 .disabled(isExportingConfiguration || isImportingConfiguration || pendingConfigurationImport != nil)
             SettingsSeparator()
             SettingsActionRow(title: "导入配置",
-                              detail: "读取 PawShot 配置备份，确认后恢复设置",
+                              detail: "读取 NookPup 配置备份，确认后恢复设置",
                               symbol: "square.and.arrow.down") { importConfiguration() }
                 .disabled(isExportingConfiguration || isImportingConfiguration || pendingConfigurationImport != nil || model.isBusy)
             if let error = configurationImportError {
@@ -506,7 +506,7 @@ private struct SettingsDetailView: View {
             general: .init(appLanguage: model.appLanguage.rawValue,
                            launchAtLogin: model.launchAtLoginEnabled || model.launchAtLoginRequiresApproval,
                            showsMenuBarIcon: model.showsMenuBarIcon,
-                           menuBarIconStyle: model.menuBarDogStyle.rawValue,
+                           menuBarIconStyle: model.menuBarIconStyle.rawValue,
                            customMenuBarIconData: model.customMenuBarIconData),
             screenshot: .init(autoOCR: model.autoOCR, autoTranslate: model.autoTranslate,
                               keepHistory: model.keepHistory, autoCleanHistory: model.autoCleanHistory,
@@ -591,9 +591,9 @@ private struct SettingsDetailView: View {
     private func importErrorDescription(_ error: Error) -> String {
         guard let error = error as? ConfigurationFileError else { return error.localizedDescription }
         switch error {
-        case .tooLarge: return L("配置文件超过 8 MB，请选择 PawShot 导出的 JSON 文件。")
-        case .invalidFormat: return L("这不是有效的 PawShot 配置备份。")
-        case .unsupportedVersion: return L("暂不支持此配置版本，请使用兼容版本的 PawShot。")
+        case .tooLarge: return L("配置文件超过 8 MB，请选择 NookPup 导出的 JSON 文件。")
+        case .invalidFormat: return L("这不是有效的 NookPup 配置备份。")
+        case .unsupportedVersion: return L("暂不支持此配置版本，请使用兼容版本的 NookPup。")
         case .invalidData: return L("配置内容缺失或损坏，当前设置未更改。")
         case .invalidValue(let field): return "\(L("配置值无效"))：\(L(field))"
         }
@@ -862,7 +862,7 @@ private struct SettingsDetailView: View {
                 )
                 SettingsSeparator()
                 QuickInputGuideRow(
-                    symbol: "pawprint.fill",
+                    symbol: "textformat.abc",
                     title: "直接生成变量名",
                     detail: "输入中文或英文名称，选择小驼峰、大驼峰、下划线、短横线或常量格式。",
                     example: "用户登录 → userLogin / UserLogin / user_login"
@@ -923,7 +923,7 @@ private struct SettingsDetailView: View {
                 }
                 SettingsSeparator()
                 if finderActions.coverage == .allFolders {
-                    SettingsRow("完整磁盘访问", detail: "使用系统保护的目录时，为 PawShot 授权一次") {
+                    SettingsRow("完整磁盘访问", detail: "使用系统保护的目录时，为 NookPup 授权一次") {
                         Button("打开系统设置") { finderActions.openDiskAccessSettings() }
                     }
                 } else {
@@ -1053,7 +1053,7 @@ private struct SettingsDetailView: View {
             }
             SettingsSection("划词翻译") {
                 SettingsRow("辅助功能访问",
-                            detail: SelectedTextReader.isTrusted ? "已授权，可读取其他应用的选中文字" : "需要在系统设置中允许 PawShot 读取选中文字") {
+                            detail: SelectedTextReader.isTrusted ? "已授权，可读取其他应用的选中文字" : "需要在系统设置中允许 NookPup 读取选中文字") {
                     HStack(spacing: 10) {
                         Text(SelectedTextReader.isTrusted ? "已授权" : "待授权")
                             .foregroundStyle(SelectedTextReader.isTrusted ? Palette.success : Palette.warning)
@@ -1089,13 +1089,13 @@ private struct SettingsDetailView: View {
     private var aboutContent: some View {
         Group {
             HStack(spacing: 18) {
-                MenuBarBrandMark(style: model.menuBarDogStyle,
+                MenuBarBrandMark(style: model.menuBarIconStyle,
                                  customImageData: model.customMenuBarIconData,
                                  size: 72,
                                  language: model.appLanguage)
                 VStack(alignment: .leading, spacing: 5) {
-                    Text("PawShot").font(.system(size: 20, weight: .semibold))
-                    Text("截取片刻，读懂世界。").font(.system(size: 12)).foregroundStyle(Palette.muted)
+                    Text("NookPup").font(.system(size: 20, weight: .semibold))
+                    Text("你的 Mac 菜单栏工具箱").font(.system(size: 12)).foregroundStyle(Palette.muted)
                     (Text("版本") + Text(verbatim: " \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "-") (\(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "-"))"))
                         .font(.system(size: 11)).foregroundStyle(Palette.muted)
                 }
@@ -1115,7 +1115,7 @@ private struct SettingsDetailView: View {
             }
             SettingsSection("运行方式") {
                 SettingsRow("菜单栏常驻", detail: "关闭窗口后继续运行，Dock 中不显示图标") {
-                    Text(LocalizedStringKey(model.showsMenuBarIcon ? model.menuBarDogStyle.titleKey : "已隐藏"))
+                    Text(LocalizedStringKey(model.showsMenuBarIcon ? model.menuBarIconStyle.titleKey : "已隐藏"))
                         .foregroundStyle(Palette.muted)
                 }
             }
@@ -1128,51 +1128,31 @@ private struct SettingsDetailView: View {
 }
 
 private struct MenuBarBrandMark: View {
-    let style: MenuBarDogStyle
+    let style: MenuBarIconStyle
     let customImageData: Data?
     let size: CGFloat
     let language: AppLanguage
 
-    private var accent: Color {
-        style.colorHex.map(Color.init(hex:)) ?? Palette.ink
-    }
-
     private var image: NSImage {
         BrandArtwork.menuBarImage(
-            styleID: style.rawValue,
-            customImageData: customImageData,
-            size: NSSize(width: size * 0.74, height: size * 0.67)
+            tintHex: style.colorHex,
+            customImageData: style == .custom ? customImageData : nil,
+            size: NSSize(width: size, height: size)
         )
     }
 
     var body: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: size * 0.27, style: .continuous)
-                .fill(
-                    LinearGradient(
-                        colors: [accent.opacity(0.16), Palette.panel],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
-            Image(nsImage: image)
-                .resizable()
-                .renderingMode(image.isTemplate ? .template : .original)
-                .scaledToFit()
-                .foregroundStyle(style == .system ? Palette.ink : Color.clear)
-                .padding(size * 0.16)
-        }
-        .frame(width: size, height: size)
-        .overlay {
-            RoundedRectangle(cornerRadius: size * 0.27, style: .continuous)
-                .stroke(accent.opacity(0.2), lineWidth: 1)
-        }
-        .shadow(color: accent.opacity(0.08), radius: 3, y: 1)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(
-            Text(AppLocalization.text("当前菜单栏图标：", language: language))
-                + Text(verbatim: AppLocalization.text(style.titleKey, language: language))
-        )
+        let artwork = image
+        Image(nsImage: artwork)
+            .resizable()
+            .renderingMode(artwork.isTemplate ? .template : .original)
+            .scaledToFit()
+            .foregroundStyle(Palette.ink)
+            .frame(width: size, height: size)
+            .accessibilityLabel(
+                Text(AppLocalization.text("当前菜单栏图标：", language: language))
+                    + Text(verbatim: AppLocalization.text(style.titleKey, language: language))
+            )
     }
 }
 
@@ -1199,7 +1179,7 @@ private struct ConfigurationImportConfirmation: View {
                     Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 10) {
                         previewRow("备份文件", pending.url.lastPathComponent)
                         previewRow("导出时间", pending.plan.configuration.exportedAt.formatted(date: .abbreviated, time: .shortened))
-                        previewRow("备份版本", "PawShot \(pending.plan.configuration.appVersion) (\(pending.plan.configuration.buildNumber))")
+                        previewRow("备份版本", "NookPup \(pending.plan.configuration.appVersion) (\(pending.plan.configuration.buildNumber))")
                         previewRow("界面语言", pending.plan.appLanguage.nativeTitle)
                         previewRow("翻译引擎", pending.plan.provider.title)
                         previewRow("AI 接口", pending.plan.aiAPI.title)
@@ -1255,7 +1235,7 @@ private struct ConfigurationImportConfirmation: View {
 }
 
 private struct MenuBarIconPicker: View {
-    @Binding var selection: MenuBarDogStyle
+    @Binding var selection: MenuBarIconStyle
     @Binding var customImageData: Data?
     let language: AppLanguage
     @StoredState private var showsPicker = false
@@ -1268,8 +1248,6 @@ private struct MenuBarIconPicker: View {
                 iconPreview(selection)
                     .frame(width: 20, height: 18)
                     .frame(width: 26, height: 26)
-                    .background(Palette.background, in: RoundedRectangle(cornerRadius: 6))
-                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(Palette.line))
                 Text(AppLocalization.text(selection.titleKey, language: language))
                     .font(.system(size: 11.5, weight: .medium))
                     .lineLimit(1)
@@ -1298,28 +1276,11 @@ private struct MenuBarIconPicker: View {
 
     private var pickerPanel: some View {
         VStack(alignment: .leading, spacing: 14) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("菜单栏图标")
-                    .font(.system(size: 13, weight: .semibold))
-                Text("选择一只小动物，或上传自己的图片")
-                    .font(.system(size: 10.5))
-                    .foregroundStyle(Palette.muted)
-            }
+            Text("菜单栏图标")
+                .font(.system(size: 13, weight: .semibold))
 
-            Text("小狗")
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(Palette.muted)
-            LazyVGrid(columns: Array(repeating: GridItem(.fixed(48), spacing: 7), count: 5), spacing: 8) {
-                ForEach([MenuBarDogStyle.system, .lake, .coral, .teal, .amber]) { style in
-                    styleButton(style)
-                }
-            }
-
-            Text("小动物")
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(Palette.muted)
-            LazyVGrid(columns: Array(repeating: GridItem(.fixed(48), spacing: 7), count: 5), spacing: 8) {
-                ForEach([MenuBarDogStyle.cat, .rabbit, .fox, .panda]) { style in
+            HStack(spacing: 7) {
+                ForEach(MenuBarIconStyle.allCases.filter { $0 != .custom }) { style in
                     styleButton(style)
                 }
             }
@@ -1365,7 +1326,7 @@ private struct MenuBarIconPicker: View {
         .background(Palette.panel)
     }
 
-    private func styleButton(_ style: MenuBarDogStyle) -> some View {
+    private func styleButton(_ style: MenuBarIconStyle) -> some View {
         Button {
             selection = style
             showsPicker = false
@@ -1397,14 +1358,14 @@ private struct MenuBarIconPicker: View {
         .accessibilityAddTraits(selection == style ? .isSelected : [])
     }
 
-    private func iconPreview(_ style: MenuBarDogStyle) -> some View {
-        let image = BrandArtwork.menuBarImage(styleID: style.rawValue,
-                                              customImageData: customImageData)
+    private func iconPreview(_ style: MenuBarIconStyle) -> some View {
+        let image = BrandArtwork.menuBarImage(tintHex: style.colorHex,
+                                              customImageData: style == .custom ? customImageData : nil)
         return Image(nsImage: image)
             .resizable()
             .renderingMode(image.isTemplate ? .template : .original)
             .scaledToFit()
-            .foregroundStyle(style == .system ? Palette.ink : Color.clear)
+            .foregroundStyle(Palette.ink)
     }
 
     private func importCustomIcon(_ result: Result<[URL], Error>) {
@@ -1431,7 +1392,7 @@ private struct MenuBarIconPicker: View {
         }
     }
 
-    private func previewTint(_ style: MenuBarDogStyle) -> Color {
+    private func previewTint(_ style: MenuBarIconStyle) -> Color {
         style.colorHex.map(Color.init(hex:)) ?? Palette.ink
     }
 }

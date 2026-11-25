@@ -157,6 +157,6 @@ struct ConfigurationExport: Codable {
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.calendar = Calendar(identifier: .gregorian)
         formatter.dateFormat = "yyyy-MM-dd_HHmmss"
-        return "PawShot-configuration-\(formatter.string(from: date)).json"
+        return "NookPup-configuration-\(formatter.string(from: date)).json"
     }
 }

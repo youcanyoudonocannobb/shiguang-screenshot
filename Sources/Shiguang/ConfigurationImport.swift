@@ -6,7 +6,7 @@ import ImageIO
 struct ConfigurationImport {
     let configuration: ConfigurationExport
     let appLanguage: AppLanguage
-    let menuBarIconStyle: MenuBarDogStyle
+    let menuBarIconStyle: MenuBarIconStyle
     let provider: TranslationProvider
     let aiAPI: AITranslationAPI
     let namingStyle: VariableNamingStyle
@@ -24,7 +24,7 @@ struct ConfigurationImport {
             return parsed
         }
         appLanguage = try value(AppLanguage(rawValue: settings.general.appLanguage), "界面语言")
-        menuBarIconStyle = try value(MenuBarDogStyle(rawValue: settings.general.menuBarIconStyle), "菜单栏图标")
+        menuBarIconStyle = try value(MenuBarIconStyle(savedValue: settings.general.menuBarIconStyle), "菜单栏图标")
         provider = try value(TranslationProvider(rawValue: settings.translation.provider), "翻译引擎")
         aiAPI = try value(AITranslationAPI(rawValue: settings.translation.aiAPI), "AI 接口")
         namingStyle = try value(VariableNamingStyle(rawValue: settings.quickInput.variableNamingStyle), "默认变量格式")
@@ -134,7 +134,7 @@ struct ConfigurationImport {
             model.selectionTranslateHotkey = settings.shortcuts.selectionTranslate
             model.variableNamingHotkey = settings.shortcuts.launcher
             model.customMenuBarIconData = settings.general.customMenuBarIconData
-            model.menuBarDogStyle = menuBarIconStyle
+            model.menuBarIconStyle = menuBarIconStyle
             model.showsMenuBarIcon = settings.general.showsMenuBarIcon
             model.appLanguage = appLanguage
         }

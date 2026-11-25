@@ -3,9 +3,9 @@
 <plist version="1.0">
 <dict>
     <key>CFBundleDisplayName</key>
-    <string>PawShot</string>
+    <string>NookPup</string>
     <key>CFBundleName</key>
-    <string>PawShot Finder</string>
+    <string>NookPup Finder</string>
     <key>CFBundleIdentifier</key>
     <string>dev.shiguang.screenshot.finder</string>
     <key>CFBundleExecutable</key>

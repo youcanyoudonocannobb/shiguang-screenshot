@@ -1,12 +1,14 @@
-# PawShot
+# NookPup
+
+<img src="docs/brand/nookpup.png" alt="The NookPup logo: a cream and lime geometric N" width="112">
 
 **English** · [简体中文](README.zh-CN.md)
 
-PawShot is a native macOS menu bar app for screenshots, screen recording, OCR, translation, and clipboard history. Capture what you need, mark it up, and paste it back into your work.
+NookPup is a native Mac menu bar toolkit for capturing and translating, searching your clipboard, launching apps, and working with files in Finder. Earlier releases are named PawShot.
 
 **[Download the latest release](https://github.com/youcanyoudonocannobb/shiguang-screenshot/releases/latest)** · macOS 15 or later · Apple silicon
 
-![PawShot's editor with a rectangle, arrow, and numbered callout on a sample trail guide](docs/screenshots/annotation-editor.jpg)
+![The editor with a rectangle, arrow, and numbered callout on a sample trail guide](docs/screenshots/annotation-editor.jpg)
 
 ## What you can do
 
@@ -16,26 +18,26 @@ PawShot is a native macOS menu bar app for screenshots, screen recording, OCR, t
 - **Search and reuse** Find past clipboard items by text or type. Use the launcher to search apps, prefix a query with `/` to find files, or generate variable names and test data. The toolbox handles JSON, Base64, and other conversions.
 - **Work in Finder** Use the Finder extension to create files, copy paths, compress or extract archives, jump to favorite folders, and open files or folders with your chosen apps.
 
-## PawShot in action
+## NookPup in action
 
 ### Table OCR
 
-The original image stays on the left while PawShot rebuilds the table on the right. Copy the result as Markdown or export it as CSV.
+The original image stays on the left while NookPup rebuilds the table on the right. Copy the result as Markdown or export it as CSV.
 
-![PawShot table OCR with the source image on the left and three reconstructed columns on the right](docs/screenshots/table-ocr.jpg)
+![Table OCR with the source image on the left and three reconstructed columns on the right](docs/screenshots/table-ocr.jpg)
 
 ### Launcher
 
 Type `xt coastal trail` to generate `coastalTrail`. Press Return to copy it.
 
-![PawShot launcher converting xt coastal trail into the camelCase name coastalTrail](docs/screenshots/launcher.jpg)
+![The launcher converting xt coastal trail into the camelCase name coastalTrail](docs/screenshots/launcher.jpg)
 
 ## Install and get started
 
-1. Download the DMG from the [latest release](https://github.com/youcanyoudonocannobb/shiguang-screenshot/releases/latest) and drag `PawShot.app` into Applications.
-2. Open PawShot and click the dog icon in the menu bar or press `⌥⇧S` to start a capture. Allow screen recording when macOS prompts you. Selected-text translation and automatic scrolling capture also need Accessibility permission.
+1. Download the DMG from the [latest release](https://github.com/youcanyoudonocannobb/shiguang-screenshot/releases/latest) and drag the app into Applications.
+2. Open the app and choose **Capture a region** from its menu bar icon, or press `⌥⇧S`. Allow screen recording when macOS prompts you. Selected-text translation and automatic scrolling capture also need Accessibility permission.
 3. Open **Settings → General** to choose English, Simplified Chinese, Japanese, or Korean and customize the menu bar icon.
-4. To use Finder actions, open **Settings → Finder Actions → System Settings** and enable the PawShot Finder extension. Grant Full Disk Access only if you need actions in protected folders.
+4. To use Finder actions, open **Settings → Finder Actions → System Settings** and enable the app's Finder extension. Grant Full Disk Access only if you need actions in protected folders.
 
 ## Default global shortcuts
 

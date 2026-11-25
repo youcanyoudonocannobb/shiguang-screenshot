@@ -2,9 +2,10 @@
 set -euo pipefail
 
 PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+APP_NAME="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleName' "$PROJECT_DIR/Info.plist")"
 BUILD_DIR="${BUILD_DIR:-$PROJECT_DIR/.build}"
 OUTPUT_DIR="${OUTPUT_DIR:-$PROJECT_DIR/dist}"
-FINAL_APP="$OUTPUT_DIR/PawShot.app"
+FINAL_APP="$OUTPUT_DIR/$APP_NAME.app"
 SIGN_IDENTITY="${SHIGUANG_SIGN_IDENTITY:-}"
 # Local builds keep one persistent certificate; release builds sign with Developer ID.
 if [[ -z "$SIGN_IDENTITY" ]]; then
@@ -26,7 +27,7 @@ fi
 swift build "${BUILD_OPTIONS[@]}"
 BIN_DIR="$(swift build "${BUILD_OPTIONS[@]}" --show-bin-path)"
 STAGING_DIR="$(mktemp -d "$OUTPUT_DIR/.shiguang-build.XXXXXX")"
-APP="$STAGING_DIR/PawShot.app"
+APP="$STAGING_DIR/$APP_NAME.app"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN_DIR/Shiguang" "$APP/Contents/MacOS/Shiguang"
 cp "$PROJECT_DIR/Info.plist" "$APP/Contents/Info.plist"

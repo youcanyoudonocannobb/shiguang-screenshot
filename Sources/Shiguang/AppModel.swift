@@ -57,9 +57,11 @@ final class AppModel: ObservableObject {
             if !isApplyingConfiguration { statusItemPreferencesChanged?() }
         }
     }
-    @Published var menuBarDogStyle: MenuBarDogStyle {
+    // Keep the original preference key so existing color and custom choices still load.
+    private static let menuBarIconStyleKey = "menuBarDogStyle"
+    @Published var menuBarIconStyle: MenuBarIconStyle {
         didSet {
-            preferences.set(menuBarDogStyle.rawValue, forKey: "menuBarDogStyle")
+            preferences.set(menuBarIconStyle.rawValue, forKey: Self.menuBarIconStyleKey)
             if !isApplyingConfiguration { statusItemPreferencesChanged?() }
         }
     }
@@ -300,11 +302,11 @@ final class AppModel: ObservableObject {
         appLanguage = AppLanguage(
             rawValue: preferences.string(forKey: "appLanguage") ?? ""
         ) ?? .simplifiedChinese
-        let storedMenuBarStyle = MenuBarDogStyle(
-            rawValue: preferences.string(forKey: "menuBarDogStyle") ?? ""
+        let storedMenuBarStyle = MenuBarIconStyle(
+            savedValue: preferences.string(forKey: Self.menuBarIconStyleKey) ?? ""
         ) ?? .system
         let storedCustomMenuBarIcon = preferences.data(forKey: "customMenuBarIconData")
-        menuBarDogStyle = storedMenuBarStyle == .custom && storedCustomMenuBarIcon == nil
+        menuBarIconStyle = storedMenuBarStyle == .custom && storedCustomMenuBarIcon == nil
             ? .system : storedMenuBarStyle
         customMenuBarIconData = storedCustomMenuBarIcon
         autoOCR = preferences.object(forKey: "autoOCR.v2") as? Bool
@@ -367,7 +369,7 @@ final class AppModel: ObservableObject {
         }
         refreshLaunchAtLoginState()
         if launchAtLoginRequiresApproval {
-            launchAtLoginMessage = "已提交登录项，请在“系统设置 > 通用 > 登录项”中允许 PawShot。"
+            launchAtLoginMessage = "已提交登录项，请在“系统设置 > 通用 > 登录项”中允许 NookPup。"
         }
     }
 
@@ -947,7 +949,7 @@ final class AppModel: ObservableObject {
             // show the settings window with a retry hint instead.
             errorMessage = screenPermission.refresh()
                 ? "屏幕访问暂时不可用，请再试一次。"
-                : "屏幕访问尚未生效。请在「系统设置 → 隐私与安全性 → 屏幕与系统音频录制」中确认 PawShot 已开启，然后重启 PawShot。"
+                : "屏幕访问尚未生效。请在「系统设置 → 隐私与安全性 → 屏幕与系统音频录制」中确认 NookPup 已开启，然后重启 NookPup。"
             showWindow?()
         } else {
             errorMessage = "截图失败：\(error.localizedDescription)"
@@ -1424,7 +1426,7 @@ final class AppModel: ObservableObject {
         guard let output = renderedImage(), let data = output.pngData else { return }
         let panel = NSSavePanel()
         panel.allowedContentTypes = [.png]
-        let title = (currentRecord?.title ?? "PawShot")
+        let title = (currentRecord?.title ?? "NookPup")
             .replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: ":", with: "-")
         panel.nameFieldStringValue = "\(title).png"
         NSApp.activate(ignoringOtherApps: true)
